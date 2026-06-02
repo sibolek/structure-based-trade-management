@@ -1,0 +1,38 @@
+export const classifications = [
+  {
+    type: "Scalp",
+    status: "fast",
+    tone: "blue",
+    allowed: "Only at a defined reaction level with immediate response expected.",
+    stop: "Tight tactical stop. No widening after entry.",
+    target: "Nearest opposing micro-structure or liquidity pocket.",
+    management: "Take reaction. If it pauses or loses speed, flatten by plan.",
+  },
+  {
+    type: "Structure Trade",
+    status: "primary",
+    tone: "green",
+    allowed: "After setup confirms at a clean structural area.",
+    stop: "Beyond the structure that proves the thesis wrong.",
+    target: "Next meaningful structural level, not first green print.",
+    management: "Hold while structure remains intact. Trail only by new structure.",
+  },
+  {
+    type: "Swing",
+    status: "wide",
+    tone: "amber",
+    allowed: "Only when higher-timeframe structure supports continuation.",
+    stop: "Beyond higher-timeframe invalidation. Must be accepted before entry.",
+    target: "Major opposing structure or planned measured move.",
+    management: "Ignore small P&L swings. Review only at structural checkpoints.",
+  },
+  {
+    type: "A+ Exception",
+    status: "rare",
+    tone: "red",
+    allowed: "Only when all exception criteria are present and risk is still controlled.",
+    stop: "Correct structural stop. No exception to invalidation.",
+    target: "Clear asymmetric target with defined failure response.",
+    management: "Pre-written management plan required. No improvising.",
+  },
+];
