@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import Shell from "./components/Shell.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
+import ExecutionDiscipline from "./pages/ExecutionDiscipline.jsx";
 import FrontPageRules from "./pages/FrontPageRules.jsx";
 import TradeClassification from "./pages/TradeClassification.jsx";
 import StructuralStops from "./pages/StructuralStops.jsx";
@@ -31,6 +32,7 @@ const pageGroups = [
   {
     section: "Before Entry",
     items: [
+      { id: "execution-discipline", label: "Execution Discipline", component: ExecutionDiscipline },
       { id: "classification", label: "Trade Identity", component: TradeClassification },
       { id: "rules", label: "Permission Gate", component: FrontPageRules },
       { id: "risk", label: "Risk Permission", component: RiskPermission },
