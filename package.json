@@ -11,6 +11,7 @@
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
     "schwab:history": "node schwab-bridge/history.mjs",
+    "schwab:replay": "node schwab-bridge/replay.mjs",
     "schwab:status": "node schwab-bridge/index.mjs status",
     "schwab:logout": "node schwab-bridge/index.mjs logout"
   },
