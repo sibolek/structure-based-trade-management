@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
+    "schwab:monitor": "node schwab-bridge/monitor.mjs",
     "schwab:status": "node schwab-bridge/index.mjs status",
     "schwab:logout": "node schwab-bridge/index.mjs logout"
   },
