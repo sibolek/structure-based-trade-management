@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "schwab:auth": "node schwab-bridge/index.mjs auth",
+    "schwab:account": "node schwab-bridge/index.mjs account",
+    "schwab:status": "node schwab-bridge/index.mjs status",
+    "schwab:logout": "node schwab-bridge/index.mjs logout"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
