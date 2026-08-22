@@ -1,6 +1,6 @@
 # ExecutionOS Schwab Bridge — Read-Only Proof of Concept
 
-This bridge is intentionally separate from the React UI. Its first job is to prove that ExecutionOS can authenticate with Schwab and read account data reliably before any live UI integration is attempted.
+This bridge is intentionally separate from the React UI. Its job is to prove that ExecutionOS can authenticate with Schwab, read account data, and observe thinkorswim executions reliably before any live UI integration is attempted.
 
 ## Scope
 
@@ -13,11 +13,13 @@ Implemented now:
 - Current balances
 - Current positions
 - Automatic 0.5% risk-budget calculation
+- Read-only order polling
+- Detection of new `EXECUTION` / `FILL` execution legs
+- Observed fill-latency measurement using Schwab execution timestamps
 
-Not implemented in this proof of concept:
+Not implemented yet:
 
 - Order placement, replacement, or cancellation
-- ToS fill monitoring
 - Transactions reconciliation
 - React UI integration
 - NinjaTrader integration
@@ -87,6 +89,40 @@ Expected output includes:
 
 Open P/L is intentionally not displayed in this proof-of-concept output.
 
+## ToS / Schwab fill monitor
+
+Start the monitor before a normal thinkorswim trading session or before an execution you already intend to make:
+
+```bash
+npm run schwab:monitor
+```
+
+On startup the monitor:
+
+1. authenticates with the existing local tokens,
+2. discovers every authorized Schwab account,
+3. retrieves recent orders,
+4. records all already-existing execution legs as a baseline, and
+5. prints `MONITOR ARMED`.
+
+Existing fills are deliberately ignored. After the monitor is armed, each newly observed Schwab `EXECUTION` / `FILL` prints:
+
+- masked account
+- symbol
+- order instruction
+- fill quantity
+- fill price
+- order ID/status
+- Schwab execution timestamp
+- ExecutionOS first-observed timestamp
+- observed delay in milliseconds
+
+The default polling interval is 1000 ms. For controlled testing it can be changed locally with `SCHWAB_POLL_MS` in `.env.local`; the proof of concept constrains the value to 500–10000 ms.
+
+Stop the monitor with `Ctrl+C`.
+
+Observed delay is not pure network latency. It includes Schwab/ToS propagation time, API availability, request/response time, polling phase, and any clock difference between the local Mac and Schwab's execution timestamp. The purpose of this test is to measure the end-to-end delay that ExecutionOS would actually experience.
+
 ## Other commands
 
 ```bash
@@ -102,9 +138,10 @@ Schwab documents Trader API access tokens as valid for 30 minutes and refresh to
 
 ## Next milestone
 
-After account access is proven on the user's Mac:
+After the ToS latency test:
 
-1. Poll recent Schwab orders and inspect `orderActivityCollection` execution fills.
-2. Measure latency between a manual thinkorswim fill and first API observation.
-3. Add transaction reconciliation using `types=TRADE`.
-4. Only then connect the bridge to ExecutionOS V2 live/review workflows.
+1. Decide whether order polling is fast enough for live ExecutionOS awareness or should remain a journaling/reconciliation input.
+2. Add transaction reconciliation using `types=TRADE`.
+3. Build the separate NinjaTrader event adapter for futures.
+4. Normalize both broker sources into one ExecutionOS trade/event model.
+5. Only then connect broker events to the V2 live/review workflows.
