@@ -12,6 +12,7 @@
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
     "schwab:history": "node schwab-bridge/history.mjs",
     "schwab:replay": "node schwab-bridge/replay.mjs",
+    "schwab:slippage": "node schwab-bridge/slippage.mjs",
     "schwab:token-test": "node schwab-bridge/token-test.mjs",
     "schwab:status": "node schwab-bridge/index.mjs status",
     "schwab:logout": "node schwab-bridge/index.mjs logout"
