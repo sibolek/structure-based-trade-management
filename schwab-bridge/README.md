@@ -1,6 +1,6 @@
 # ExecutionOS Schwab Bridge — Read-Only Proof of Concept
 
-This bridge is intentionally separate from the React UI. Its job is to prove that ExecutionOS can authenticate with Schwab, read account data, and observe thinkorswim executions reliably before any live UI integration is attempted.
+This bridge is intentionally separate from the React UI. Its job is to prove that ExecutionOS can authenticate with Schwab, read account data, observe thinkorswim executions reliably, reconstruct trade state, and analyze execution quality before any live UI integration is attempted.
 
 ## Scope
 
@@ -16,11 +16,16 @@ Implemented now:
 - Read-only order polling
 - Detection of new `EXECUTION` / `FILL` execution legs
 - Observed fill-latency measurement using Schwab execution timestamps
+- Historical orders / TRADE transaction verification
+- Historical ENTRY / ADD / PARTIAL / FLAT / REVERSAL state replay
+- Offline execution VWAP and fragmented-fill analytics
+- Reference slippage versus available limit and stop prices
+- Credential lifecycle test across the 30-minute access-token boundary
 
 Not implemented yet:
 
 - Order placement, replacement, or cancellation
-- Transactions reconciliation
+- Live NBBO capture / true market-order slippage versus bid/ask
 - React UI integration
 - NinjaTrader integration
 
@@ -77,15 +82,7 @@ After authorization:
 npm run schwab:account
 ```
 
-Expected output includes:
-
-- Schwab authentication success
-- number of authorized accounts
-- masked account identifier
-- current equity
-- 0.5% maximum planned risk
-- buying power
-- open positions with quantity and average price
+Expected output includes Schwab authentication success, number of authorized accounts, masked account identifier, current equity, 0.5% maximum planned risk, buying power, and open positions with quantity and average price.
 
 Open P/L is intentionally not displayed in this proof-of-concept output.
 
@@ -97,31 +94,75 @@ Start the monitor before a normal thinkorswim trading session or before an execu
 npm run schwab:monitor
 ```
 
-On startup the monitor:
+On startup the monitor authenticates, discovers authorized accounts, retrieves recent orders, records already-existing execution legs as a baseline, then prints `MONITOR ARMED`.
 
-1. authenticates with the existing local tokens,
-2. discovers every authorized Schwab account,
-3. retrieves recent orders,
-4. records all already-existing execution legs as a baseline, and
-5. prints `MONITOR ARMED`.
-
-Existing fills are deliberately ignored. After the monitor is armed, each newly observed Schwab `EXECUTION` / `FILL` prints:
-
-- masked account
-- symbol
-- order instruction
-- fill quantity
-- fill price
-- order ID/status
-- Schwab execution timestamp
-- ExecutionOS first-observed timestamp
-- observed delay in milliseconds
+Existing fills are deliberately ignored. Each newly observed Schwab `EXECUTION` / `FILL` prints masked account, symbol, order instruction, fill quantity, fill price, order ID/status, Schwab execution timestamp, ExecutionOS first-observed timestamp, and observed delay in milliseconds.
 
 The default polling interval is 1000 ms. For controlled testing it can be changed locally with `SCHWAB_POLL_MS` in `.env.local`; the proof of concept constrains the value to 500–10000 ms.
 
 Stop the monitor with `Ctrl+C`.
 
-Observed delay is not pure network latency. It includes Schwab/ToS propagation time, API availability, request/response time, polling phase, and any clock difference between the local Mac and Schwab's execution timestamp. The purpose of this test is to measure the end-to-end delay that ExecutionOS would actually experience.
+Observed delay is not pure network latency. It includes Schwab/ToS propagation time, API availability, request/response time, polling phase, and any clock difference between the local Mac and Schwab's execution timestamp.
+
+## Historical verification and replay
+
+Verify historical Schwab orders against TRADE transactions:
+
+```bash
+npm run schwab:history -- --days=7
+npm run schwab:history -- --days=30 --symbol=NVDA
+```
+
+Replay historical fills through the trade-state engine:
+
+```bash
+npm run schwab:replay -- --days=7 --symbol=MRVL
+```
+
+Historical replay assumes each symbol is flat at the beginning of the selected window. Choose a window whose first fill is a known opening execution when validating state logic.
+
+## Offline execution / slippage analytics
+
+Run:
+
+```bash
+npm run schwab:slippage -- --days=7
+```
+
+Optional filters:
+
+```bash
+npm run schwab:slippage -- --days=30 --symbol=AMD
+npm run schwab:slippage -- --days=7 --fragmented-only
+```
+
+For each executed order leg, the analyzer reports:
+
+- total filled quantity
+- number of execution fragments
+- execution VWAP
+- directionally best and worst fill
+- best-to-worst fill-price range
+- quantity-weighted standard deviation of fragment prices
+- reference slippage versus an available single-leg limit price
+- reference slippage versus an available single-leg stop price
+- per-share and aggregate-dollar reference impact
+
+Positive reference-slippage values are adverse; negative values represent price improvement.
+
+Important: fill-price dispersion does **not** prove that fragmentation itself caused slippage. Market orders also have no valid historical NBBO benchmark in the current bridge. True market-order slippage versus the contemporaneous bid/ask will be added only after the live ToS latency test determines the correct quote-capture architecture.
+
+Multi-leg orders deliberately do not compare an order-level strategy price with a single execution leg.
+
+## Credential lifecycle test
+
+Run:
+
+```bash
+npm run schwab:token-test
+```
+
+The default test runs 40 minutes, uses the harmless read-only `GET /accounts/accountNumbers` endpoint every 60 seconds, and verifies that account access survives an automatic access-token refresh. It also reports the age of the original authorization and the estimated remaining time in Schwab's documented seven-day refresh-token window. Tokens themselves are never printed.
 
 ## Other commands
 
@@ -138,10 +179,10 @@ Schwab documents Trader API access tokens as valid for 30 minutes and refresh to
 
 ## Next milestone
 
-After the ToS latency test:
+After the live ToS latency test:
 
 1. Decide whether order polling is fast enough for live ExecutionOS awareness or should remain a journaling/reconciliation input.
-2. Add transaction reconciliation using `types=TRADE`.
+2. Design live NBBO/reference-price capture and true market-order slippage measurement around the observed latency.
 3. Build the separate NinjaTrader event adapter for futures.
 4. Normalize both broker sources into one ExecutionOS trade/event model.
-5. Only then connect broker events to the V2 live/review workflows.
+5. Connect broker events and execution-quality data to the V2 live/review workflows.
