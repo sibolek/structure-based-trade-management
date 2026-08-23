@@ -7,6 +7,7 @@ const TOKEN_PATH = path.join(ROOT, ".schwab-tokens.json");
 const TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token";
 const TRADER_BASE_URL = "https://api.schwabapi.com/trader/v1";
 const ACCESS_REFRESH_SAFETY_MS = 2 * 60 * 1000;
+const SLIPPAGE_ZERO_EPSILON = 1e-9;
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
@@ -142,15 +143,21 @@ function price(value) {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
-function signedMoney(value) {
+function normalizeDisplayZero(value) {
   const n = Number(value);
+  if (!Number.isFinite(n)) return n;
+  return Math.abs(n) < SLIPPAGE_ZERO_EPSILON ? 0 : n;
+}
+
+function signedMoney(value) {
+  const n = normalizeDisplayZero(value);
   if (!Number.isFinite(n)) return "—";
   const sign = n > 0 ? "+" : n < 0 ? "-" : "";
   return `${sign}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function signedPrice(value) {
-  const n = Number(value);
+  const n = normalizeDisplayZero(value);
   if (!Number.isFinite(n)) return "—";
   const sign = n > 0 ? "+" : n < 0 ? "-" : "";
   return `${sign}${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 6 })}`;
@@ -173,7 +180,8 @@ function adverseSlippage(fillPrice, referencePrice, instruction) {
   const ref = finiteNumber(referencePrice);
   const direction = instructionDirection(instruction);
   if (fill == null || ref == null || !direction) return null;
-  return direction === "BUY" ? fill - ref : ref - fill;
+  const raw = direction === "BUY" ? fill - ref : ref - fill;
+  return normalizeDisplayZero(raw);
 }
 
 function groupOrderExecutions(account, orders, symbolFilter) {
@@ -251,9 +259,9 @@ function groupOrderExecutions(account, orders, symbolFilter) {
         limitReference,
         stopReference,
         limitSlipPerShare,
-        limitSlipDollars: limitSlipPerShare == null ? null : limitSlipPerShare * totalQty,
+        limitSlipDollars: limitSlipPerShare == null ? null : normalizeDisplayZero(limitSlipPerShare * totalQty),
         stopSlipPerShare,
-        stopSlipDollars: stopSlipPerShare == null ? null : stopSlipPerShare * totalQty,
+        stopSlipDollars: stopSlipPerShare == null ? null : normalizeDisplayZero(stopSlipPerShare * totalQty),
         multiLeg: legs.length > 1,
       });
     }
@@ -264,8 +272,10 @@ function groupOrderExecutions(account, orders, symbolFilter) {
 
 function printReference(label, ref, slipPerShare, slipDollars) {
   if (ref == null) return;
-  const quality = slipPerShare > 0 ? "adverse" : slipPerShare < 0 ? "improvement" : "exact";
-  console.log(`  vs ${label.padEnd(5)} ${price(ref).padStart(12)}  adverse/share ${signedPrice(slipPerShare).padStart(12)}  total ${signedMoney(slipDollars).padStart(10)}  ${quality}`);
+  const normalizedSlip = normalizeDisplayZero(slipPerShare);
+  const normalizedDollars = normalizeDisplayZero(slipDollars);
+  const quality = normalizedSlip > 0 ? "adverse" : normalizedSlip < 0 ? "improvement" : "exact";
+  console.log(`  vs ${label.padEnd(5)} ${price(ref).padStart(12)}  adverse/share ${signedPrice(normalizedSlip).padStart(12)}  total ${signedMoney(normalizedDollars).padStart(10)}  ${quality}`);
 }
 
 function printOrder(row) {
@@ -294,7 +304,7 @@ function summarizeReference(rows, fieldPerShare, fieldDollars, refField) {
     count: measurable.length,
     qty,
     dollars,
-    weightedPerShare: qty > 0 ? dollars / qty : null,
+    weightedPerShare: qty > 0 ? normalizeDisplayZero(dollars / qty) : null,
   };
 }
 
