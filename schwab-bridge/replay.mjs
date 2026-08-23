@@ -155,6 +155,26 @@ function extractExecutions(orders, symbolFilter) {
   return rows;
 }
 
+function positionEffectPriority(effect) {
+  const normalized = String(effect || "").toUpperCase();
+  if (normalized === "CLOSING") return 0;
+  if (normalized === "OPENING") return 1;
+  return 2;
+}
+
+function compareExecutions(a, b) {
+  const timeDiff = Date.parse(a.time) - Date.parse(b.time);
+  if (timeDiff !== 0) return timeDiff;
+
+  // Schwab can report a reversal as separate closing and opening orders with
+  // the exact same execution timestamp. Process the closing leg first so a
+  // BUY_TO_COVER cannot appear to open a long, or a SELL appear to open a short.
+  const effectDiff = positionEffectPriority(a.positionEffect) - positionEffectPriority(b.positionEffect);
+  if (effectDiff !== 0) return effectDiff;
+
+  return String(a.orderId ?? "").localeCompare(String(b.orderId ?? ""), undefined, { numeric: true });
+}
+
 function formatTransition(result) {
   const left = result.previousQuantity === 0 ? "FLAT" : `${result.previousSide} ${Math.abs(result.previousQuantity)}`;
   const right = result.nextQuantity === 0 ? "FLAT" : `${result.nextSide} ${Math.abs(result.nextQuantity)}`;
@@ -180,7 +200,7 @@ async function main() {
     fills.push(...extractExecutions(orders, symbol));
   }
 
-  fills.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
+  fills.sort(compareExecutions);
 
   console.log("\nEXECUTIONOS HISTORICAL TRADE-STATE REPLAY\n");
   console.log(`✓ Lookback: ${days} day(s)`);
