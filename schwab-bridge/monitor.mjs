@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { applyExecution, createSymbolState } from "./trade-state.mjs";
 
 const ROOT = process.cwd();
 const ENV_PATH = path.join(ROOT, ".env.local");
@@ -170,6 +171,33 @@ function localTime(value) {
   });
 }
 
+function priceText(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : "—";
+}
+
+function quantityFor(position) {
+  const longQty = Number(position.longQuantity || 0);
+  const shortQty = Number(position.shortQuantity || 0);
+  return longQty - shortQty;
+}
+
+function averagePriceFor(position) {
+  const qty = quantityFor(position);
+  if (qty > 0) return Number(position.averageLongPrice ?? position.averagePrice ?? 0);
+  if (qty < 0) return Number(position.averageShortPrice ?? position.averagePrice ?? 0);
+  return Number(position.averagePrice || 0);
+}
+
+function stateKey(accountHash, symbol) {
+  return `${accountHash}|${String(symbol || "?").toUpperCase()}`;
+}
+
+function formatPosition(state) {
+  if (!state || state.quantity === 0) return "FLAT";
+  return `${state.side} ${Math.abs(state.quantity)}`;
+}
+
 function executionKey(accountHash, orderId, execution, legId) {
   return [
     accountHash,
@@ -205,6 +233,7 @@ function extractExecutions(account, orders) {
           orderStatus: order.status,
           symbol: orderLeg?.instrument?.symbol || "?",
           instruction: orderLeg?.instruction || "?",
+          positionEffect: orderLeg?.positionEffect || "?",
           quantity: Number(execution.quantity || 0),
           price: Number(execution.price || 0),
           executionTime: execution.time,
@@ -214,6 +243,29 @@ function extractExecutions(account, orders) {
   }
 
   return found;
+}
+
+function positionEffectPriority(effect) {
+  const normalized = String(effect || "").toUpperCase();
+  if (normalized === "CLOSING") return 0;
+  if (normalized === "OPENING") return 1;
+  return 2;
+}
+
+function compareExecutions(a, b) {
+  const timeDiff = Date.parse(a.executionTime) - Date.parse(b.executionTime);
+  if (timeDiff !== 0) return timeDiff;
+
+  // Schwab can represent a reversal as separate closing and opening orders with
+  // the same second-level execution timestamp. Preserve the historical replay
+  // rule here as well: CLOSING must be processed before OPENING.
+  const effectDiff = positionEffectPriority(a.positionEffect) - positionEffectPriority(b.positionEffect);
+  if (effectDiff !== 0) return effectDiff;
+
+  const accountDiff = String(a.accountHash || "").localeCompare(String(b.accountHash || ""));
+  if (accountDiff !== 0) return accountDiff;
+
+  return String(a.orderId ?? "").localeCompare(String(b.orderId ?? ""), undefined, { numeric: true });
 }
 
 function recentOrderPath(accountHash) {
@@ -236,7 +288,48 @@ async function fetchAllExecutions(accounts) {
   return batches.flat();
 }
 
-function printFill(fill, detectedAt) {
+async function bootstrapLiveState(accounts) {
+  const wrappers = await traderGet("/accounts?fields=positions");
+  const hashByPlain = new Map(
+    (accounts || []).map((account) => [String(account.accountNumber || ""), account.hashValue]),
+  );
+
+  const states = new Map();
+  const openPositions = [];
+  const accountSnapshots = [];
+
+  for (const wrapper of wrappers || []) {
+    const account = wrapper.securitiesAccount || wrapper;
+    const accountNumber = String(account.accountNumber || "");
+    const accountHash = hashByPlain.get(accountNumber);
+    if (!accountHash) continue;
+
+    const current = account.currentBalances || {};
+    const initial = account.initialBalances || {};
+    const equity = Number(current.equity ?? initial.liquidationValue ?? initial.accountValue);
+
+    accountSnapshots.push({
+      accountNumber,
+      accountHash,
+      equity: Number.isFinite(equity) ? equity : null,
+    });
+
+    for (const position of account.positions || []) {
+      const symbol = position.instrument?.symbol || "?";
+      const quantity = quantityFor(position);
+      if (!Number.isFinite(quantity) || quantity === 0) continue;
+
+      const averagePrice = averagePriceFor(position);
+      const state = createSymbolState(symbol, { quantity, averagePrice });
+      states.set(stateKey(accountHash, symbol), state);
+      openPositions.push({ accountNumber, accountHash, state });
+    }
+  }
+
+  return { states, openPositions, accountSnapshots };
+}
+
+function printFill(fill, detectedAt, stateResult) {
   const executionMs = Date.parse(fill.executionTime || "");
   const detectedMs = detectedAt.getTime();
   const latencyMs = Number.isFinite(executionMs) ? detectedMs - executionMs : null;
@@ -251,6 +344,7 @@ function printFill(fill, detectedAt) {
   console.log(`Account:        ${maskAccount(fill.accountNumber)}`);
   console.log(`Symbol:         ${fill.symbol}`);
   console.log(`Instruction:    ${fill.instruction}`);
+  console.log(`Position effect:${String(fill.positionEffect).padStart(9)}`);
   console.log(`Quantity:       ${fill.quantity}`);
   console.log(`Fill price:     ${fill.price}`);
   console.log(`Order ID:       ${fill.orderId}`);
@@ -258,6 +352,17 @@ function printFill(fill, detectedAt) {
   console.log(`Schwab fill:    ${localTime(fill.executionTime)}`);
   console.log(`Detected:       ${localTime(detectedAt)}`);
   console.log(`Observed delay: ${latencyText}`);
+  if (stateResult) {
+    const before = stateResult.previousQuantity === 0
+      ? "FLAT"
+      : `${stateResult.previousSide} ${Math.abs(stateResult.previousQuantity)}`;
+    const after = stateResult.nextQuantity === 0
+      ? "FLAT"
+      : `${stateResult.nextSide} ${Math.abs(stateResult.nextQuantity)}`;
+    console.log(`State event:    ${stateResult.event}`);
+    console.log(`Transition:     ${before} → ${after}`);
+    console.log(`Position avg:   ${stateResult.nextQuantity === 0 ? "—" : priceText(stateResult.nextAveragePrice)}`);
+  }
   console.log("----------------------------------------");
 }
 
@@ -270,18 +375,39 @@ async function monitor() {
   }
 
   console.log("\nEXECUTIONOS TOS / SCHWAB FILL MONITOR\n");
-  console.log(`✓ Schwab authenticated`);
+  console.log("✓ Schwab authenticated");
   console.log(`✓ ${accounts.length} authorized account(s)`);
   console.log(`✓ Poll interval: ${pollMs} ms`);
   console.log("✓ Read-only: this monitor does not place, replace, or cancel orders");
-  console.log("\nBuilding baseline of existing executions...");
 
+  console.log("\nInitializing live position state from Schwab...");
+  const bootstrap = await bootstrapLiveState(accounts);
+  const liveStates = bootstrap.states;
+  console.log(`✓ Position bootstrap complete (${bootstrap.openPositions.length} open position(s))`);
+
+  if (bootstrap.accountSnapshots.length !== accounts.length) {
+    console.log(`⚠ Matched ${bootstrap.accountSnapshots.length} of ${accounts.length} authorized account(s) to account snapshots.`);
+  }
+
+  if (bootstrap.openPositions.length) {
+    for (const item of bootstrap.openPositions) {
+      console.log(
+        `  ${maskAccount(item.accountNumber)}  ${item.state.symbol.padEnd(10)} ` +
+        `${formatPosition(item.state).padEnd(14)} avg ${priceText(item.state.averagePrice)}`,
+      );
+    }
+  } else {
+    console.log("  No open Schwab positions at startup.");
+  }
+
+  console.log("\nBuilding baseline of existing executions...");
   const seen = new Set();
   const baseline = await fetchAllExecutions(accounts);
   for (const fill of baseline) seen.add(fill.key);
 
   console.log(`✓ Baseline complete (${baseline.length} existing execution leg(s) ignored)`);
   console.log("✓ MONITOR ARMED — new Schwab execution fills will print below");
+  console.log("✓ Live state is seeded from broker positions; new fills update that state automatically");
   console.log("Press Ctrl+C to stop.\n");
 
   let consecutiveErrors = 0;
@@ -290,11 +416,23 @@ async function monitor() {
     try {
       const fills = await fetchAllExecutions(accounts);
       const detectedAt = new Date();
+      const unseen = fills.filter((fill) => !seen.has(fill.key)).sort(compareExecutions);
 
-      for (const fill of fills) {
-        if (seen.has(fill.key)) continue;
+      for (const fill of unseen) {
         seen.add(fill.key);
-        printFill(fill, detectedAt);
+        const key = stateKey(fill.accountHash, fill.symbol);
+        const current = liveStates.get(key) || createSymbolState(fill.symbol);
+
+        if (String(fill.positionEffect).toUpperCase() === "CLOSING" && current.quantity === 0) {
+          console.warn(
+            `\n⚠ STATE CONTEXT WARNING: ${fill.symbol} arrived as CLOSING while ExecutionOS state is FLAT. ` +
+            "Do not rely on the inferred transition until broker position state is resynchronized.",
+          );
+        }
+
+        const result = applyExecution(current, fill);
+        liveStates.set(key, result.state);
+        printFill(fill, detectedAt, result);
       }
 
       consecutiveErrors = 0;
