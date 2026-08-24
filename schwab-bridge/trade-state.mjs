@@ -28,14 +28,19 @@ function weightedAverage(oldAvg, oldQty, fillPrice, addQty) {
   return ((Number(oldAvg || 0) * Math.abs(oldQty)) + (Number(fillPrice || 0) * Math.abs(addQty))) / denominator;
 }
 
-export function createSymbolState(symbol) {
+export function createSymbolState(symbol, initial = {}) {
+  const rawQuantity = Number(initial.quantity || 0);
+  const quantity = Number.isFinite(rawQuantity) ? rawQuantity : 0;
+  const rawAveragePrice = Number(initial.averagePrice || 0);
+  const averagePrice = quantity === 0 || !Number.isFinite(rawAveragePrice) ? 0 : rawAveragePrice;
+
   return {
     symbol,
-    quantity: 0,
-    side: "FLAT",
-    averagePrice: 0,
-    realizedGrossPnl: 0,
-    completedTrades: 0,
+    quantity,
+    side: sideFor(quantity),
+    averagePrice,
+    realizedGrossPnl: Number(initial.realizedGrossPnl || 0),
+    completedTrades: Number(initial.completedTrades || 0),
   };
 }
 
