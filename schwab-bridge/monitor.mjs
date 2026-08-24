@@ -10,6 +10,7 @@ const TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token";
 const TRADER_BASE_URL = "https://api.schwabapi.com/trader/v1";
 const ACCESS_REFRESH_SAFETY_MS = 2 * 60 * 1000;
 const ORDER_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const MAX_RISK_FRACTION = 0.005;
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
@@ -176,6 +177,37 @@ function priceText(value) {
   return Number.isFinite(n) ? n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : "—";
 }
 
+function money(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
+function riskBudgetForEquity(equity) {
+  const n = Number(equity);
+  return Number.isFinite(n) && n >= 0 ? n * MAX_RISK_FRACTION : null;
+}
+
+function accountSnapshot(wrapper, fallback = {}) {
+  const account = wrapper?.securitiesAccount || wrapper || {};
+  const current = account.currentBalances || {};
+  const initial = account.initialBalances || {};
+  const equity = Number(current.equity ?? initial.liquidationValue ?? initial.accountValue);
+  const accountNumber = String(account.accountNumber || fallback.accountNumber || "");
+
+  return {
+    accountNumber,
+    accountHash: fallback.accountHash || null,
+    equity: Number.isFinite(equity) ? equity : null,
+    maxRisk: riskBudgetForEquity(equity),
+  };
+}
+
 function quantityFor(position) {
   const longQty = Number(position.longQuantity || 0);
   const shortQty = Number(position.shortQuantity || 0);
@@ -288,6 +320,11 @@ async function fetchAllExecutions(accounts) {
   return batches.flat();
 }
 
+async function refreshAccountRisk(accountHash, accountNumber) {
+  const wrapper = await traderGet(`/accounts/${encodeURIComponent(accountHash)}`);
+  return accountSnapshot(wrapper, { accountHash, accountNumber });
+}
+
 async function bootstrapLiveState(accounts) {
   const wrappers = await traderGet("/accounts?fields=positions");
   const hashByPlain = new Map(
@@ -304,15 +341,7 @@ async function bootstrapLiveState(accounts) {
     const accountHash = hashByPlain.get(accountNumber);
     if (!accountHash) continue;
 
-    const current = account.currentBalances || {};
-    const initial = account.initialBalances || {};
-    const equity = Number(current.equity ?? initial.liquidationValue ?? initial.accountValue);
-
-    accountSnapshots.push({
-      accountNumber,
-      accountHash,
-      equity: Number.isFinite(equity) ? equity : null,
-    });
+    accountSnapshots.push(accountSnapshot(wrapper, { accountNumber, accountHash }));
 
     for (const position of account.positions || []) {
       const symbol = position.instrument?.symbol || "?";
@@ -366,6 +395,15 @@ function printFill(fill, detectedAt, stateResult) {
   console.log("----------------------------------------");
 }
 
+function printRiskSnapshot(snapshot, label = "ACCOUNT RISK") {
+  console.log(`\n${label}`);
+  console.log("----------------------------------------");
+  console.log(`Account:        ${maskAccount(snapshot.accountNumber)}`);
+  console.log(`Current equity: ${money(snapshot.equity)}`);
+  console.log(`0.5% max risk:  ${money(snapshot.maxRisk)}`);
+  console.log("----------------------------------------");
+}
+
 async function monitor() {
   const { pollMs } = getConfig();
   const accounts = await traderGet("/accounts/accountNumbers");
@@ -383,10 +421,20 @@ async function monitor() {
   console.log("\nInitializing live position state from Schwab...");
   const bootstrap = await bootstrapLiveState(accounts);
   const liveStates = bootstrap.states;
+  const accountSnapshots = new Map(
+    bootstrap.accountSnapshots.map((snapshot) => [snapshot.accountHash, snapshot]),
+  );
   console.log(`✓ Position bootstrap complete (${bootstrap.openPositions.length} open position(s))`);
 
   if (bootstrap.accountSnapshots.length !== accounts.length) {
     console.log(`⚠ Matched ${bootstrap.accountSnapshots.length} of ${accounts.length} authorized account(s) to account snapshots.`);
+  }
+
+  for (const snapshot of bootstrap.accountSnapshots) {
+    console.log(
+      `  ${maskAccount(snapshot.accountNumber)}  equity ${money(snapshot.equity)}  ` +
+      `0.5% max risk ${money(snapshot.maxRisk)}`,
+    );
   }
 
   if (bootstrap.openPositions.length) {
@@ -408,6 +456,7 @@ async function monitor() {
   console.log(`✓ Baseline complete (${baseline.length} existing execution leg(s) ignored)`);
   console.log("✓ MONITOR ARMED — new Schwab execution fills will print below");
   console.log("✓ Live state is seeded from broker positions; new fills update that state automatically");
+  console.log("✓ Equity and the 0.5% risk budget refresh after completed trade cycles");
   console.log("Press Ctrl+C to stop.\n");
 
   let consecutiveErrors = 0;
@@ -417,6 +466,7 @@ async function monitor() {
       const fills = await fetchAllExecutions(accounts);
       const detectedAt = new Date();
       const unseen = fills.filter((fill) => !seen.has(fill.key)).sort(compareExecutions);
+      const riskRefreshAccounts = new Map();
 
       for (const fill of unseen) {
         seen.add(fill.key);
@@ -433,6 +483,28 @@ async function monitor() {
         const result = applyExecution(current, fill);
         liveStates.set(key, result.state);
         printFill(fill, detectedAt, result);
+
+        if (result.event === "FLAT" || result.event === "REVERSAL") {
+          riskRefreshAccounts.set(fill.accountHash, {
+            accountHash: fill.accountHash,
+            accountNumber: fill.accountNumber,
+          });
+        }
+      }
+
+      // Refresh only after all fills in the poll batch have been state-processed.
+      // This preserves close-before-open ordering for same-second Schwab reversals.
+      for (const account of riskRefreshAccounts.values()) {
+        try {
+          const snapshot = await refreshAccountRisk(account.accountHash, account.accountNumber);
+          accountSnapshots.set(account.accountHash, snapshot);
+          printRiskSnapshot(snapshot, "RISK BUDGET REFRESH — TRADE CYCLE COMPLETE");
+        } catch (error) {
+          console.warn(
+            `\n⚠ Risk-budget refresh failed for ${maskAccount(account.accountNumber)}: ${error.message}`,
+          );
+          console.warn("  Fill/state processing succeeded; account risk can be refreshed on the next completed cycle.\n");
+        }
       }
 
       consecutiveErrors = 0;
