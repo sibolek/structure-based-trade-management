@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { applyExecution, createSymbolState } from "./trade-state.mjs";
+import { createLiveStateApi } from "./live-state-api.mjs";
 
 const ROOT = process.cwd();
 const ENV_PATH = path.join(ROOT, ".env.local");
@@ -11,6 +12,7 @@ const TRADER_BASE_URL = "https://api.schwabapi.com/trader/v1";
 const ACCESS_REFRESH_SAFETY_MS = 2 * 60 * 1000;
 const ORDER_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const MAX_RISK_FRACTION = 0.005;
+const DEFAULT_API_PORT = 8787;
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
@@ -39,12 +41,16 @@ function getConfig() {
   const clientSecret = process.env.SCHWAB_CLIENT_SECRET || fileEnv.SCHWAB_CLIENT_SECRET;
   const configuredPollMs = Number(process.env.SCHWAB_POLL_MS || fileEnv.SCHWAB_POLL_MS || 1000);
   const pollMs = Number.isFinite(configuredPollMs) ? Math.min(Math.max(configuredPollMs, 500), 10000) : 1000;
+  const configuredApiPort = Number(process.env.EXECUTIONOS_API_PORT || fileEnv.EXECUTIONOS_API_PORT || DEFAULT_API_PORT);
+  const apiPort = Number.isInteger(configuredApiPort) && configuredApiPort >= 1024 && configuredApiPort <= 65535
+    ? configuredApiPort
+    : DEFAULT_API_PORT;
 
   if (!clientId || !clientSecret) {
     throw new Error("Missing Schwab client ID or client secret in .env.local.");
   }
 
-  return { clientId, clientSecret, pollMs };
+  return { clientId, clientSecret, pollMs, apiPort };
 }
 
 function readTokens() {
@@ -230,6 +236,24 @@ function formatPosition(state) {
   return `${state.side} ${Math.abs(state.quantity)}`;
 }
 
+function publicAccount(snapshot) {
+  return {
+    account: maskAccount(snapshot.accountNumber),
+    equity: snapshot.equity,
+    maxRisk: snapshot.maxRisk,
+  };
+}
+
+function publicPosition(accountNumber, state) {
+  return {
+    account: maskAccount(accountNumber),
+    symbol: state.symbol,
+    side: state.side,
+    quantity: state.quantity,
+    averagePrice: state.averagePrice,
+  };
+}
+
 function executionKey(accountHash, orderId, execution, legId) {
   return [
     accountHash,
@@ -288,9 +312,6 @@ function compareExecutions(a, b) {
   const timeDiff = Date.parse(a.executionTime) - Date.parse(b.executionTime);
   if (timeDiff !== 0) return timeDiff;
 
-  // Schwab can represent a reversal as separate closing and opening orders with
-  // the same second-level execution timestamp. Preserve the historical replay
-  // rule here as well: CLOSING must be processed before OPENING.
   const effectDiff = positionEffectPriority(a.positionEffect) - positionEffectPriority(b.positionEffect);
   if (effectDiff !== 0) return effectDiff;
 
@@ -404,12 +425,41 @@ function printRiskSnapshot(snapshot, label = "ACCOUNT RISK") {
   console.log("----------------------------------------");
 }
 
+function publicExecution(fill, detectedAt, result) {
+  const executionMs = Date.parse(fill.executionTime || "");
+  const detectedMs = detectedAt.getTime();
+  return {
+    detectedAt: detectedAt.toISOString(),
+    account: maskAccount(fill.accountNumber),
+    symbol: fill.symbol,
+    instruction: fill.instruction,
+    positionEffect: fill.positionEffect,
+    quantity: fill.quantity,
+    price: fill.price,
+    executionTime: fill.executionTime,
+    observedDelayMs: Number.isFinite(executionMs) ? detectedMs - executionMs : null,
+    stateEvent: result.event,
+    previousSide: result.previousSide,
+    previousQuantity: result.previousQuantity,
+    nextSide: result.nextSide,
+    nextQuantity: result.nextQuantity,
+    averagePrice: result.nextAveragePrice,
+  };
+}
+
 async function monitor() {
-  const { pollMs } = getConfig();
+  const { pollMs, apiPort } = getConfig();
   const accounts = await traderGet("/accounts/accountNumbers");
 
   if (!Array.isArray(accounts) || accounts.length === 0) {
     throw new Error("No Schwab accounts are authorized for this app.");
+  }
+
+  const liveApi = createLiveStateApi({ port: apiPort });
+  try {
+    await liveApi.start();
+  } catch (error) {
+    throw new Error(`ExecutionOS local API could not start on 127.0.0.1:${apiPort}: ${error.message}`);
   }
 
   console.log("\nEXECUTIONOS TOS / SCHWAB FILL MONITOR\n");
@@ -417,6 +467,7 @@ async function monitor() {
   console.log(`✓ ${accounts.length} authorized account(s)`);
   console.log(`✓ Poll interval: ${pollMs} ms`);
   console.log("✓ Read-only: this monitor does not place, replace, or cancel orders");
+  console.log(`✓ Local UI API: http://127.0.0.1:${apiPort}/api/state (read-only, loopback only)`);
 
   console.log("\nInitializing live position state from Schwab...");
   const bootstrap = await bootstrapLiveState(accounts);
@@ -424,6 +475,13 @@ async function monitor() {
   const accountSnapshots = new Map(
     bootstrap.accountSnapshots.map((snapshot) => [snapshot.accountHash, snapshot]),
   );
+
+  liveApi.setBootstrap({
+    pollMs,
+    accounts: bootstrap.accountSnapshots.map(publicAccount),
+    positions: bootstrap.openPositions.map((item) => publicPosition(item.accountNumber, item.state)),
+  });
+
   console.log(`✓ Position bootstrap complete (${bootstrap.openPositions.length} open position(s))`);
 
   if (bootstrap.accountSnapshots.length !== accounts.length) {
@@ -453,10 +511,12 @@ async function monitor() {
   const baseline = await fetchAllExecutions(accounts);
   for (const fill of baseline) seen.add(fill.key);
 
+  liveApi.setStatus("ARMED");
   console.log(`✓ Baseline complete (${baseline.length} existing execution leg(s) ignored)`);
   console.log("✓ MONITOR ARMED — new Schwab execution fills will print below");
   console.log("✓ Live state is seeded from broker positions; new fills update that state automatically");
   console.log("✓ Equity and the 0.5% risk budget refresh after completed trade cycles");
+  console.log("✓ React can now read masked broker state from the local UI API");
   console.log("Press Ctrl+C to stop.\n");
 
   let consecutiveErrors = 0;
@@ -483,6 +543,8 @@ async function monitor() {
         const result = applyExecution(current, fill);
         liveStates.set(key, result.state);
         printFill(fill, detectedAt, result);
+        liveApi.updatePosition(publicPosition(fill.accountNumber, result.state));
+        liveApi.recordExecution(publicExecution(fill, detectedAt, result));
 
         if (result.event === "FLAT" || result.event === "REVERSAL") {
           riskRefreshAccounts.set(fill.accountHash, {
@@ -492,12 +554,11 @@ async function monitor() {
         }
       }
 
-      // Refresh only after all fills in the poll batch have been state-processed.
-      // This preserves close-before-open ordering for same-second Schwab reversals.
       for (const account of riskRefreshAccounts.values()) {
         try {
           const snapshot = await refreshAccountRisk(account.accountHash, account.accountNumber);
           accountSnapshots.set(account.accountHash, snapshot);
+          liveApi.updateAccount(publicAccount(snapshot));
           printRiskSnapshot(snapshot, "RISK BUDGET REFRESH — TRADE CYCLE COMPLETE");
         } catch (error) {
           console.warn(
@@ -508,8 +569,10 @@ async function monitor() {
       }
 
       consecutiveErrors = 0;
+      liveApi.setStatus("ARMED");
     } catch (error) {
       consecutiveErrors += 1;
+      liveApi.setError(error.message);
       const backoffMs = Math.min(pollMs * (2 ** consecutiveErrors), 30_000);
       console.error(`\n⚠ Monitor poll failed: ${error.message}`);
       console.error(`Retrying in ${backoffMs} ms...\n`);
