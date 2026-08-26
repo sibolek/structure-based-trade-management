@@ -47,6 +47,8 @@
   "notes": [
     "Values marked Approx are regression targets, not exact floating-point assertions.",
     "Counterfactual prices were based on historical market data and are analytical approximations, not guaranteed executable fills.",
-    "The original source dataset has not yet been committed to this repository; do not fabricate it."
+    "The original source dataset has not yet been committed to this repository; do not fabricate it.",
+    "Recovered duration and historical stop-action fingerprints reproduce the preserved benchmarks to documented precision.",
+    "Recovered historical R uses first accepted in-episode stop loss-side of episode blended VWAP and risk = abs(entryVWAP - stop) * peakQuantity. It reproduces 83/35/48 and all preserved R means, medians and winner thresholds; the reconstructed loser <= -1R threshold is 27/48 (56.3%) versus preserved 26/48 (54.2%). No one-trade special case is used to force the benchmark."
   ]
 }
