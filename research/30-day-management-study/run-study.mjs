@@ -7,6 +7,7 @@ import {
   summarizeCapture,
   summarizeDurations,
   summarizeFixedDuration,
+  summarizeHistoricalStopActions,
   summarizeRMultiples,
   summarizeStopMovements,
 } from "../../analytics/index.mjs";
@@ -64,15 +65,26 @@ function buildReport(dataset) {
   const trades = Array.isArray(dataset?.trades) ? dataset.trades : [];
   const mfe = buildMfeReport(trades);
   const hasHistoricalStopEvents = trades.some((trade) => Array.isArray(trade?.historicalManagementEvents));
+  const historicalStopActionCount = trades.reduce(
+    (sum, trade) => sum + (Array.isArray(trade?.historicalManagementEvents) ? trade.historicalManagementEvents.length : 0),
+    0,
+  );
+  const productionStopEventCount = trades.reduce(
+    (sum, trade) => sum + (Array.isArray(trade?.managementEvents) ? trade.managementEvents.length : 0),
+    0,
+  );
+
   return {
     metadata: {
       source: dataset?.source || "normalized ExecutionOS trade dataset",
       generatedAt: new Date().toISOString(),
       trades: trades.length,
+      historicalStopActionCount,
+      productionStopEventCount,
     },
     duration: summarizeDurations(trades),
     stops: hasHistoricalStopEvents
-      ? summarizeStopMovements(trades, { mode: "HISTORICAL_ORDER_ACTION", eventField: "historicalManagementEvents" })
+      ? summarizeHistoricalStopActions(trades)
       : summarizeStopMovements(trades),
     stopsProduction: hasHistoricalStopEvents
       ? summarizeStopMovements(trades, { mode: "BE_OR_PROFIT", eventField: "managementEvents" })
