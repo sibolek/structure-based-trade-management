@@ -45,7 +45,8 @@
     "research:audit-market-data": "node research/30-day-management-study/audit-market-data.mjs",
     "research:diagnose-fast-winners": "node research/30-day-management-study/diagnose-fast-winner-sample.mjs",
     "research:diagnose-fast-winner-strata": "node research/30-day-management-study/diagnose-fast-winner-strata.mjs",
-    "research:validate-fast-winners-schwab": "node research/30-day-management-study/validate-fast-winner-candidates-schwab.mjs"
+    "research:validate-fast-winners-schwab": "node research/30-day-management-study/validate-fast-winner-candidates-schwab.mjs",
+    "research:diagnose-minute-alignment": "node research/30-day-management-study/diagnose-minute-bar-alignment.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
