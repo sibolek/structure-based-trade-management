@@ -1,5 +1,6 @@
 import ArmedTradeTicket from "./components/ArmedTradeTicket.jsx";
 import BrokerStatusPanel from "./components/BrokerStatusPanel.jsx";
+import PreEntryTradeActions from "./components/PreEntryTradeActions.jsx";
 import useBrokerState from "./hooks/useBrokerState.js";
 import ExecutionV22 from "./pages/ExecutionV22.jsx";
 
@@ -12,6 +13,7 @@ export default function App() {
         <BrokerStatusPanel broker={broker} />
       </div>
       <ExecutionV22 broker={broker} />
+      <PreEntryTradeActions />
       <ArmedTradeTicket broker={broker} />
     </div>
   );
