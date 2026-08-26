@@ -9,6 +9,7 @@ import {
   initialRiskDollars,
   realizedR,
   summarizeDurations,
+  summarizeHistoricalStopActions,
   summarizeRMultiples,
   summarizeStopMovements,
 } from "../analytics/index.mjs";
@@ -49,6 +50,39 @@ test("stop analysis distinguishes tightening from reaching breakeven/profit", ()
   assert.equal(result.winnersWithProtectiveMove, 1);
   assert.equal(result.winnersMovedWithin60Sec, 0);
   assert.equal(result.winnersMovedWithin120Sec, 1);
+});
+
+test("historical stop actions are summarized independently of STOP_CHANGED production events", () => {
+  const trades = [
+    {
+      direction: "LONG",
+      entryAt: base,
+      entryPrice: 100,
+      realizedPnl: 10,
+      historicalManagementEvents: [
+        { type: "STOP_ORDER_ACTION", timestamp: plus(45), newStop: 100, classification: "BE_OR_PROFIT", status: "REJECTED" },
+      ],
+      managementEvents: [],
+    },
+    {
+      direction: "SHORT",
+      entryAt: base,
+      entryPrice: 50,
+      realizedPnl: -5,
+      historicalManagementEvents: [
+        { type: "STOP_ORDER_ACTION", timestamp: plus(90), newStop: 49.9, classification: "BE_OR_PROFIT", status: "REPLACED" },
+      ],
+      managementEvents: [],
+    },
+  ];
+  const historical = summarizeHistoricalStopActions(trades);
+  assert.equal(historical.winnersWithProtectiveMove, 1);
+  assert.equal(historical.losersWithProtectiveMove, 1);
+  assert.equal(historical.medianWinnerMoveSec, 45);
+  assert.equal(historical.winnersMovedWithin60Sec, 1);
+  const production = summarizeStopMovements(trades);
+  assert.equal(production.winnersWithProtectiveMove, 0);
+  assert.equal(production.losersWithProtectiveMove, 0);
 });
 
 test("initial risk and realized R use structural stop and original size", () => {
