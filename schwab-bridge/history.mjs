@@ -7,6 +7,7 @@ const TOKEN_PATH = path.join(ROOT, ".schwab-tokens.json");
 const TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token";
 const TRADER_BASE_URL = "https://api.schwabapi.com/trader/v1";
 const ACCESS_REFRESH_SAFETY_MS = 2 * 60 * 1000;
+const DEFAULT_EXPORT_PATH = path.join(ROOT, "research", "30-day-management-study", "raw-schwab-history.json");
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
@@ -109,7 +110,10 @@ function parseArgs() {
   const parsedDays = Number(values.days ?? 7);
   const days = Number.isFinite(parsedDays) ? Math.min(Math.max(parsedDays, 1), 365) : 7;
   const symbol = typeof values.symbol === "string" ? values.symbol.trim().toUpperCase() : null;
-  return { days, symbol };
+  const quiet = values.quiet === true || String(values.quiet || "").toLowerCase() === "true";
+  let exportPath = null;
+  if (values.export) exportPath = values.export === true ? DEFAULT_EXPORT_PATH : path.resolve(ROOT, String(values.export));
+  return { days, symbol, quiet, exportPath };
 }
 
 function maskAccount(accountNumber) {
@@ -132,6 +136,10 @@ function formatNumber(value) {
   return Number.isFinite(n) ? n.toString() : "—";
 }
 
+function instrumentType(instrument = {}) {
+  return instrument.assetType || instrument.type || "";
+}
+
 function extractOrderExecutions(account, orders, symbolFilter) {
   const rows = [];
   for (const order of orders || []) {
@@ -146,6 +154,7 @@ function extractOrderExecutions(account, orders, symbolFilter) {
           accountNumber: account.accountNumber,
           orderId: order.orderId,
           symbol,
+          assetType: instrumentType(leg?.instrument),
           instruction: leg?.instruction || "?",
           positionEffect: leg?.positionEffect || "",
           quantity: execution.quantity,
@@ -159,9 +168,53 @@ function extractOrderExecutions(account, orders, symbolFilter) {
   return rows;
 }
 
+function extractOrderSnapshots(account, orders, symbolFilter) {
+  const rows = [];
+  const seen = new Set();
+
+  function visit(order, parentOrderId = null) {
+    if (!order || typeof order !== "object") return;
+    const legs = order.orderLegCollection || [];
+    for (const leg of legs) {
+      const symbol = leg?.instrument?.symbol || "?";
+      if (symbolFilter && symbol.toUpperCase() !== symbolFilter) continue;
+      const key = `${order.orderId}|${leg.legId}|${parentOrderId || ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        accountNumber: account.accountNumber,
+        orderId: order.orderId,
+        parentOrderId,
+        legId: leg.legId,
+        symbol,
+        assetType: instrumentType(leg?.instrument),
+        instruction: leg?.instruction || "?",
+        positionEffect: leg?.positionEffect || "",
+        orderType: order.orderType || "",
+        orderStrategyType: order.orderStrategyType || "",
+        duration: order.duration || "",
+        session: order.session || "",
+        quantity: order.quantity,
+        filledQuantity: order.filledQuantity,
+        remainingQuantity: order.remainingQuantity,
+        price: order.price,
+        stopPrice: order.stopPrice,
+        status: order.status,
+        enteredTime: order.enteredTime,
+        closeTime: order.closeTime,
+        cancelTime: order.cancelTime,
+      });
+    }
+    for (const child of order.childOrderStrategies || []) visit(child, order.orderId || parentOrderId);
+  }
+
+  for (const order of orders || []) visit(order, null);
+  return rows;
+}
+
 function isSecurityTransferItem(item) {
   const symbol = String(item?.instrument?.symbol || "");
-  const type = String(item?.instrument?.type || "").toUpperCase();
+  const type = String(item?.instrument?.type || item?.instrument?.assetType || "").toUpperCase();
   if (!symbol) return false;
   if (symbol.toUpperCase().startsWith("CURRENCY_")) return false;
   if (type === "CURRENCY") return false;
@@ -182,6 +235,7 @@ function extractTradeTransactions(account, transactions, symbolFilter) {
       orderId: tx.orderId,
       activityId: tx.activityId,
       symbol,
+      assetType: instrumentType(securityItem.instrument),
       amount: securityItem.amount,
       price: securityItem.price,
       cost: securityItem.cost,
@@ -220,21 +274,48 @@ function printTransactions(rows) {
   }
 }
 
+function writeSanitizedExport(filePath, { accounts, days, symbol, start, end, orderRows, orderSnapshots, transactionRows }) {
+  const accountKeys = new Map(accounts.map((account, index) => [String(account.accountNumber), `A${index + 1}`]));
+  const sanitize = (row) => {
+    const { accountNumber, ...rest } = row;
+    return { accountKey: accountKeys.get(String(accountNumber)) || "A?", ...rest };
+  };
+  const payload = {
+    schemaVersion: 1,
+    source: "SCHWAB",
+    generatedAt: new Date().toISOString(),
+    lookbackDays: days,
+    symbolFilter: symbol,
+    window: { start: start.toISOString(), end: end.toISOString() },
+    accountCount: accounts.length,
+    executionLegs: orderRows.map(sanitize),
+    orderSnapshots: orderSnapshots.map(sanitize),
+    tradeTransactions: transactionRows.map(sanitize),
+  };
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+  try { fs.chmodSync(filePath, 0o600); } catch { /* best effort */ }
+  return payload;
+}
+
 async function main() {
-  const { days, symbol } = parseArgs();
+  const { days, symbol, quiet, exportPath } = parseArgs();
   const accounts = await traderGet("/accounts/accountNumbers");
   if (!Array.isArray(accounts) || !accounts.length) throw new Error("No authorized Schwab accounts found.");
 
   const end = new Date(Date.now() + 60_000);
   const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const orderRows = [];
+  const orderSnapshots = [];
   const transactionRows = [];
 
-  console.log("\nEXECUTIONOS SCHWAB HISTORY VERIFIER\n");
-  console.log(`✓ Accounts: ${accounts.length}`);
-  console.log(`✓ Lookback: ${days} day(s)`);
-  console.log(`✓ Symbol filter: ${symbol || "none"}`);
-  console.log("✓ Read-only\n");
+  if (!quiet) {
+    console.log("\nEXECUTIONOS SCHWAB HISTORY VERIFIER\n");
+    console.log(`✓ Accounts: ${accounts.length}`);
+    console.log(`✓ Lookback: ${days} day(s)`);
+    console.log(`✓ Symbol filter: ${symbol || "none"}`);
+    console.log("✓ Read-only\n");
+  }
 
   for (const account of accounts) {
     const orderParams = new URLSearchParams({
@@ -254,25 +335,38 @@ async function main() {
       traderGet(`/accounts/${encodeURIComponent(account.hashValue)}/transactions?${transactionParams}`),
     ]);
     orderRows.push(...extractOrderExecutions(account, orders, symbol));
+    orderSnapshots.push(...extractOrderSnapshots(account, orders, symbol));
     transactionRows.push(...extractTradeTransactions(account, transactions, symbol));
   }
 
   orderRows.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
+  orderSnapshots.sort((a, b) => Date.parse(a.enteredTime || a.closeTime || "") - Date.parse(b.enteredTime || b.closeTime || ""));
   transactionRows.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
-  printOrders(orderRows);
-  printTransactions(transactionRows);
+
+  if (!quiet) {
+    printOrders(orderRows);
+    printTransactions(transactionRows);
+  }
 
   const orderIds = new Set(orderRows.map((row) => String(row.orderId)).filter((value) => value && value !== "undefined"));
   const txOrderIds = new Set(transactionRows.map((row) => String(row.orderId)).filter((value) => value && value !== "undefined"));
   const overlap = [...orderIds].filter((id) => txOrderIds.has(id));
 
+  let exported = null;
+  if (exportPath) exported = writeSanitizedExport(exportPath, { accounts, days, symbol, start, end, orderRows, orderSnapshots, transactionRows });
+
   console.log("\nSUMMARY");
   console.log("================================================================================");
   console.log(`Order execution legs:        ${orderRows.length}`);
+  console.log(`Order snapshots:             ${orderSnapshots.length}`);
   console.log(`TRADE transactions:          ${transactionRows.length}`);
   console.log(`Unique execution order IDs:  ${orderIds.size}`);
   console.log(`Order IDs also in txns:      ${overlap.length}`);
-  console.log("\nIf you recognize these as trades entered in thinkorswim, the ToS → Schwab API visibility path is proven before Monday.\n");
+  if (exportPath) {
+    console.log(`Sanitized export:            ${exportPath}`);
+    console.log(`Export schema:               v${exported.schemaVersion}`);
+  }
+  if (!quiet) console.log("\nIf you recognize these as trades entered in thinkorswim, the ToS → Schwab API visibility path is proven before Monday.\n");
 }
 
 main().catch((error) => {
