@@ -394,7 +394,7 @@ export default function ExecutionV23({ broker }) {
     return {
       ...current,
       candidates: current.candidates.filter((item) => item.id !== id),
-      draft: { phase: "RISK", plan: { ...candidate.originalPlan }, originalPlan: { ...candidate.originalPlan }, risk: { ...candidate.risk } },
+      draft: { phase: "PLAN", plan: { ...candidate.originalPlan }, originalPlan: { ...candidate.originalPlan }, risk: { ...candidate.risk } },
     };
   });
 
