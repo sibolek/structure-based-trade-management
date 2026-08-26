@@ -7,3 +7,4 @@ dist/
 npm-debug.log*
 research/30-day-management-study/raw-schwab-history.json
 research/30-day-management-study/normalized-trades.json
+research/30-day-management-study/historical-study-trades.json
