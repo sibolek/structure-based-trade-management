@@ -1,4 +1,5 @@
 import BrokerStatusPanel from "./components/BrokerStatusPanel.jsx";
+import CandidateEditCancel from "./components/CandidateEditCancel.jsx";
 import useBrokerState from "./hooks/useBrokerState.js";
 import ExecutionV23 from "./pages/ExecutionV23.jsx";
 
@@ -11,6 +12,7 @@ export default function App() {
         <BrokerStatusPanel broker={broker} />
       </div>
       <ExecutionV23 broker={broker} />
+      <CandidateEditCancel />
     </div>
   );
 }
