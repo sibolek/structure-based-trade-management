@@ -36,7 +36,8 @@
     "research:diagnose-stop-linkage": "node research/30-day-management-study/diagnose-stop-linkage.mjs",
     "research:enrich-stops": "node research/30-day-management-study/enrich-stop-history.mjs",
     "research:report-recovered": "node research/30-day-management-study/run-study.mjs --input research/30-day-management-study/historical-study-trades.json",
-    "research:diagnose-r": "node research/30-day-management-study/diagnose-initial-risk.mjs"
+    "research:diagnose-r": "node research/30-day-management-study/diagnose-initial-risk.mjs",
+    "research:diagnose-r-winners": "node research/30-day-management-study/diagnose-r-winner-delta.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
