@@ -49,14 +49,57 @@ One discrete threshold remains one trade away from the preserved benchmark: the 
 
 The recovered R rule should be treated as a high-confidence reconstruction of the historical analysis, with that one documented source-detail discrepancy. It is not the production ExecutionOS TradeContract risk model.
 
+## Historical 19-trade market-study provenance
+
+The retained evidence preserves the numerical fingerprint of a **19-trade stratified sample of fast winners**, but it does not preserve the 19 exact trade identities or the original sampling implementation.
+
+A strong execution-only clue was recovered: **189 of the 265 winners were held for 209 seconds or less**, where 209 seconds is the preserved median-loser hold horizon used by the fixed-duration study. Ten percent of 189 is 18.9, naturally yielding a 19-trade sample. This supports, but does not prove, an eligibility interpretation of “fast winners” as winners exited within the median-loser horizon followed by an approximately 10% stratified sample.
+
+To avoid outcome-fitting, the reconstruction froze a finite set of standard sampling rules before market-data validation: chronological and duration-sorted 1-in-10 systematic samples, equal-count 19-stratum representatives, and proportional-by-trading-day strata. These produced 27 predeclared 19-trade candidates. No arbitrary trade combinations were searched.
+
+## Schwab historical 1-minute market data
+
+The Schwab Market Data `GET /marketdata/v1/pricehistory` endpoint was validated read-only against the recovered study window. A test request for NVDA on 2026-08-20 returned 765 one-minute OHLCV candles with extended-hours coverage. The reconstruction therefore has a viable same-broker historical 1-minute source and does not require a substitute vendor for this preservation work.
+
+For the 27 frozen candidate samples, 86 unique symbol/day minute histories were retrieved from Schwab and cached only in a local Git-ignored research file. The preserved market-study fingerprints were then used strictly as validation outputs:
+
+- actual P/L: +$86.46;
+- 209-second counterfactual: +$111.30, 6/19 improved;
+- 842-second counterfactual: +$18.16, 11/19 losing;
+- aggregate MFE: approximately $387 / $513 / $687 / $858 / $1,185 at 5 / 10 / 15 / 30 / 60 minutes;
+- at least 2× realized profit reached by 15/19 at 5m, 16/19 at 10m, and 17/19 at 60m.
+
+No predeclared candidate reproduced that fingerprint across the independent metrics. The best market-only candidate under the initial minute convention was `duration systematic offset 5`, but it materially missed the preserved actual P/L and several MFE/counterfactual statistics.
+
+Because the historical work used 1-minute bars but did not preserve the bar-alignment convention for second-level trade entries, the same frozen 27 candidates were also tested under standard timestamp interpretations: next-minute-start close, containing-minute close, last-completed-minute close, and next-minute-start open, each with entry-minute overlap/exclusion where applicable. No new samples were generated.
+
+The best standard alignment was **containing-minute close with entry-minute overlap**, which improved the market-only score but still missed multiple independent fingerprints simultaneously (including 209-second improved count, 842-second loser count, and the 2×-MFE counts). Bar alignment therefore does not explain the missing provenance.
+
+### Preservation conclusion for MFE / capture / fixed-duration studies
+
+The exact original 19 trade identities are **unresolved and not defensibly recoverable from the retained evidence**. The original market-study numerical benchmarks remain preserved as historical evidence, and the analytical formulas remain preserved and tested, but the project must not claim exact historical reproduction of the 19-trade MFE, capture-efficiency, or fixed-duration sample without the original membership list or an independently recovered sampling rule.
+
+Do **not** search arbitrary combinations of 19 trades, custom offsets, symbol exclusions, or timing rules after seeing the benchmark values merely to manufacture a match. Any future replacement sample must be defined deterministically before observing its market outcomes and must be reported as a **new reproducible study**, not as recovery of the original historical sample.
+
+## Preservation status
+
+| Analysis | Status |
+| --- | --- |
+| Winner / loser duration | Recovered to preserved precision |
+| Historical stop-management timing | Recovered to preserved precision |
+| Initial-risk / realized-R | High-confidence recovery; one documented one-trade threshold discrepancy |
+| 19-trade MFE windows | Benchmark + formula preserved; exact sample membership unresolved |
+| 19-trade capture efficiency | Benchmark + formula preserved; exact sample membership unresolved |
+| 19-trade fixed-duration counterfactuals | Benchmark + formula preserved; exact sample membership unresolved |
+
 ## Reproduction policy
 
-`expected-results.json` is the historical numerical fingerprint. When the original normalized source dataset is recovered or reconstructed, `run-study.mjs` must reproduce those values within documented tolerances before the rebuilt analytics are considered equivalent to the original study.
+`expected-results.json` is the historical numerical fingerprint. When an original normalized source dataset or independently evidenced sample membership is recovered, `run-study.mjs` may be used to test reproduction within documented tolerances.
 
-Do not reverse-engineer fake trade rows merely to make the regression targets pass. The benchmarks validate real source data; they are not fixtures from which source data should be invented.
+Do not reverse-engineer fake trade rows or trade membership merely to make regression targets pass. The benchmarks validate source evidence; they are not fixtures from which source data should be invented.
 
-The ignored local file `historical-study-trades.json` is enriched from raw Schwab history and normalized episodes. It must not be committed. The enrichment attaches historical stop actions, production stop changes and the recovered initial-risk fields needed for the R report.
+The ignored local file `historical-study-trades.json` is enriched from raw Schwab history and normalized episodes. It must not be committed. The enrichment attaches historical stop actions, production stop changes and the recovered initial-risk fields needed for the R report. Schwab minute-history cache files used by diagnostics must also remain local and ignored.
 
 ## Production evolution
 
-The historical study used simplified market-window counterfactuals. Production ExecutionOS should additionally compute scaling-aware MFE_R / MAE_R from combined realized + unrealized trade value relative to the original contract risk. Both paths are kept deliberately: one for historical reproducibility, one for production telemetry.
+The historical study used simplified market-window counterfactuals. Production ExecutionOS should additionally compute scaling-aware MFE_R / MAE_R from combined realized + unrealized trade value relative to the original contract risk. Both paths are kept deliberately: one for historical benchmark preservation, one for production telemetry.
