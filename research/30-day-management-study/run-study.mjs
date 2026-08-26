@@ -63,6 +63,7 @@ function buildCounterfactualReport(trades) {
 function buildReport(dataset) {
   const trades = Array.isArray(dataset?.trades) ? dataset.trades : [];
   const mfe = buildMfeReport(trades);
+  const hasHistoricalStopEvents = trades.some((trade) => Array.isArray(trade?.historicalManagementEvents));
   return {
     metadata: {
       source: dataset?.source || "normalized ExecutionOS trade dataset",
@@ -70,7 +71,12 @@ function buildReport(dataset) {
       trades: trades.length,
     },
     duration: summarizeDurations(trades),
-    stops: summarizeStopMovements(trades),
+    stops: hasHistoricalStopEvents
+      ? summarizeStopMovements(trades, { mode: "HISTORICAL_ORDER_ACTION", eventField: "historicalManagementEvents" })
+      : summarizeStopMovements(trades),
+    stopsProduction: hasHistoricalStopEvents
+      ? summarizeStopMovements(trades, { mode: "BE_OR_PROFIT", eventField: "managementEvents" })
+      : null,
     r: summarizeRMultiples(trades),
     mfe,
     capture: mfe.captureByWindow,
@@ -102,6 +108,6 @@ if (args.section === "all" || args.section === "report") console.log(JSON.string
 else if (Object.hasOwn(report, args.section)) console.log(JSON.stringify(report[args.section], null, 2));
 else {
   console.error(`Unknown section: ${args.section}`);
-  console.error("Valid sections: duration, stops, r, mfe, capture, counterfactuals, all");
+  console.error("Valid sections: duration, stops, stopsProduction, r, mfe, capture, counterfactuals, all");
   process.exit(1);
 }
