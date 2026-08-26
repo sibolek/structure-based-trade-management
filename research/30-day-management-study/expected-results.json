@@ -1,0 +1,52 @@
+{
+  "study": "30-day management study",
+  "status": "historical benchmark reconstructed from preserved project specification",
+  "duration": {
+    "completedTrades": 384,
+    "winners": 265,
+    "losers": 118,
+    "flat": 1,
+    "winRateApprox": 0.69,
+    "medianWinnerMinutes": 1.35,
+    "medianLoserMinutes": 3.49,
+    "meanWinnerMinutes": 5.04,
+    "meanLoserMinutes": 14.03
+  },
+  "stopMovements": {
+    "winnersWithProtectiveMove": 135,
+    "medianWinnerMoveSecApprox": 77,
+    "pctMovedWithin60SecApprox": 0.43,
+    "pctMovedWithin120SecApprox": 0.63,
+    "losersWithProtectiveMove": 3
+  },
+  "rMultiples": {
+    "tradesWithInitialRisk": 83,
+    "winners": 35,
+    "losers": 48,
+    "medianWinnerR": 0.31,
+    "medianLoserR": -1.0,
+    "meanWinnerR": 0.60,
+    "meanLoserR": -1.01,
+    "pctWinnersBelowHalfR": 0.686,
+    "pctWinnersBelowOneR": 0.829,
+    "pctLosersAtOrBeyondMinusOneR": 0.542
+  },
+  "mfeWindows": {
+    "300": { "aggregateMfeApprox": 387, "actualApprox": 86, "captureApprox": 0.22 },
+    "600": { "aggregateMfeApprox": 513, "actualApprox": 86, "captureApprox": 0.17 },
+    "900": { "aggregateMfeApprox": 687, "actualApprox": 86, "captureApprox": 0.13 },
+    "1800": { "aggregateMfeApprox": 858, "actualApprox": 86, "captureApprox": 0.10 },
+    "3600": { "aggregateMfeApprox": 1185, "actualApprox": 86, "captureApprox": 0.07 }
+  },
+  "fixedDurationSample": {
+    "trades": 19,
+    "actualAggregatePnl": 86.46,
+    "hold209Sec": { "aggregatePnl": 111.30, "improvedTrades": 6 },
+    "hold842Sec": { "aggregatePnl": 18.16, "losingTradesAtExit": 11 }
+  },
+  "notes": [
+    "Values marked Approx are regression targets, not exact floating-point assertions.",
+    "Counterfactual prices were based on historical market data and are analytical approximations, not guaranteed executable fills.",
+    "The original source dataset has not yet been committed to this repository; do not fabricate it."
+  ]
+}
