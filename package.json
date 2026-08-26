@@ -11,13 +11,14 @@
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
     "schwab:history": "node schwab-bridge/history.mjs",
+    "schwab:history-export": "node schwab-bridge/history.mjs --days=30 --quiet --export=research/30-day-management-study/raw-schwab-history.json",
     "schwab:replay": "node schwab-bridge/replay.mjs",
     "schwab:slippage": "node schwab-bridge/slippage.mjs",
     "schwab:state-test": "node schwab-bridge/state-test.mjs",
     "schwab:token-test": "node schwab-bridge/token-test.mjs",
     "schwab:status": "node schwab-bridge/index.mjs status",
     "schwab:logout": "node schwab-bridge/index.mjs logout",
-    "analytics:test": "node --test tests/analytics.test.mjs",
+    "analytics:test": "node --test tests/*.test.mjs",
     "analytics:report": "node research/30-day-management-study/run-study.mjs",
     "analytics:duration": "node research/30-day-management-study/run-study.mjs --section duration",
     "analytics:stops": "node research/30-day-management-study/run-study.mjs --section stops",
@@ -25,7 +26,9 @@
     "analytics:mfe": "node research/30-day-management-study/run-study.mjs --section mfe",
     "analytics:capture": "node research/30-day-management-study/run-study.mjs --section capture",
     "analytics:counterfactuals": "node research/30-day-management-study/run-study.mjs --section counterfactuals",
-    "research:30day-management": "node research/30-day-management-study/run-study.mjs"
+    "research:30day-management": "node research/30-day-management-study/run-study.mjs",
+    "research:normalize-30day": "node research/30-day-management-study/normalize-schwab-history.mjs",
+    "research:reconstruct-30day": "npm run schwab:history-export && npm run research:normalize-30day && npm run analytics:report"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
