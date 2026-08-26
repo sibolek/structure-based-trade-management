@@ -5,11 +5,9 @@ import {
   History,
   LockKeyhole,
   Radio,
-  RotateCcw,
   ShieldCheck,
   Trash2,
   XCircle,
-  Zap,
 } from "lucide-react";
 
 const STORE_KEY = "execution-v23-store";
@@ -45,20 +43,102 @@ const PLAN_FIELDS = [
 function freshDraft() {
   return {
     phase: "PLAN",
+    mode: "NEW",
+    editingCandidateId: null,
     plan: { ...emptyPlan },
     originalPlan: null,
     risk: { expectedEntry: "", intendedSize: "" },
   };
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function nowLabel() {
+  return new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date());
+}
+
+function decision(stage, state, action, note = "") {
+  return { id: `${Date.now()}-${Math.random()}`, timestamp: nowIso(), time: nowLabel(), stage, state, action, note };
+}
+
+function makeCandidate(plan, risk, existing = null) {
+  const now = nowIso();
+  return {
+    id: existing?.id || `${Date.now()}-${plan.symbol}`,
+    phase: "ARMED",
+    createdAt: existing?.createdAt || now,
+    armedAt: now,
+    originalPlan: { ...plan, symbol: String(plan.symbol || "").toUpperCase() },
+    risk: { ...risk },
+    currentState: existing?.currentState || "VALID",
+    broker: existing?.broker || {
+      account: null,
+      entryPrice: null,
+      entryQuantity: null,
+      peakQuantity: null,
+      currentQuantity: null,
+      currentAveragePrice: null,
+      entryDetectedAt: null,
+      exitPrice: null,
+      exitQuantity: null,
+      flatDetectedAt: null,
+    },
+    decisions: existing?.decisions || [
+      decision("PLAN", "—", "PLAN FROZEN", `${plan.symbol} ${plan.direction} — ${plan.setup}`),
+      decision("ARM", "—", "CANDIDATE ARMED", "Waiting for matching ToS opening fill"),
+    ],
+  };
+}
+
+function normalizeStore(raw) {
+  const clean = raw && typeof raw === "object" ? raw : {};
+  const candidates = Array.isArray(clean.candidates) ? clean.candidates : [];
+  const liveTrades = Array.isArray(clean.liveTrades) ? clean.liveTrades : [];
+  const history = Array.isArray(clean.history) ? clean.history : [];
+  let draft = clean.draft && typeof clean.draft === "object" ? clean.draft : freshDraft();
+
+  // Migration for the short-lived V2.3 behavior that removed a candidate while editing.
+  // Test/draft state is restored as a continuously editable candidate from load-forward.
+  if (!draft.mode && draft.phase === "PLAN" && draft.originalPlan && (String(draft.risk?.expectedEntry ?? "").trim() || String(draft.risk?.intendedSize ?? "").trim())) {
+    const symbol = String(draft.originalPlan.symbol || "").toUpperCase();
+    const alreadyPresent = candidates.find((item) => item.originalPlan?.symbol === symbol);
+    if (!alreadyPresent) {
+      const restored = makeCandidate(draft.originalPlan, draft.risk);
+      candidates.push(restored);
+      draft = {
+        ...draft,
+        mode: "EDIT",
+        editingCandidateId: restored.id,
+        plan: { ...draft.plan },
+        originalPlan: { ...draft.originalPlan },
+      };
+    } else {
+      draft = { ...draft, mode: "EDIT", editingCandidateId: alreadyPresent.id };
+    }
+  } else {
+    draft = {
+      ...freshDraft(),
+      ...draft,
+      mode: draft.mode || "NEW",
+      editingCandidateId: draft.editingCandidateId || null,
+      plan: { ...emptyPlan, ...(draft.plan || {}) },
+      risk: { expectedEntry: "", intendedSize: "", ...(draft.risk || {}) },
+    };
+  }
+
+  return { draft, candidates, liveTrades, history, view: clean.view || "TRADE", notice: clean.notice || "" };
+}
+
 function initialStore() {
   try {
     const saved = localStorage.getItem(STORE_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) return normalizeStore(JSON.parse(saved));
   } catch {
-    // Fall through to a clean V2.3 store.
+    // Fall through to clean store.
   }
-  return { draft: freshDraft(), candidates: [], liveTrades: [], history: [], view: "TRADE" };
+  return { draft: freshDraft(), candidates: [], liveTrades: [], history: [], view: "TRADE", notice: "" };
 }
 
 function sourceFor(symbol) {
@@ -88,18 +168,6 @@ function price(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
   return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function nowLabel() {
-  return new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date());
-}
-
-function decision(stage, state, action, note = "") {
-  return { id: `${Date.now()}-${Math.random()}`, timestamp: nowIso(), time: nowLabel(), stage, state, action, note };
 }
 
 function weightedVwap(events) {
@@ -142,11 +210,13 @@ function Chain({ active }) {
   );
 }
 
-function PlanEditor({ draft, setDraft }) {
+function PlanEditor({ draft, setDraft, onCancelEdit }) {
   const [validationMessage, setValidationMessage] = useState("");
   const plan = draft.plan;
   const missing = missingPlanFields(plan);
   const source = sourceFor(plan.symbol);
+  const editing = draft.mode === "EDIT";
+
   const update = (key, value) => {
     setValidationMessage("");
     setDraft((current) => ({ ...current, plan: { ...current.plan, [key]: value } }));
@@ -167,12 +237,21 @@ function PlanEditor({ draft, setDraft }) {
 
   return (
     <div className="space-y-4">
+      {editing && (
+        <section className="rounded border border-emerald-400/25 bg-emerald-950/15 p-3">
+          <p className="section-label">Editing Armed Candidate · Original Still Listening</p>
+          <p className="text-sm text-emerald-100">
+            The last saved {draft.originalPlan?.symbol} plan remains armed while you edit this working copy. If it fills before SAVE, the saved plan becomes LIVE and these unsaved edits are discarded.
+          </p>
+        </section>
+      )}
+
       <section className="panel">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <p className="section-label">New Candidate · Pre-Entry Freeze</p>
-            <h2 className="text-xl font-semibold text-zinc-100">Build the next setup without disturbing armed candidates.</h2>
-            <p className="mt-1 text-sm text-zinc-500">Armed ideas remain listening while you plan additional symbols.</p>
+            <p className="section-label">{editing ? "Edit Candidate · Working Copy" : "New Candidate · Pre-Entry Freeze"}</p>
+            <h2 className="text-xl font-semibold text-zinc-100">{editing ? "Update the setup without interrupting broker listening." : "Build the next setup without disturbing armed candidates."}</h2>
+            <p className="mt-1 text-sm text-zinc-500">{editing ? "Changes are not authoritative until you save them after risk validation." : "Armed ideas remain listening while you plan additional symbols."}</p>
           </div>
           <LockKeyhole className="text-sky-300" size={22} />
         </div>
@@ -201,23 +280,33 @@ function PlanEditor({ draft, setDraft }) {
       </section>
 
       <div className={`rounded border px-4 py-3 text-sm ${missing.length ? "border-amber-400/25 bg-amber-950/15 text-amber-100" : "border-emerald-400/25 bg-emerald-950/15 text-emerald-100"}`}>
-        {missing.length ? `Still required: ${missing.join(", ")}.` : "READY TO FREEZE — this candidate can move to risk sizing."}
+        {missing.length ? `Still required: ${missing.join(", ")}.` : editing ? "READY TO VALIDATE EDIT — move this working copy to risk sizing." : "READY TO FREEZE — this candidate can move to risk sizing."}
         {validationMessage && <p className="mt-1 font-semibold">{validationMessage}</p>}
       </div>
-      <button type="button" onClick={freeze} className="w-full rounded border border-sky-400/40 bg-sky-400/10 px-4 py-3 font-semibold text-sky-100">FREEZE CANDIDATE → RISK</button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={freeze} className="flex-1 rounded border border-sky-400/40 bg-sky-400/10 px-4 py-3 font-semibold text-sky-100">{editing ? "VALIDATE EDIT → RISK" : "FREEZE CANDIDATE → RISK"}</button>
+        {editing && <button type="button" onClick={onCancelEdit} className="rounded border border-white/15 px-4 py-3 text-sm font-semibold text-zinc-300">CANCEL EDIT</button>}
+      </div>
     </div>
   );
 }
 
-function RiskEditor({ draft, broker, candidates, onBack, onArm, onDiscard }) {
+function RiskEditor({ draft, broker, candidates, onBack, onArm, onSaveEdit, onDiscard, onCancelEdit }) {
   const plan = draft.originalPlan;
   const account = broker?.state?.accounts?.[0] || null;
   const positions = broker?.state?.positions || [];
+  const editing = draft.mode === "EDIT";
+  const editingId = draft.editingCandidateId;
   const existingPosition = positions.find((item) => item.symbol === plan.symbol);
-  const duplicateCandidate = candidates.find((item) => item.originalPlan.symbol === plan.symbol);
+  const duplicateCandidate = candidates.find((item) => item.originalPlan.symbol === plan.symbol && item.id !== editingId);
   const source = sourceFor(plan.symbol);
   const [expectedEntry, setExpectedEntry] = useState(draft.risk.expectedEntry || "");
   const [intendedSize, setIntendedSize] = useState(draft.risk.intendedSize || "");
+
+  useEffect(() => {
+    setExpectedEntry(draft.risk.expectedEntry || "");
+    setIntendedSize(draft.risk.intendedSize || "");
+  }, [draft.editingCandidateId, draft.mode]);
 
   const metrics = useMemo(() => {
     const entry = Number(expectedEntry);
@@ -232,11 +321,13 @@ function RiskEditor({ draft, broker, candidates, onBack, onArm, onDiscard }) {
 
   const numbersReady = [metrics.entry, metrics.stop, metrics.size].every((value) => Number.isFinite(value) && value > 0) && metrics.distance > 0;
   const brokerReady = source === "SCHWAB" && broker?.connected && broker?.state?.status === "ARMED" && account;
-  const allowed = brokerReady && numbersReady && !existingPosition && !duplicateCandidate && metrics.risk <= metrics.maxRisk;
+  const editingCandidateStillArmed = !editing || candidates.some((item) => item.id === editingId);
+  const allowed = brokerReady && numbersReady && !existingPosition && !duplicateCandidate && editingCandidateStillArmed && metrics.risk <= metrics.maxRisk;
 
   return (
     <div className="space-y-4">
-      <section className="panel"><p className="section-label">Candidate Risk Permission</p><h2 className="text-xl font-semibold text-zinc-100">{plan.symbol} {plan.direction} · size this setup, then add it to the armed board.</h2></section>
+      {editing && <section className="rounded border border-emerald-400/25 bg-emerald-950/15 p-3 text-sm text-emerald-100">The saved candidate is still LISTENING. SAVE EDIT atomically replaces it only after this risk check passes.</section>}
+      <section className="panel"><p className="section-label">{editing ? "Edit Risk Validation" : "Candidate Risk Permission"}</p><h2 className="text-xl font-semibold text-zinc-100">{plan.symbol} {plan.direction} · {editing ? "validate the updated setup before replacing the armed version." : "size this setup, then add it to the armed board."}</h2></section>
       <section className="grid gap-3 md:grid-cols-4">
         <div className="compact-card"><p className="section-label">Broker Equity</p><p className="text-2xl font-semibold">{money(account?.equity)}</p></div>
         <div className="compact-card"><p className="section-label">0.5% Maximum</p><p className="text-2xl font-semibold text-sky-100">{money(metrics.maxRisk)}</p></div>
@@ -249,28 +340,29 @@ function RiskEditor({ draft, broker, candidates, onBack, onArm, onDiscard }) {
         <div className="compact-card"><p className="section-label">Planned Risk</p><p className="text-xl font-semibold">{numbersReady ? money(metrics.risk) : "—"}</p></div>
         <div className="compact-card"><p className="section-label">Maximum Shares</p><p className="text-xl font-semibold">{numbersReady ? metrics.maxSize : "—"}</p></div>
       </section>
-      {existingPosition && <section className="rounded border border-amber-400/25 bg-amber-950/15 p-3 text-sm text-amber-100">{plan.symbol} is already held in Schwab, so automatic fresh-trade binding is blocked.</section>}
-      {duplicateCandidate && <section className="rounded border border-amber-400/25 bg-amber-950/15 p-3 text-sm text-amber-100">{plan.symbol} is already armed. One armed candidate per symbol avoids ambiguous fill binding.</section>}
+      {existingPosition && <section className="rounded border border-amber-400/25 bg-amber-950/15 p-3 text-sm text-amber-100">{plan.symbol} is already held in Schwab. If this is the edited candidate filling while you worked, return to the live board rather than saving another armed setup.</section>}
+      {duplicateCandidate && <section className="rounded border border-amber-400/25 bg-amber-950/15 p-3 text-sm text-amber-100">{plan.symbol} is already armed by another candidate. One armed candidate per symbol avoids ambiguous fill binding.</section>}
+      {!editingCandidateStillArmed && <section className="rounded border border-red-400/25 bg-red-950/20 p-3 text-sm text-red-100">The candidate being edited is no longer armed—most likely because its broker fill was detected. This edit cannot be saved as another candidate.</section>}
       <div className={`rounded border p-4 ${allowed ? "border-emerald-400/25 bg-emerald-950/15" : "border-amber-400/25 bg-amber-950/15"}`}>
-        <div className="flex gap-3">{allowed ? <ShieldCheck className="text-emerald-300" /> : <AlertTriangle className="text-amber-300" />}<div><p className="font-semibold">{allowed ? "RISK PERMITTED" : "NOT YET PERMITTED"}</p><p className="mt-1 text-sm text-zinc-400">Arming listens for a fill; it does not place or reserve an order.</p></div></div>
+        <div className="flex gap-3">{allowed ? <ShieldCheck className="text-emerald-300" /> : <AlertTriangle className="text-amber-300" />}<div><p className="font-semibold">{allowed ? "RISK PERMITTED" : "NOT YET PERMITTED"}</p><p className="mt-1 text-sm text-zinc-400">{editing ? "Saving replaces the existing armed candidate; it does not create an additional one." : "Arming listens for a fill; it does not place or reserve an order."}</p></div></div>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="button" disabled={!allowed} onClick={() => onArm(expectedEntry, intendedSize)} className="flex-1 rounded border border-emerald-400/40 bg-emerald-400/10 px-4 py-3 font-semibold text-emerald-100 disabled:opacity-30">ARM CANDIDATE + START NEXT PLAN</button>
+        <button type="button" disabled={!allowed} onClick={() => editing ? onSaveEdit(expectedEntry, intendedSize) : onArm(expectedEntry, intendedSize)} className="flex-1 rounded border border-emerald-400/40 bg-emerald-400/10 px-4 py-3 font-semibold text-emerald-100 disabled:opacity-30">{editing ? "SAVE EDIT → KEEP LISTENING" : "ARM CANDIDATE + START NEXT PLAN"}</button>
         <button type="button" onClick={onBack} className="rounded border border-white/10 px-4 py-3 text-sm font-semibold text-zinc-400">BACK TO PLAN</button>
-        <button type="button" onClick={onDiscard} className="rounded border border-red-400/20 px-4 py-3 text-sm font-semibold text-red-300">DISCARD CANDIDATE</button>
+        {editing ? <button type="button" onClick={onCancelEdit} className="rounded border border-white/15 px-4 py-3 text-sm font-semibold text-zinc-300">CANCEL EDIT</button> : <button type="button" onClick={onDiscard} className="rounded border border-red-400/20 px-4 py-3 text-sm font-semibold text-red-300">DISCARD CANDIDATE</button>}
       </div>
     </div>
   );
 }
 
-function CandidateCard({ trade, account, brokerConnected, onEdit, onDiscard }) {
+function CandidateCard({ trade, account, brokerConnected, editing, onEdit, onDiscard }) {
   const plan = trade.originalPlan;
   const risk = plannedRisk(trade);
   return (
-    <article className="overflow-hidden rounded border border-sky-400/20 bg-ink-850 shadow-terminal">
+    <article className={`overflow-hidden rounded border bg-ink-850 shadow-terminal ${editing ? "border-amber-300/40" : "border-sky-400/20"}`}>
       <header className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
         <div>
-          <p className="section-label">Armed Candidate</p>
+          <p className="section-label">Armed Candidate {editing ? "· Editing Working Copy" : ""}</p>
           <div className="flex items-baseline gap-2"><h3 className="text-2xl font-bold">{plan.symbol}</h3><span className={plan.direction === "LONG" ? "font-bold text-emerald-300" : "font-bold text-red-300"}>{plan.direction}</span></div>
           <p className="mt-1 text-xs text-zinc-500">{plan.setup} · {plan.timeframe}</p>
         </div>
@@ -288,20 +380,20 @@ function CandidateCard({ trade, account, brokerConnected, onEdit, onDiscard }) {
         <div><p className="section-label">Target</p><p className="text-zinc-300">{plan.target}</p><p className="mt-3 section-label">Management</p><p className="text-zinc-300">{plan.management}</p></div>
       </div>
       <footer className="flex gap-2 border-t border-white/10 px-4 py-3">
-        <button type="button" onClick={() => onEdit(trade.id)} className="rounded border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-300">DISARM + EDIT</button>
-        <button type="button" onClick={() => onDiscard(trade.id)} className="flex items-center gap-1 rounded border border-red-400/20 px-3 py-2 text-xs font-semibold text-red-300"><Trash2 size={13} /> DISCARD</button>
+        <button type="button" disabled={editing} onClick={() => onEdit(trade.id)} className="rounded border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-300 disabled:opacity-40">{editing ? "EDITING — STILL ARMED" : "EDIT"}</button>
+        <button type="button" disabled={editing} onClick={() => onDiscard(trade.id)} className="flex items-center gap-1 rounded border border-red-400/20 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-40"><Trash2 size={13} /> DISCARD</button>
       </footer>
     </article>
   );
 }
 
-function CandidateBoard({ candidates, broker, onEdit, onDiscard }) {
+function CandidateBoard({ candidates, broker, editingCandidateId, onEdit, onDiscard }) {
   if (!candidates.length) return null;
   const account = broker?.state?.accounts?.[0] || null;
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between"><div><p className="section-label">Armed Candidate Board</p><h2 className="text-lg font-semibold">{candidates.length} setup{candidates.length === 1 ? "" : "s"} listening for ToS entries</h2></div><Radio className="text-sky-300" size={20} /></div>
-      <div className="grid gap-3 xl:grid-cols-2">{candidates.map((trade) => <CandidateCard key={trade.id} trade={trade} account={account} brokerConnected={broker?.connected} onEdit={onEdit} onDiscard={onDiscard} />)}</div>
+      <div className="grid gap-3 xl:grid-cols-2">{candidates.map((trade) => <CandidateCard key={trade.id} trade={trade} account={account} brokerConnected={broker?.connected} editing={editingCandidateId === trade.id} onEdit={onEdit} onDiscard={onDiscard} />)}</div>
     </section>
   );
 }
@@ -367,34 +459,51 @@ export default function ExecutionV23({ broker }) {
 
   const setDraft = (updater) => setStore((current) => ({ ...current, draft: typeof updater === "function" ? updater(current.draft) : updater }));
 
+  const cancelEdit = () => setStore((current) => ({ ...current, draft: freshDraft(), notice: current.draft.mode === "EDIT" ? `Edit canceled. ${current.draft.originalPlan?.symbol || "Candidate"} remained armed throughout.` : current.notice }));
+
   const armCandidate = (expectedEntry, intendedSize) => setStore((current) => {
     const plan = current.draft.originalPlan;
-    const candidate = {
-      id: `${Date.now()}-${plan.symbol}`,
-      phase: "ARMED",
-      createdAt: nowIso(),
-      armedAt: nowIso(),
-      originalPlan: plan,
-      risk: { expectedEntry, intendedSize },
-      currentState: "VALID",
-      broker: { account: null, entryPrice: null, entryQuantity: null, peakQuantity: null, currentQuantity: null, currentAveragePrice: null, entryDetectedAt: null, exitPrice: null, exitQuantity: null, flatDetectedAt: null },
-      decisions: [decision("PLAN", "—", "PLAN FROZEN", `${plan.symbol} ${plan.direction} — ${plan.setup}`), decision("ARM", "—", "CANDIDATE ARMED", "Waiting for matching ToS opening fill")],
+    const candidate = makeCandidate(plan, { expectedEntry, intendedSize });
+    return { ...current, candidates: [...current.candidates, candidate], draft: freshDraft(), notice: `${plan.symbol} armed and listening.` };
+  });
+
+  const saveCandidateEdit = (expectedEntry, intendedSize) => setStore((current) => {
+    const id = current.draft.editingCandidateId;
+    const existing = current.candidates.find((item) => item.id === id);
+    if (!existing) {
+      return { ...current, draft: freshDraft(), notice: "Edit was not saved because the candidate is no longer armed. Check the Live Execution Board for a broker fill." };
+    }
+    const plan = current.draft.originalPlan;
+    const saved = makeCandidate(plan, { expectedEntry, intendedSize }, existing);
+    saved.decisions = [...existing.decisions, decision("PLAN", "—", "ARMED PLAN UPDATED", "Working-copy edit saved atomically; prior version listened until this save."), decision("ARM", "—", "UPDATED PLAN LISTENING", "New saved version owns only fills detected after this save.")];
+    return {
+      ...current,
+      candidates: current.candidates.map((item) => item.id === id ? saved : item),
+      draft: freshDraft(),
+      notice: `${saved.originalPlan.symbol} edit saved. Updated plan is armed and listening.`,
     };
-    return { ...current, candidates: [...current.candidates, candidate], draft: freshDraft() };
   });
 
   const discardCandidate = (id) => {
     if (!window.confirm("Discard this unfilled armed candidate? This does not affect Schwab or any order.")) return;
-    setStore((current) => ({ ...current, candidates: current.candidates.filter((item) => item.id !== id) }));
+    setStore((current) => ({ ...current, candidates: current.candidates.filter((item) => item.id !== id), notice: "Armed candidate discarded." }));
   };
 
   const editCandidate = (id) => setStore((current) => {
+    if (current.draft.mode === "EDIT") return current;
     const candidate = current.candidates.find((item) => item.id === id);
     if (!candidate) return current;
     return {
       ...current,
-      candidates: current.candidates.filter((item) => item.id !== id),
-      draft: { phase: "PLAN", plan: { ...candidate.originalPlan }, originalPlan: { ...candidate.originalPlan }, risk: { ...candidate.risk } },
+      draft: {
+        phase: "PLAN",
+        mode: "EDIT",
+        editingCandidateId: candidate.id,
+        plan: { ...candidate.originalPlan },
+        originalPlan: { ...candidate.originalPlan },
+        risk: { ...candidate.risk },
+      },
+      notice: `${candidate.originalPlan.symbol} working copy opened. Saved candidate remains armed and listening.`,
     };
   });
 
@@ -414,6 +523,8 @@ export default function ExecutionV23({ broker }) {
     setStore((current) => {
       let candidates = [...current.candidates];
       let liveTrades = [...current.liveTrades];
+      let draft = current.draft;
+      let notice = current.notice;
       for (const { candidate, opening } of matches) {
         if (!candidates.some((item) => item.id === candidate.id)) continue;
         const position = positions.find((item) => item.symbol === candidate.originalPlan.symbol);
@@ -428,8 +539,12 @@ export default function ExecutionV23({ broker }) {
         };
         candidates = candidates.filter((item) => item.id !== candidate.id);
         liveTrades.push(live);
+        if (draft.mode === "EDIT" && draft.editingCandidateId === candidate.id) {
+          draft = freshDraft();
+          notice = `${candidate.originalPlan.symbol} filled while its working copy was open. The last saved armed plan owns the trade; unsaved edits were discarded.`;
+        }
       }
-      return { ...current, candidates, liveTrades };
+      return { ...current, candidates, liveTrades, draft, notice };
     });
   }, [store.candidates, executions, positions]);
 
@@ -485,12 +600,27 @@ export default function ExecutionV23({ broker }) {
           {store.view === "TRADE" && <div className="mt-3"><Chain active={activeStep} /></div>}
         </header>
 
+        {store.notice && <section className="rounded border border-sky-400/25 bg-sky-950/15 px-4 py-3 text-sm text-sky-100">{store.notice}<button type="button" className="ml-3 text-xs text-zinc-500 underline" onClick={() => setStore((current) => ({ ...current, notice: "" }))}>dismiss</button></section>}
+
         {store.view === "HISTORY" ? <HistoryView history={store.history} onBack={() => setStore((current) => ({ ...current, view: "TRADE" }))} /> : <>
           {liveCount > 2 && <section className="rounded border border-red-400/30 bg-red-950/20 p-3 font-semibold text-red-200">More than two instruments are live. This exceeds the ExecutionOS two-live-instrument guardrail.</section>}
           <LiveBoard liveTrades={store.liveTrades} broker={broker} onState={updateState} onClassify={classifyExit} />
-          <CandidateBoard candidates={store.candidates} broker={broker} onEdit={editCandidate} onDiscard={discardCandidate} />
+          <CandidateBoard candidates={store.candidates} broker={broker} editingCandidateId={store.draft.mode === "EDIT" ? store.draft.editingCandidateId : null} onEdit={editCandidate} onDiscard={discardCandidate} />
           <section className="border-t border-white/10 pt-5">
-            {store.draft.phase === "PLAN" ? <PlanEditor draft={store.draft} setDraft={setDraft} /> : <RiskEditor draft={store.draft} broker={broker} candidates={store.candidates} onBack={() => setDraft((current) => ({ ...current, phase: "PLAN" }))} onArm={armCandidate} onDiscard={() => { if (window.confirm("Discard this unfilled candidate and start a new plan?")) setDraft(freshDraft()); }} />}
+            {store.draft.phase === "PLAN" ? (
+              <PlanEditor draft={store.draft} setDraft={setDraft} onCancelEdit={cancelEdit} />
+            ) : (
+              <RiskEditor
+                draft={store.draft}
+                broker={broker}
+                candidates={store.candidates}
+                onBack={() => setDraft((current) => ({ ...current, phase: "PLAN" }))}
+                onArm={armCandidate}
+                onSaveEdit={saveCandidateEdit}
+                onCancelEdit={cancelEdit}
+                onDiscard={() => { if (window.confirm("Discard this unfilled candidate and start a new plan?")) setDraft(freshDraft()); }}
+              />
+            )}
           </section>
         </>}
       </div>
