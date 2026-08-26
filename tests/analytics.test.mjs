@@ -8,6 +8,7 @@ import {
   firstProtectiveStopMove,
   initialRiskDollars,
   realizedR,
+  recoverHistoricalInitialRisk,
   summarizeDurations,
   summarizeHistoricalStopActions,
   summarizeRMultiples,
@@ -94,6 +95,64 @@ test("initial risk and realized R use structural stop and original size", () => 
   assert.equal(summary.tradesWithInitialRisk, 2);
   assert.equal(summary.winner.medianR, 0.5);
   assert.equal(summary.loser.medianR, -1);
+});
+
+test("historical R recovery uses episode VWAP and peak quantity", () => {
+  const trade = {
+    accountKey: "A1",
+    symbol: "TEST",
+    direction: "LONG",
+    entryAt: base,
+    exitAt: plus(300),
+    entryPrice: 100,
+    entryVWAP: 99,
+    initialQuantity: 10,
+    peakQuantity: 20,
+  };
+  const snapshots = [
+    {
+      accountKey: "A1",
+      symbol: "TEST",
+      positionEffect: "CLOSING",
+      instruction: "SELL",
+      orderType: "STOP",
+      stopPrice: 98,
+      status: "REPLACED",
+      enteredTime: plus(60),
+    },
+  ];
+  const result = recoverHistoricalInitialRisk(trade, snapshots);
+  assert.equal(result.initialStop, 98);
+  assert.equal(result.initialRisk, 20);
+  assert.equal(result.historicalRiskBasis.entryBasis, "EPISODE_OPENING_FILL_VWAP");
+  assert.equal(result.historicalRiskBasis.quantityBasis, "PEAK_EPISODE_QUANTITY");
+});
+
+test("historical R recovery excludes a first stop that is not loss-side of episode VWAP", () => {
+  const trade = {
+    accountKey: "A1",
+    symbol: "TEST",
+    direction: "LONG",
+    entryAt: base,
+    exitAt: plus(300),
+    entryPrice: 100,
+    entryVWAP: 98,
+    initialQuantity: 10,
+    peakQuantity: 20,
+  };
+  const snapshots = [
+    {
+      accountKey: "A1",
+      symbol: "TEST",
+      positionEffect: "CLOSING",
+      instruction: "SELL",
+      orderType: "STOP",
+      stopPrice: 99,
+      status: "REPLACED",
+      enteredTime: plus(60),
+    },
+  ];
+  assert.equal(recoverHistoricalInitialRisk(trade, snapshots), null);
 });
 
 test("legacy MFE/MAE uses favorable/adverse prices by direction", () => {
