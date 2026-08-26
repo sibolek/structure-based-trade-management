@@ -25,9 +25,14 @@ export function isBreakevenOrProfitStop(trade, event) {
   return direction === "SHORT" ? next <= entry : next >= entry;
 }
 
-export function firstProtectiveStopMove(trade, { mode = "BE_OR_PROFIT" } = {}) {
-  const events = Array.isArray(trade?.managementEvents) ? trade.managementEvents : [];
-  const predicate = mode === "TIGHTENING" ? isStopTightening : isBreakevenOrProfitStop;
+export function firstProtectiveStopMove(trade, { mode = "BE_OR_PROFIT", eventField = "managementEvents" } = {}) {
+  const events = Array.isArray(trade?.[eventField]) ? trade[eventField] : [];
+  const predicate = mode === "TIGHTENING"
+    ? isStopTightening
+    : mode === "HISTORICAL_ORDER_ACTION"
+      ? (event) => String(event?.classification || "").toUpperCase() === "BE_OR_PROFIT"
+      : isBreakevenOrProfitStop;
+
   return events
     .filter((event) => predicate(trade, event))
     .map((event) => ({ ...event, entryAgeSec: ageSeconds(trade, event) }))
@@ -43,6 +48,7 @@ export function summarizeStopMovements(trades = [], options = {}) {
 
   return {
     mode: options.mode || "BE_OR_PROFIT",
+    eventField: options.eventField || "managementEvents",
     winnersWithProtectiveMove: winnerMoves.length,
     losersWithProtectiveMove: loserMoves.length,
     medianWinnerMoveSec: median(winnerAges),
