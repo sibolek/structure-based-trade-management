@@ -30,6 +30,25 @@ const emptyPlan = {
   management: "",
 };
 
+const PLAN_FIELDS = [
+  ["Symbol", "symbol"],
+  ["Direction", "direction"],
+  ["Setup", "setup"],
+  ["Timeframe", "timeframe"],
+  ["Thesis", "thesis"],
+  ["Trigger", "trigger"],
+  ["Invalidation", "invalidation"],
+  ["Structural Stop", "structuralStop"],
+  ["Target", "target"],
+  ["Management Plan", "management"],
+];
+
+function missingPlanFields(plan) {
+  return PLAN_FIELDS
+    .filter(([, key]) => !String(plan?.[key] ?? "").trim())
+    .map(([label]) => label);
+}
+
 function freshTrade() {
   return {
     id: null,
@@ -157,13 +176,27 @@ function Chain({ phase }) {
 
 function PlanScreen({ trade, updateTrade }) {
   const plan = trade.plan;
-  const update = (key, value) => updateTrade((current) => ({ ...current, plan: { ...current.plan, [key]: value } }));
-  const canFreeze = Object.keys(emptyPlan).every((key) => String(plan[key] ?? "").trim());
+  const [validationMessage, setValidationMessage] = useState("");
+  const update = (key, value) => {
+    setValidationMessage("");
+    updateTrade((current) => ({ ...current, plan: { ...current.plan, [key]: value } }));
+  };
+  const missing = missingPlanFields(plan);
+  const canFreeze = missing.length === 0;
   const source = sourceFor(plan.symbol);
 
   const freeze = () => {
-    if (!canFreeze) return;
+    const currentMissing = missingPlanFields(plan);
+    if (currentMissing.length) {
+      setValidationMessage(`Complete before freezing: ${currentMissing.join(", ")}.`);
+      return;
+    }
+
+    setValidationMessage("");
     updateTrade((current) => {
+      const missingAtCommit = missingPlanFields(current.plan);
+      if (missingAtCommit.length) return current;
+
       const frozen = { ...current.plan, symbol: current.plan.symbol.toUpperCase() };
       let next = {
         ...current,
@@ -207,7 +240,14 @@ function PlanScreen({ trade, updateTrade }) {
         </div>
       </section>
 
-      <button type="button" disabled={!canFreeze} onClick={freeze} className="w-full rounded border border-sky-400/40 bg-sky-400/10 px-4 py-3 font-semibold text-sky-100 disabled:opacity-30">FREEZE PLAN → RISK</button>
+      <div className={`rounded border px-4 py-3 text-sm ${canFreeze ? "border-emerald-400/25 bg-emerald-950/15 text-emerald-100" : "border-amber-400/25 bg-amber-950/15 text-amber-100"}`}>
+        {canFreeze ? "READY TO FREEZE — all required plan fields are complete." : `Still required: ${missing.join(", ")}.`}
+        {validationMessage && <p className="mt-1 font-semibold">{validationMessage}</p>}
+      </div>
+
+      <button type="button" onClick={freeze} className={`w-full rounded border px-4 py-3 font-semibold transition ${canFreeze ? "border-sky-300/70 bg-sky-400/20 text-sky-50 hover:bg-sky-400/30" : "border-amber-400/30 bg-amber-400/10 text-amber-100 hover:bg-amber-400/15"}`}>
+        {canFreeze ? "READY — FREEZE PLAN → RISK" : "CHECK PLAN — FREEZE WHEN COMPLETE"}
+      </button>
     </div>
   );
 }
