@@ -5,3 +5,5 @@ dist/
 .env.local
 .schwab-tokens.json
 npm-debug.log*
+research/30-day-management-study/raw-schwab-history.json
+research/30-day-management-study/normalized-trades.json
