@@ -27,23 +27,31 @@ Historical documents should not be rewritten merely because later evidence chang
 
 | Document | Repository location | Branch / source | Role | Authority |
 |---|---|---|---|---|
-| `USER-GUIDE.md` | Repository root | `v2-execution-system` | Living operator guide: setup, session startup, Schwab authorization, risk sizing, candidate creation, ARMED/LIVE behavior, lifecycle use, persistence, troubleshooting, security, CLI commands | **Current authoritative operator guide** |
-| `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` | `docs/` | `v2-execution-system` | Architecture, empirical rationale, validated V2.3 baseline, analytics-preservation closeout, Trade Contract model, Management Governor target architecture, safety model, V3 sequencing | **Current authoritative project specification** |
-| `research/30-day-management-study/methodology.md` | `research/30-day-management-study/` | `v2-execution-system` | Technical provenance for duration, stop-management, historical R, MFE/counterfactual work, unresolved 19-trade sample boundary, anti-curve-fitting policy | **Current authoritative analytics provenance** |
-| `DOCUMENTATION-STATUS.md` | Repository root | `v2-execution-system` | Distinguishes current authoritative records from historical/superseded records | **Current documentation-governance record** |
-| `README.md` | Repository root | `v2-execution-system` | Operational overview and project entry point | **Current overview; defer to User Guide / v1.2 spec for detail** |
-| `research/30-day-management-study/README.md` | Research folder | `v2-execution-system` | Research-folder orientation and reproduction entry point | **Supporting research documentation** |
-| `research/30-day-management-study/expected-results.json` | Research folder | `v2-execution-system` | Preserved numerical fingerprint for historical-study validation | **Historical benchmark artifact; not source data** |
+| `USER-GUIDE.md` | Repository root | `main` | Living operator guide: setup, session startup, Schwab authorization, risk sizing, candidate creation, ARMED/LIVE behavior, lifecycle use, persistence, troubleshooting, security, CLI commands | **Current authoritative operator guide** |
+| `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` | `docs/` | `main` | Architecture, empirical rationale, validated V2.3 baseline, analytics-preservation closeout, Trade Contract model, Management Governor target architecture, safety model, V3 sequencing | **Current authoritative project specification** |
+| `research/30-day-management-study/methodology.md` | `research/30-day-management-study/` | `main` | Technical provenance for duration, stop-management, historical R, MFE/counterfactual work, unresolved 19-trade sample boundary, anti-curve-fitting policy | **Current authoritative analytics provenance** |
+| `DOCUMENTATION-STATUS.md` | Repository root | `main` | Distinguishes current authoritative records from historical/superseded records | **Current documentation-governance record** |
+| `README.md` | Repository root | `main` | Operational overview and project entry point | **Current overview; defer to User Guide / v1.2 spec for detail** |
+| `research/30-day-management-study/README.md` | Research folder | `main` | Research-folder orientation and reproduction entry point | **Supporting research documentation** |
+| `research/30-day-management-study/expected-results.json` | Research folder | `main` | Preserved numerical fingerprint for historical-study validation | **Historical benchmark artifact; not source data** |
 
 ### Current implementation baseline
 
-The active V2.3 product branch is `v2-execution-system`. On 2026-08-27 it was advanced to commit:
+The authoritative V2.3 product baseline is now `main`.
 
-`74a7bde8eb76cbcbb2f35f6bbf0a0c8da52f52e1` — **Handle broker reversals without false flat state**
+V2.3 completed functional release validation on the development lineage at:
 
-That commit followed live and deterministic acceptance work for ENTRY, ADD, PARTIAL, FLAT, SHORT, concurrent candidate ownership, fragmented fills, and reversal semantics.
+`4c08dd0723a714c0e1e6a34a9d9d2b72dcdb56cc`
 
-The Project Specification v1.2 remains the current architecture record, but its embedded V2.3 SHA/status snapshot predates this final reversal-hardening commit. Treat the specification's SHA as a dated snapshot, not as the current branch head.
+The subsequent PR #5 change was documentation-only, producing the final V2 development head:
+
+`1f71bce33ab40d21698d6972ae3e0c399fda3ac5`
+
+PR #1 then merged that exact V2.3 tree into `main` on 2026-08-27 at:
+
+`e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`
+
+The merge commit's tree matches the final V2.3 tree. The Project Specification v1.2 remains the current architecture record, but its embedded SHA/status snapshot is historical; treat that SHA as a dated snapshot rather than the current repository head.
 
 ---
 
@@ -89,14 +97,15 @@ Do not delete these simply because they are old. Their value is historical trace
 
 ## 6. Pull requests as project records
 
-### PR #1 — V2 execution-system development
+### PR #1 — V2.3 execution-system release merge
 
 - Branch: `v2-execution-system`
 - Base: `main`
-- Status as of 2026-08-27: **open, draft, unmerged**
-- Post-PR-#2 merged baseline: `780b2a5cd0f8a91ebf08c3a24be9b1524b4550af`
-- Its description still reflects older V2.1 framing and is therefore **not the current documentation authority**.
-- Do not merge, retarget, or rewrite release history without explicit approval and deliberate main reconciliation.
+- Status as of 2026-08-27: **merged**
+- Final V2 head: `1f71bce33ab40d21698d6972ae3e0c399fda3ac5`
+- Merge commit on `main`: `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`
+- The PR description was updated before merge to reflect the actual V2.3 broker-aware system and completed release validation.
+- Its discussion remains useful release provenance; normative operating guidance belongs in the User Guide and Project Specification.
 
 ### PR #2 — analytics preservation
 
@@ -186,7 +195,7 @@ Update this index when any of the following occurs:
 - a historical document is superseded;
 - an important work-session / validation report is produced;
 - documentation moves between Library and repository;
-- PR #1 or PR #2 is merged, closed, or materially repurposed;
+- a major pull request is merged, closed, or materially repurposed;
 - V2.3 is reconciled / tagged;
 - a V3 branch is explicitly authorized and created;
 - a new research study replaces or extends the preserved historical benchmark;
@@ -212,7 +221,7 @@ Update this index when any of the following occurs:
 | Which documents are current versus historical? | `DOCUMENTATION-STATUS.md` + this index |
 | What happened in the Aug. 27 final V2.3 edge-hardening session? | `ExecutionOS_Work_Session_Report_2026-08-27` |
 | What did we know before the first live Schwab test? | Aug. 23 Architecture / Validation / Monday Plan |
-| What code state is the current V2.3 product branch on? | `v2-execution-system` Git history / current branch head |
+| What code state is the current V2.3 product baseline on? | `main` Git history / current branch head |
 | What remains unresolved in the 19-trade market study? | Research methodology + Project Specification v1.2 |
 
 ---
@@ -221,10 +230,14 @@ Update this index when any of the following occurs:
 
 As of **2026-08-27**:
 
-- V2.3 product hardening and analytics preservation are unified on `v2-execution-system`.
-- PR #2 was merged into `v2-execution-system` at `780b2a5`.
-- The useful pre-V2 `main` execution-discipline Markdown has been deliberately preserved in this reconciliation without importing the obsolete pre-V2 UI implementation.
-- PR #1 remains open, draft, and unmerged pending final V2.3 reconciliation and release validation.
+- V2.3 is release-validated and merged into `main`.
+- PR #2 merged analytics preservation into the V2 lineage at `780b2a5`.
+- PR #3 preserved useful pre-V2 execution-discipline Markdown without importing obsolete pre-V2 UI implementation.
+- PR #4 reconciled `main` history with no V2.3 tree-content changes.
+- PR #5 completed the V2.3 release-documentation closeout.
+- PR #1 merged the final V2.3 tree into `main` at `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`.
+- A V2.3 release tag has not yet been created and requires explicit approval.
+- V3 has not started.
 - The User Guide, Project Specification v1.2, research methodology, Documentation Status, dated validation report, and Aug. 27 work-session report together provide sufficient formal documentation to continue the project without relying on reconstructed conversational memory.
 - Exact same-poll cross-symbol execution remains deferred/non-blocking for the current manual/read-only V2.3 scope and should be revisited before broker-write or automated simultaneous-entry capability.
 - A true live cross-zero Schwab reversal was not obtained because the broker platform rejected the attempted reverse action; deterministic engine behavior and the actual UI transition path were validated without falsely claiming a live broker reversal.

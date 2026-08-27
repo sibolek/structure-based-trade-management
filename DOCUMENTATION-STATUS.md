@@ -21,7 +21,7 @@ Key v1.2 additions:
 - high-confidence historical R reconstruction with the documented one-trade NVDA threshold discrepancy;
 - Schwab historical 1-minute price-history validation;
 - explicit conclusion that the exact original 19-trade MFE/counterfactual sample membership is unresolved and should not be curve-fit;
-- updated repository sequencing: preservation -> V2.3 closeout -> main reconciliation -> PR #1 update -> merge/tag -> V3.
+- updated repository sequencing: preservation -> V2.3 validation -> reconciliation -> documentation closeout -> merge to `main` -> tag approval -> V3.
 
 ### `research/30-day-management-study/methodology.md`
 
@@ -49,9 +49,11 @@ Preserved historical specifications. v1.1 remains valuable as the post-V2.3-vali
 
 ## Pull requests
 
-- **PR #1** - V2 execution-system development. Remains open for final V2.3 closeout/reconciliation; its description should be updated during that closeout phase before release.
+- **PR #1** - V2.3 execution system. Merged into `main` on 2026-08-27 at merge commit `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`.
 - **PR #2** - analytics preservation. Merged into `v2-execution-system` on 2026-08-27 at merge commit `780b2a5`; its conversation remains a provenance record for the recovered historical methodology and unresolved 19-trade boundary.
-- **Pre-V2 `main` reconciliation** - useful execution-discipline Markdown from commit `4dd27d1` is preserved as historical source material; its obsolete pre-V2 React/UI wiring is intentionally not imported into V2.3.
+- **PR #3** - preserved useful pre-V2 execution-discipline Markdown without importing obsolete pre-V2 React/UI wiring.
+- **PR #4** - reconciled `main` history into the V2.3 lineage with no V2.3 tree-content changes.
+- **PR #5** - completed the V2.3 README/User Guide release-state closeout before the final PR #1 merge.
 
 ## Documentation rule
 

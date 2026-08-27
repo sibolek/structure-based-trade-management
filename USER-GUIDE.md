@@ -4,8 +4,8 @@
 **Date:** 27 August 2026  
 **Status:** Living operator guide for the current V2.3 baseline  
 **Repository:** `sibolek/structure-based-trade-management`  
-**Current development baseline:** `v2-execution-system`  
-**Current documentation baseline:** `v2-execution-system`
+**Current product baseline:** `main`
+**Current documentation baseline:** `main`
 
 > **Operating principle:** Structure decides. P/L emotion does not.
 >
@@ -122,7 +122,7 @@ This matters operationally: **thinkorswim remains the execution venue for equiti
 
 ## 4.1 Current baseline
 
-The active product and documentation baseline is **V2.3** on branch `v2-execution-system`. The analytics-preservation work was merged into this branch through PR #2 and is now part of the V2.3 baseline.
+The active product and documentation baseline is **V2.3** on `main`. V2.3 was developed and release-validated on `v2-execution-system`, then merged into `main` through PR #1 on 27 August 2026. The `main` merge commit is `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`.
 
 V2.3 supports:
 
@@ -156,7 +156,7 @@ Validated release gates include:
 
 A true live cross-zero REVERSAL could not be forced through thinkorswim because the broker rejected the attempted cross-zero order. The exact same-poll cross-symbol execution case also remains deferred as a non-blocking edge case before any future broker-write or automated simultaneous-entry capability.
 
-V2.3 is therefore release-validated, but PR #1 remains unmerged and no V2.3 release tag should be created without explicit approval.
+V2.3 is release-validated and merged into `main`. No V2.3 release tag should be created without explicit approval.
 
 ## 4.3 Analytics preservation status
 
@@ -1191,31 +1191,32 @@ The V2.3 release-validation gate is complete. The following are documented defer
 - true live cross-zero REVERSAL could not be broker-validated because thinkorswim rejected the attempted cross-zero order;
 - REVERSAL lifecycle behavior has nevertheless passed deterministic state tests and synthetic end-to-end React acceptance.
 
-Do not expand these deferred cases into unrelated V3 architecture work during V2.3 release closeout.
+These deferred cases remain documented V2.3 limitations. Do not expand them into unrelated V3 architecture work before the V2.3 tag and V3 start are explicitly authorized.
 
 ---
 
 # 30. Repository and branch discipline
 
-ExecutionOS is currently in V2.3 release closeout.
+ExecutionOS V2.3 is merged into `main` and awaiting an explicitly approved release tag.
 
 The key rules are:
 
-- do not merge PR #1 without explicit approval;
-- do not casually rebase or overwrite `main`;
+- treat `main` as the authoritative V2.3 baseline;
+- do not casually rebase, overwrite, or rewrite validated `main` history;
 - preserve the validated V2.3 broker-aware architecture and release-tested file tree;
 - keep historical analytics and preserved pre-V2 execution-discipline material intact;
-- update PR #1 to describe actual V2.3 behavior before final merge consideration;
-- create the V3 branch only after V2.3 is cleanly merged and tagged.
+- do not create the V2.3 release tag without explicit approval;
+- do not create the V3 branch or begin Management Governor implementation until the tagged V2.3 baseline is confirmed.
 
 Pull-request status:
 
-- **PR #1** - V2 execution system, `v2-execution-system` -> `main`; still open and unmerged;
+- **PR #1** - V2 execution system, `v2-execution-system` -> `main`; merged on 27 August 2026 as `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`;
 - **PR #2** - analytics preservation -> `v2-execution-system`; merged;
 - **PR #3** - pre-V2 execution-discipline documentation reconciliation; merged;
-- **PR #4** - history-only `main` reconciliation with no V2.3 tree changes; merged.
+- **PR #4** - history-only `main` reconciliation with no V2.3 tree changes; merged;
+- **PR #5** - V2.3 release-documentation closeout; merged.
 
-The user guide should be updated again when PR #1 is merged and the normal working branch changes.
+The normal V2.3 repository baseline is now `main`.
 
 ---
 
@@ -1837,10 +1838,10 @@ At the time of this guide's publication, the intended project sequence is:
 2. **Pre-V2 documentation preservation - complete; PR #3 merged.**
 3. **`main` history reconciliation - complete; PR #4 merged with no V2.3 tree changes.**
 4. **V2.3 final acceptance and full release gate - complete.**
-5. Rewrite PR #1 to describe actual V2.3 behavior and validated release status.
-6. Merge PR #1 only after explicit approval.
-7. Tag V2.3 only after the intended merge state is confirmed and explicitly approved.
-8. Begin V3 Management Governor from the clean merged baseline.
+5. **V2.3 release-documentation closeout - complete; PR #5 merged.**
+6. **V2.3 merge into `main` - complete; PR #1 merged.**
+7. Tag V2.3 only after explicit approval.
+8. Begin V3 Management Governor only from the confirmed tagged V2.3 baseline.
 9. Add the broker-agnostic event/adapter boundary, then a read-only NinjaTrader observer.
 10. Implement Governor Observe/Govern mode before any broker-write enforcement.
 
