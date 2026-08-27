@@ -27,13 +27,13 @@ Historical documents should not be rewritten merely because later evidence chang
 
 | Document | Repository location | Branch / source | Role | Authority |
 |---|---|---|---|---|
-| `USER-GUIDE.md` | Repository root | `analytics-preservation-v23` | Living operator guide: setup, session startup, Schwab authorization, risk sizing, candidate creation, ARMED/LIVE behavior, lifecycle use, persistence, troubleshooting, security, CLI commands | **Current authoritative operator guide** |
-| `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` | `docs/` | `analytics-preservation-v23` | Architecture, empirical rationale, validated V2.3 baseline, analytics-preservation closeout, Trade Contract model, Management Governor target architecture, safety model, V3 sequencing | **Current authoritative project specification** |
-| `research/30-day-management-study/methodology.md` | `research/30-day-management-study/` | `analytics-preservation-v23` | Technical provenance for duration, stop-management, historical R, MFE/counterfactual work, unresolved 19-trade sample boundary, anti-curve-fitting policy | **Current authoritative analytics provenance** |
-| `DOCUMENTATION-STATUS.md` | Repository root | `analytics-preservation-v23` | Distinguishes current authoritative records from historical/superseded records | **Current documentation-governance record** |
-| `README.md` | Repository root | `analytics-preservation-v23` | Operational overview and project entry point | **Current overview; defer to User Guide / v1.2 spec for detail** |
-| `research/30-day-management-study/README.md` | Research folder | `analytics-preservation-v23` | Research-folder orientation and reproduction entry point | **Supporting research documentation** |
-| `research/30-day-management-study/expected-results.json` | Research folder | `analytics-preservation-v23` | Preserved numerical fingerprint for historical-study validation | **Historical benchmark artifact; not source data** |
+| `USER-GUIDE.md` | Repository root | `v2-execution-system` | Living operator guide: setup, session startup, Schwab authorization, risk sizing, candidate creation, ARMED/LIVE behavior, lifecycle use, persistence, troubleshooting, security, CLI commands | **Current authoritative operator guide** |
+| `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` | `docs/` | `v2-execution-system` | Architecture, empirical rationale, validated V2.3 baseline, analytics-preservation closeout, Trade Contract model, Management Governor target architecture, safety model, V3 sequencing | **Current authoritative project specification** |
+| `research/30-day-management-study/methodology.md` | `research/30-day-management-study/` | `v2-execution-system` | Technical provenance for duration, stop-management, historical R, MFE/counterfactual work, unresolved 19-trade sample boundary, anti-curve-fitting policy | **Current authoritative analytics provenance** |
+| `DOCUMENTATION-STATUS.md` | Repository root | `v2-execution-system` | Distinguishes current authoritative records from historical/superseded records | **Current documentation-governance record** |
+| `README.md` | Repository root | `v2-execution-system` | Operational overview and project entry point | **Current overview; defer to User Guide / v1.2 spec for detail** |
+| `research/30-day-management-study/README.md` | Research folder | `v2-execution-system` | Research-folder orientation and reproduction entry point | **Supporting research documentation** |
+| `research/30-day-management-study/expected-results.json` | Research folder | `v2-execution-system` | Preserved numerical fingerprint for historical-study validation | **Historical benchmark artifact; not source data** |
 
 ### Current implementation baseline
 
@@ -94,7 +94,7 @@ Do not delete these simply because they are old. Their value is historical trace
 - Branch: `v2-execution-system`
 - Base: `main`
 - Status as of 2026-08-27: **open, draft, unmerged**
-- Current head after reversal hardening: `74a7bde8eb76cbcbb2f35f6bbf0a0c8da52f52e1`
+- Post-PR-#2 merged baseline: `780b2a5cd0f8a91ebf08c3a24be9b1524b4550af`
 - Its description still reflects older V2.1 framing and is therefore **not the current documentation authority**.
 - Do not merge, retarget, or rewrite release history without explicit approval and deliberate main reconciliation.
 
@@ -102,9 +102,10 @@ Do not delete these simply because they are old. Their value is historical trace
 
 - Branch: `analytics-preservation-v23`
 - Base: `v2-execution-system`
-- Status as of 2026-08-27: **open, draft, unmerged**
+- Status as of 2026-08-27: **merged**
+- Merge commit: `780b2a5cd0f8a91ebf08c3a24be9b1524b4550af`
 - Preserves analytics modules, research methodology, historical reconstruction evidence, documentation updates, and the unresolved 19-trade provenance boundary.
-- Its conversation and diff are valuable research provenance, but normative system guidance belongs in the User Guide and Project Specification.
+- Its conversation and diff remain valuable research provenance, while normative system guidance belongs in the User Guide and Project Specification.
 
 ---
 
@@ -220,10 +221,10 @@ Update this index when any of the following occurs:
 
 As of **2026-08-27**:
 
-- V2.3 product hardening is preserved on `v2-execution-system`.
-- The reversal UI fix is committed and pushed at `74a7bde`.
-- The analytics-preservation work remains on `analytics-preservation-v23`.
-- PR #1 and PR #2 remain open, draft, and unmerged.
+- V2.3 product hardening and analytics preservation are unified on `v2-execution-system`.
+- PR #2 was merged into `v2-execution-system` at `780b2a5`.
+- The useful pre-V2 `main` execution-discipline Markdown has been deliberately preserved in this reconciliation without importing the obsolete pre-V2 UI implementation.
+- PR #1 remains open, draft, and unmerged pending final V2.3 reconciliation and release validation.
 - The User Guide, Project Specification v1.2, research methodology, Documentation Status, dated validation report, and Aug. 27 work-session report together provide sufficient formal documentation to continue the project without relying on reconstructed conversational memory.
 - Exact same-poll cross-symbol execution remains deferred/non-blocking for the current manual/read-only V2.3 scope and should be revisited before broker-write or automated simultaneous-entry capability.
 - A true live cross-zero Schwab reversal was not obtained because the broker platform rejected the attempted reverse action; deterministic engine behavior and the actual UI transition path were validated without falsely claiming a live broker reversal.
