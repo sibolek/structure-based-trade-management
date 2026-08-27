@@ -14,6 +14,7 @@
     "schwab:history-export": "node schwab-bridge/history.mjs --days=30 --quiet --export=research/30-day-management-study/raw-schwab-history.json",
     "schwab:price-history-test": "node schwab-bridge/price-history-test.mjs",
     "schwab:replay": "node schwab-bridge/replay.mjs",
+    "schwab:eod": "node schwab-bridge/eod-report.mjs",
     "schwab:slippage": "node schwab-bridge/slippage.mjs",
     "schwab:state-test": "node schwab-bridge/state-test.mjs",
     "schwab:token-test": "node schwab-bridge/token-test.mjs",

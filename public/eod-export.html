@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ExecutionOS EOD History Export</title>
+  <style>
+    :root { color-scheme: dark; --bg:#07100d; --panel:#0c1713; --line:#20352c; --text:#e7f3ee; --muted:#7d948b; --green:#4bea72; --red:#ff6b73; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at top,#10251b 0,#07100d 45%); color:var(--text); font:14px/1.5 Inter,system-ui,sans-serif; }
+    main { width:min(760px,calc(100% - 32px)); border:1px solid var(--line); background:rgba(10,22,18,.96); border-radius:14px; padding:28px; box-shadow:0 24px 70px #0008; }
+    .eyebrow { font:700 10px ui-monospace,monospace; letter-spacing:.14em; color:var(--green); text-transform:uppercase; }
+    h1 { margin:6px 0 8px; font-size:28px; }
+    p { color:var(--muted); }
+    .status { margin:20px 0; border:1px solid var(--line); background:#0f1d18; padding:14px; border-radius:9px; }
+    .status strong { color:var(--text); }
+    button { width:100%; border:1px solid #3a8553; background:#12351e; color:#dffff0; padding:14px 16px; border-radius:9px; font-weight:800; cursor:pointer; }
+    button:disabled { cursor:not-allowed; opacity:.45; }
+    code { color:#62d7ff; }
+    .error { color:var(--red); }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">ExecutionOS · Local Browser History</div>
+    <h1>Export EOD Plan / Risk Data</h1>
+    <p>This page reads only the <code>execution-v23-store</code> data already stored by ExecutionOS in this browser origin. It does not contact Schwab and does not place, change, or cancel orders.</p>
+    <div class="status" id="status">Checking local ExecutionOS history…</div>
+    <button id="export" disabled>DOWNLOAD EXECUTIONOS EOD HISTORY</button>
+    <p>After downloading, run <code>npm run schwab:eod</code>. The reporter automatically looks for the newest <code>executionos-eod-history-*.json</code> file in your Downloads folder, or you can pass an explicit file with <code>--executionos=/path/to/file.json</code>.</p>
+  </main>
+<script>
+(() => {
+  const STORE_KEY = "execution-v23-store";
+  const status = document.getElementById("status");
+  const button = document.getElementById("export");
+  let history = [];
+
+  function dateKey() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) throw new Error("No ExecutionOS V2.3 local store was found for this browser origin.");
+    const store = JSON.parse(raw);
+    history = Array.isArray(store.history) ? store.history : [];
+    status.innerHTML = `<strong>${history.length} completed trade${history.length === 1 ? "" : "s"}</strong> found in ExecutionOS browser history.`;
+    button.disabled = false;
+  } catch (error) {
+    status.innerHTML = `<span class="error">${error.message}</span><br>Open this helper from the same <strong>localhost:5173</strong> origin you use for ExecutionOS.`;
+  }
+
+  button.addEventListener("click", () => {
+    const payload = {
+      schemaVersion: 1,
+      source: "EXECUTIONOS_V23_BROWSER_HISTORY",
+      exportedAt: new Date().toISOString(),
+      history,
+    };
+    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `executionos-eod-history-${dateKey()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  });
+})();
+</script>
+</body>
+</html>
