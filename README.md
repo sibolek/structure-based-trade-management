@@ -24,7 +24,7 @@ The governing execution principle is:
 
 ## Current product baseline: V2.3
 
-The V2.3 branch (`v2-execution-system`) is a broker-aware multi-candidate workflow built around `ExecutionV23`.
+The authoritative V2.3 baseline is now on `main`. The completed V2.3 development lineage (`v2-execution-system`) is a broker-aware multi-candidate workflow built around `ExecutionV23`.
 
 Current capabilities include:
 
@@ -39,7 +39,7 @@ Current capabilities include:
 - ENTRY / ADD / PARTIAL / FLAT / REVERSAL broker-state semantics;
 - execution history and review.
 
-V2.3 has completed final acceptance, branch reconciliation, and its release-validation gate on `v2-execution-system`. PR #1 remains unmerged pending explicit approval and final release closeout. Do not casually rebase or overwrite `main`; its useful pre-V2 documentation and history have already been deliberately reconciled without changing the validated V2.3 tree.
+V2.3 completed final acceptance, branch reconciliation, and its release-validation gate on `v2-execution-system`, then merged into `main` through PR #1 on 27 August 2026. The V2.3 merge commit on `main` is `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`. Do not casually rewrite `main`; it is now the authoritative V2.3 baseline. A V2.3 release tag has not yet been created.
 
 ## Broker architecture
 
@@ -147,9 +147,10 @@ The current sequence is intentionally constrained:
 1. **Analytics preservation - complete; PR #2 merged.**
 2. **Pre-V2 documentation and `main` history reconciliation - complete; PRs #3 and #4 merged.**
 3. **V2.3 final acceptance and release-validation gate - complete.**
-4. **Update PR #1 to actual V2.3 behavior and validated release status.**
-5. **Merge/tag V2.3 only after explicit approval.**
-6. **Begin V3 Management Governor from the clean merged baseline.**
+4. **V2.3 documentation closeout - complete; PR #5 merged.**
+5. **V2.3 merged into `main` - complete; PR #1 merged.**
+6. **Create the V2.3 release tag only after explicit approval.**
+7. **Begin V3 Management Governor only after the tagged V2.3 baseline is confirmed.**
 
 ## V3 direction
 
