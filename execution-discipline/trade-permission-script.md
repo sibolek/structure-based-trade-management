@@ -1,5 +1,7 @@
 # Trade Permission Script
 
+> **Preservation note — 2026-08-27:** This document is preserved from pre-V2 `main` commit `4dd27d1` as historical execution-discipline source material. MES-specific checklist items reflect the regime in effect when it was written; durable principles may remain useful, but current ExecutionOS operation is governed by `USER-GUIDE.md`.
+
 > I am taking **[setup]** at **[level]** because **[trigger]**.  
 > My stop is **[structural invalidation]**.  
 > My first target is **[specific level]**.  

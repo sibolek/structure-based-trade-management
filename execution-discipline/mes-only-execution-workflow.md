@@ -1,5 +1,7 @@
 # MES-Only Execution Workflow
 
+> **Preservation note — 2026-08-27:** This document is preserved from pre-V2 `main` commit `4dd27d1` as a historical 20-session execution-discipline block. The original `Status: ACTIVE` applied to that temporary futures discipline phase; it is not a universal current ExecutionOS operating rule. For current operation, defer to `USER-GUIDE.md`.
+
 Status: ACTIVE
 Scope: Live futures execution
 Duration: 20 trading sessions

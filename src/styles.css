@@ -20,6 +20,10 @@ button {
   font: inherit;
 }
 
+body[data-executionos-armed="true"] main > div > header + .space-y-4 {
+  display: none;
+}
+
 @layer components {
   .panel {
     @apply rounded border border-white/10 bg-ink-850/95 p-4 shadow-terminal;

@@ -1,5 +1,7 @@
 # Daily Execution Scorecard
 
+> **Preservation note — 2026-08-27:** This document is preserved from pre-V2 `main` commit `4dd27d1` as historical execution-discipline source material. Its MES-specific limits describe the discipline regime in effect when it was written; they are not universal current ExecutionOS product rules. For current operation, defer to `USER-GUIDE.md`.
+
 > A green day can be a C execution day. A red day can be an A execution day.
 
 Purpose:
