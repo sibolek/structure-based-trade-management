@@ -22,30 +22,79 @@ The governing execution principle is:
 
 > Entry freezes the original plan. New structure can modify it. Emotion cannot.
 
-## Current product baseline: V2.3
+## Current product baseline
 
-The authoritative V2.3 baseline is now on `main`. The completed V2.3 development lineage (`v2-execution-system`) is a broker-aware multi-candidate workflow built around `ExecutionV23`.
+The validated V2.3 execution release is frozen under the annotated tag:
 
-Current capabilities include:
+```text
+v2.3.0
+```
 
-- multiple armed trade candidates listening for broker fills;
+Tag target:
+
+```text
+baabb75f36050599f20e6c89e8db2f1f7d7769a1
+```
+
+Current `main` contains that frozen execution baseline plus the subsequently merged **read-only End-of-Day reporting workflow** from PR #7. PR #7 merged on 27 August 2026 at:
+
+```text
+bedd70979a3b18844386bcf8f927fd8a1f62307f
+```
+
+The EOD addition does not add broker-write authority and does not change the validated production trade-state engine.
+
+V3 has **not** started and requires separate explicit authorization.
+
+## V2.3 execution capabilities
+
+- multiple armed trade candidates;
 - one armed candidate per symbol;
 - broker-fill binding by symbol, direction, opening effect, and arm time;
 - automatic ARMED -> LIVE transition when a matching Schwab fill appears;
-- edit/cancel/save behavior that preserves the last saved armed contract while edits are in progress;
-- deterministic fill-during-edit ownership;
-- multiple simultaneous live trades with warning above the intended concurrency limit;
-- actual broker average price, quantity, peak quantity, risk information, and trade-state reconstruction;
-- ENTRY / ADD / PARTIAL / FLAT / REVERSAL broker-state semantics;
-- execution history and review.
+- deterministic edit/fill ownership;
+- multiple simultaneous live trades;
+- actual broker average price, quantity, peak quantity, and trade-state reconstruction;
+- ENTRY / ADD / PARTIAL / FLAT / REVERSAL semantics;
+- execution History and review;
+- browser-local persistence.
 
-V2.3 completed final acceptance, branch reconciliation, and its release-validation gate on `v2-execution-system`, then merged into `main` through PR #1 on 27 August 2026. The V2.3 merge commit on `main` is `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`. Do not casually rewrite `main`; it is now the authoritative V2.3 baseline. A V2.3 release tag has not yet been created.
+## End-of-Day reporting
+
+ExecutionOS now includes a read-only EOD reporter:
+
+```bash
+npm run schwab:eod -- --date=YYYY-MM-DD
+```
+
+The report reconstructs broker-authoritative Schwab trade cycles and can enrich them with ExecutionOS Trade Contract data.
+
+For a **fully enriched** report, completed trades must first be present in ExecutionOS History and the browser History must be exported while the Vite app is still running:
+
+```text
+http://localhost:5173/eod-export.html
+```
+
+Choose **DOWNLOAD EXECUTIONOS EOD HISTORY**, then run the EOD command. Without that export, broker trade/P&L reconstruction still works, but setup, planned risk, R multiple, ownership, and process fields cannot be fully populated.
+
+See:
+
+- `USER-GUIDE.md` — complete operating procedure, including the required enriched-EOD sequence;
+- `docs/ExecutionOS_EOD_Report.md` — dedicated EOD reporting reference.
+
+Generated EOD HTML reports are written by default under:
+
+```text
+reports/eod/YYYY-MM-DD.html
+```
+
+and remain Git-ignored/local.
 
 ## Broker architecture
 
 ### Schwab / thinkorswim equities
 
-The local Schwab bridge is read-only and currently provides:
+The local Schwab bridge is read-only and provides:
 
 - OAuth authentication and token refresh;
 - account discovery, balances, positions, orders, and transactions;
@@ -54,18 +103,21 @@ The local Schwab bridge is read-only and currently provides:
 - fragmented-fill handling and execution VWAP;
 - trade-state reconstruction;
 - local read-only state API (`/health`, `/api/state`);
-- historical 1-minute OHLCV via Schwab Market Data price history for research/telemetry reconstruction.
+- historical 1-minute OHLCV via Schwab Market Data price history;
+- read-only EOD trade-cycle reconstruction and reporting.
 
 Credentials and tokens remain local and Git-ignored. Secrets must never be printed, committed, or exposed to browser code.
 
 ### NinjaTrader futures
 
-MES/MNQ futures are executed through NinjaTrader, not Schwab. The planned V3 sequence is:
+MES/MNQ futures are executed through NinjaTrader, not Schwab. Automatic NinjaTrader binding is not connected yet.
 
-1. close and tag V2.3;
+The planned future sequence is:
+
+1. begin V3 only after explicit authorization;
 2. define a broker-agnostic `BrokerAdapter` / `BrokerEvent` boundary;
 3. add a minimal read-only NinjaTrader observer;
-4. validate equivalent lifecycle semantics across Schwab and NinjaTrader before the full Management Governor rollout.
+4. validate equivalent lifecycle semantics across Schwab and NinjaTrader before Management Governor enforcement.
 
 ## Risk model
 
@@ -79,9 +131,7 @@ The stop is defined by technical invalidation. If that stop is too expensive, re
 
 ## Analytics preservation
 
-The empirical research that motivated the V3 Management Governor was preserved on `analytics-preservation-v23` and merged into `v2-execution-system` through PR #2.
-
-Recovered/preserved status:
+The empirical research that motivated the future Management Governor is preserved in the repository.
 
 | Analysis | Status |
 | --- | --- |
@@ -92,9 +142,7 @@ Recovered/preserved status:
 | 19-trade capture efficiency | Benchmark + formula preserved; exact sample membership unresolved |
 | 19-trade fixed-duration counterfactuals | Benchmark + formula preserved; exact sample membership unresolved |
 
-See `research/30-day-management-study/methodology.md` for the evidence, reconstruction rules, and explicit anti-curve-fitting boundary.
-
-The project does **not** search arbitrary trade combinations or custom timing conventions merely to force historical benchmark matches.
+See `research/30-day-management-study/methodology.md` for evidence, reconstruction rules, and the anti-curve-fitting boundary.
 
 ## Common commands
 
@@ -110,7 +158,12 @@ npm run schwab:monitor
 npm run schwab:history
 npm run schwab:price-history-test
 
+# End-of-Day reporting
+npm run schwab:eod
+npm run schwab:eod -- --date=2026-08-27
+
 # Tests / analytics
+npm run schwab:state-test
 npm run analytics:test
 npm run analytics:report
 npm run analytics:duration
@@ -130,31 +183,33 @@ npm run research:validate-fast-winners-schwab
 npm run research:diagnose-minute-alignment
 ```
 
-Local research exports and Schwab minute-history caches are intentionally Git-ignored.
+Local research exports, Schwab minute-history caches, EOD exports, and generated EOD reports are intentionally kept local/Git-ignored.
 
 ## Documentation
 
-- `USER-GUIDE.md` - authoritative living operator guide: setup, daily workflow, broker binding, live-state use, troubleshooting, security, and full CLI appendix.
-- `research/30-day-management-study/methodology.md` - authoritative preservation methodology and recovery status.
-- `V2-MILESTONE-1.md` - historical V2 Milestone 1 record; preserved for design history, not current system status.
-- `DOCUMENTATION-STATUS.md` - map of authoritative versus historical project documents.
-- **ExecutionOS Management Governor Project Specification v1.2** - current project/architecture decision record after analytics preservation.
+- `USER-GUIDE.md` — authoritative living operator guide, including the complete enriched-EOD procedure.
+- `docs/ExecutionOS_EOD_Report.md` — dedicated EOD report behavior, inputs, interpretation, and validation.
+- `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` — dated architecture/project decision record. Its embedded repository status is historical; do not rewrite it to mimic later project state.
+- `research/30-day-management-study/methodology.md` — authoritative analytics provenance.
+- `DOCUMENTATION-STATUS.md` — current-versus-historical documentation map.
+- `docs/ExecutionOS_Documentation_Index.md` — cross-document authority/index record.
+- `V2-MILESTONE-1.md` — historical V2 Milestone 1 record.
 
-## Development sequence
+## Current development sequence
 
-The current sequence is intentionally constrained:
-
-1. **Analytics preservation - complete; PR #2 merged.**
-2. **Pre-V2 documentation and `main` history reconciliation - complete; PRs #3 and #4 merged.**
-3. **V2.3 final acceptance and release-validation gate - complete.**
-4. **V2.3 documentation closeout - complete; PR #5 merged.**
-5. **V2.3 merged into `main` - complete; PR #1 merged.**
-6. **Create the V2.3 release tag only after explicit approval.**
-7. **Begin V3 Management Governor only after the tagged V2.3 baseline is confirmed.**
+1. **Analytics preservation — complete.**
+2. **Pre-V2 documentation/history reconciliation — complete.**
+3. **V2.3 final acceptance/release gate — complete.**
+4. **V2.3 merged into `main` — complete.**
+5. **Post-merge V2.3 documentation finalization — complete.**
+6. **Annotated `v2.3.0` tag — created and verified.**
+7. **Read-only EOD reporting — complete; PR #7 merged and validated.**
+8. **Current documentation closeout — in progress.**
+9. **V3 Management Governor — not started; requires explicit approval.**
 
 ## V3 direction
 
-The target Management Governor is a deterministic policy engine:
+The target Management Governor remains a deterministic policy engine:
 
 ```text
 evaluateManagementAction(
