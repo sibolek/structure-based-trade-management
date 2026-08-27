@@ -1,5 +1,9 @@
 # ExecutionOS V2 — Milestone 1
 
+> **HISTORICAL / SUPERSEDED DOCUMENT**
+>
+> This file is preserved as the original V2 Milestone 1 design record. It is **not current operating documentation**. ExecutionOS has since progressed through V2.1/V2.2 into the broker-aware multi-candidate **V2.3** workflow with Schwab execution observation, automatic broker-fill binding, live trade-state reconstruction, and analytics preservation. For current project status, see the root `README.md`, `DOCUMENTATION-STATUS.md`, `research/30-day-management-study/methodology.md`, and the ExecutionOS Management Governor Project Specification v1.2.
+
 ## Goal
 
 Build one narrow, usable live execution loop around the framework:
@@ -92,6 +96,8 @@ The review question is:
 The active trade is stored in browser local storage so a normal page refresh does not erase the current execution record.
 
 ## Deliberately Deferred
+
+> **Historical note:** the items below were deliberately deferred **at Milestone 1**. Several have since been implemented or materially advanced in V2.3. This list is retained unchanged as part of the milestone record.
 
 Milestone 1 does not yet include:
 
