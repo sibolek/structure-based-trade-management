@@ -261,6 +261,11 @@ export function summarizeReport({ completedTrades = [], openTrades = [], incompl
   const flats = completedTrades.filter((trade) => trade.grossPnl === 0);
   const grossProfit = winners.reduce((sum, trade) => sum + trade.grossPnl, 0);
   const grossLoss = Math.abs(losers.reduce((sum, trade) => sum + trade.grossPnl, 0));
+  const averageWinner = winners.length ? grossProfit / winners.length : null;
+  const averageLoser = losers.length ? -grossLoss / losers.length : null;
+  const averageWinLossFactor = winners.length && losers.length
+    ? averageWinner / Math.abs(averageLoser)
+    : winners.length ? Infinity : null;
   const owned = completedTrades.filter((trade) => trade.executionOs);
   const plannedRisks = owned.map((trade) => trade.executionOs.plannedRisk).filter((value) => Number.isFinite(value));
   const rValues = owned.map((trade) => trade.executionOs.rMultiple).filter((value) => Number.isFinite(value));
@@ -279,9 +284,10 @@ export function summarizeReport({ completedTrades = [], openTrades = [], incompl
     flats: flats.length,
     winRate: completedTrades.length ? winners.length / completedTrades.length : null,
     grossPnl,
-    averageWinner: winners.length ? grossProfit / winners.length : null,
-    averageLoser: losers.length ? -grossLoss / losers.length : null,
+    averageWinner,
+    averageLoser,
     profitFactor: grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : null,
+    averageWinLossFactor,
     largestWinner: winners.length ? Math.max(...winners.map((trade) => trade.grossPnl)) : null,
     largestLoser: losers.length ? Math.min(...losers.map((trade) => trade.grossPnl)) : null,
     contextIncomplete: incompleteActivity.length > 0,
