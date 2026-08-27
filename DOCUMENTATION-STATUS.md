@@ -4,6 +4,12 @@ This file distinguishes current authoritative project records from historical pl
 
 ## Current authoritative records
 
+### `USER-GUIDE.md`
+
+The **living operator guide** for ExecutionOS as it exists now. This is the primary day-to-day reference for installation, Schwab authorization, session startup, candidate creation, risk sizing, ARMED/LIVE behavior, broker binding, VALID/THREATENED/INVALID state use, persistence, troubleshooting, security, and the complete command-line appendix.
+
+Update this file whenever the normal operating workflow, broker integration, plan/risk fields, lifecycle semantics, persistence model, supported instruments, safety boundaries, or CLI surface changes.
+
 ### ExecutionOS Management Governor Project Specification v1.2
 
 The current project/architecture decision record after completion of the analytics-preservation pass. It supersedes v1.1 for current project status while preserving prior versions as historical records.
@@ -23,7 +29,7 @@ Authoritative technical provenance for the preserved historical study, including
 
 ### Root `README.md`
 
-Current operational overview of ExecutionOS, V2.3 capabilities, Schwab/NinjaTrader architecture, common commands, analytics-preservation status, and development sequence.
+Current operational overview of ExecutionOS, V2.3 capabilities, Schwab/NinjaTrader architecture, common commands, analytics-preservation status, and development sequence. It links to the living User Guide for detailed operation.
 
 ## Historical / superseded records
 
@@ -48,4 +54,4 @@ Preserved historical specifications. v1.1 remains valuable as the post-V2.3-vali
 
 ## Documentation rule
 
-Do not rewrite historical documents merely because later evidence changed the project state. Preserve them as dated snapshots and point readers to the current authoritative specification instead.
+Do not rewrite historical documents merely because later evidence changed the project state. Preserve them as dated snapshots and point readers to the current authoritative User Guide and Project Specification instead.
