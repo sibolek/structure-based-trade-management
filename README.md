@@ -10,7 +10,7 @@ ExecutionOS is not a setup scanner and is not intended to replace the broker. Th
 
 ## Core workflow
 
-**READ -> PLAN -> TRIGGER -> RISK -> HOLD -> UPDATE -> EXIT -> REVIEW**
+**READ -> PLAN -> TRIGGER -> RISK -> ARM -> HOLD -> UPDATE -> EXIT -> REVIEW**
 
 The live trade state is classified independently as:
 
@@ -134,6 +134,7 @@ Local research exports and Schwab minute-history caches are intentionally Git-ig
 
 ## Documentation
 
+- `USER-GUIDE.md` - authoritative living operator guide: setup, daily workflow, broker binding, live-state use, troubleshooting, security, and full CLI appendix.
 - `research/30-day-management-study/methodology.md` - authoritative preservation methodology and recovery status.
 - `V2-MILESTONE-1.md` - historical V2 Milestone 1 record; preserved for design history, not current system status.
 - `DOCUMENTATION-STATUS.md` - map of authoritative versus historical project documents.
