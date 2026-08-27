@@ -49,8 +49,9 @@ Preserved historical specifications. v1.1 remains valuable as the post-V2.3-vali
 
 ## Pull requests
 
-- **PR #1** - V2 execution-system development. Remains for V2.3 closeout/reconciliation; its description should be updated only during that closeout phase.
-- **PR #2** - analytics preservation. Its conversation records the recovered historical methodology and the final unresolved 19-trade provenance boundary.
+- **PR #1** - V2 execution-system development. Remains open for final V2.3 closeout/reconciliation; its description should be updated during that closeout phase before release.
+- **PR #2** - analytics preservation. Merged into `v2-execution-system` on 2026-08-27 at merge commit `780b2a5`; its conversation remains a provenance record for the recovered historical methodology and unresolved 19-trade boundary.
+- **Pre-V2 `main` reconciliation** - useful execution-discipline Markdown from commit `4dd27d1` is preserved as historical source material; its obsolete pre-V2 React/UI wiring is intentionally not imported into V2.3.
 
 ## Documentation rule
 

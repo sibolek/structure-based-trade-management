@@ -166,10 +166,10 @@ The workflow is not just navigation. Each stage has a specific job.
 | Stage | Purpose |
 | --- | --- |
 | READ | Analyze market structure outside the app. |
-| PLAN | State the trade thesis, trigger, invalidation, stop, target, and management plan. |
-| TRIGGER | Define what authorizes the actual entry in the broker. |
+| PLAN | State the trade thesis, entry trigger, invalidation, structural stop, target, and management plan. |
 | RISK | Verify that the structural stop is affordable at the intended size. |
 | ARM | Make the saved plan eligible to listen for a matching broker fill. |
+| TRIGGER | Wait for the planned entry condition to occur, then execute in the broker. |
 | HOLD | Do nothing when structure has not changed. |
 | UPDATE | Record legitimate new structure and change trade state when appropriate. |
 | EXIT | End the trade for a structural, planned, or explicitly discretionary reason. |
@@ -1241,16 +1241,14 @@ This is the concise operating sequence for a normal Schwab equity session.
 ## For each potential trade
 
 1. Perform the READ outside ExecutionOS.
-2. Create the PLAN.
-3. Define the TRIGGER.
-4. Define invalidation and structural stop.
-5. Complete RISK sizing.
-6. ARM the candidate.
-7. Enter only in thinkorswim when the trigger actually occurs.
-8. Confirm the candidate binds to the new broker ENTRY.
-9. Manage the trade as VALID / THREATENED / INVALID.
-10. Ask **what changed on the chart?** before interfering.
-11. Let broker FLAT state close the episode and review the execution.
+2. Create the PLAN, including entry trigger, invalidation, structural stop, target, and management.
+3. Complete RISK sizing.
+4. ARM the candidate.
+5. Wait for the planned TRIGGER to occur and enter only in thinkorswim.
+6. Confirm the candidate binds to the new broker ENTRY.
+7. Manage the trade as VALID / THREATENED / INVALID.
+8. Ask **what changed on the chart?** before interfering.
+9. Let broker FLAT state close the episode and review the execution.
 
 ## After the session
 
