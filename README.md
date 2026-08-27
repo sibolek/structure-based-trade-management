@@ -39,7 +39,7 @@ Current capabilities include:
 - ENTRY / ADD / PARTIAL / FLAT / REVERSAL broker-state semantics;
 - execution history and review.
 
-V2.3 remains unmerged while final acceptance, branch reconciliation, and release closeout are completed. Do not merge or overwrite `main` casually; the newer main-side pre-V2 execution-discipline work must be reconciled deliberately.
+V2.3 has completed final acceptance, branch reconciliation, and its release-validation gate on `v2-execution-system`. PR #1 remains unmerged pending explicit approval and final release closeout. Do not casually rebase or overwrite `main`; its useful pre-V2 documentation and history have already been deliberately reconciled without changing the validated V2.3 tree.
 
 ## Broker architecture
 
@@ -79,7 +79,7 @@ The stop is defined by technical invalidation. If that stop is too expensive, re
 
 ## Analytics preservation
 
-The `analytics-preservation-v23` branch and draft PR #2 preserve the empirical research that motivated the V3 Management Governor.
+The empirical research that motivated the V3 Management Governor was preserved on `analytics-preservation-v23` and merged into `v2-execution-system` through PR #2.
 
 Recovered/preserved status:
 
@@ -144,11 +144,11 @@ Local research exports and Schwab minute-history caches are intentionally Git-ig
 
 The current sequence is intentionally constrained:
 
-1. **Analytics preservation - complete.**
-2. **V2.3 final acceptance / edge hardening.**
-3. **Reconcile the main-side pre-V2 work deliberately.**
-4. **Update PR #1 to V2.3 reality.**
-5. **Merge/tag V2.3 only after explicit approval and green acceptance tests.**
+1. **Analytics preservation - complete; PR #2 merged.**
+2. **Pre-V2 documentation and `main` history reconciliation - complete; PRs #3 and #4 merged.**
+3. **V2.3 final acceptance and release-validation gate - complete.**
+4. **Update PR #1 to actual V2.3 behavior and validated release status.**
+5. **Merge/tag V2.3 only after explicit approval.**
 6. **Begin V3 Management Governor from the clean merged baseline.**
 
 ## V3 direction
