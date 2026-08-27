@@ -84,7 +84,7 @@ It separates three activities that are often mixed together during discretionary
 
 The system's core workflow is:
 
-**READ -> PLAN -> TRIGGER -> RISK -> ARM -> HOLD -> UPDATE -> EXIT -> REVIEW**
+**READ -> PLAN -> RISK -> ARM -> TRIGGER -> HOLD -> UPDATE -> EXIT -> REVIEW**
 
 ExecutionOS currently integrates with Schwab in a **read-only** mode. You continue to place equity orders in thinkorswim/Schwab. ExecutionOS observes broker executions, reconstructs position state, and binds a matching opening fill to an armed candidate.
 

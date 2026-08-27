@@ -10,7 +10,7 @@ ExecutionOS is not a setup scanner and is not intended to replace the broker. Th
 
 ## Core workflow
 
-**READ -> PLAN -> TRIGGER -> RISK -> ARM -> HOLD -> UPDATE -> EXIT -> REVIEW**
+**READ -> PLAN -> RISK -> ARM -> TRIGGER -> HOLD -> UPDATE -> EXIT -> REVIEW**
 
 The live trade state is classified independently as:
 

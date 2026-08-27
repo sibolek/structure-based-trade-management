@@ -167,14 +167,13 @@ For project continuity, prefer the formal documents and repository history above
 
 ---
 
-## 10. Known documentation consistency item
+## 10. Documentation consistency resolution
 
-There is a previously identified wording discrepancy in the preparation sequence:
+On 2026-08-27, the living User Guide and README were aligned with the actual V2.3 preparation/execution sequence:
 
-- some User Guide / README language has used `READ -> PLAN -> TRIGGER -> RISK -> ARM`;
-- the actual V2.3 UI / Project Specification preparation model uses `READ -> PLAN -> RISK -> ARM -> TRIGGER`.
+`READ -> PLAN -> RISK -> ARM -> TRIGGER -> HOLD -> UPDATE -> EXIT -> REVIEW`
 
-This is a documentation-consistency item to resolve deliberately. Until corrected, defer to the actual product workflow and the current Project Specification for execution sequencing.
+This matches the Project Specification model: risk permission is established before the Trade Contract is armed; the live broker trigger occurs only after preparation is complete.
 
 ---
 
