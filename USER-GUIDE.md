@@ -570,7 +570,7 @@ The helper reads persisted History from:
 execution-v23-store
 ```
 
-A trade that has not yet completed/archive into History cannot be enriched from that export.
+A trade that has not yet completed/archived into History cannot be enriched from that export.
 
 ## 16.4 Step 2 — keep the Vite server running
 
