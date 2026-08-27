@@ -406,11 +406,13 @@ function StatePill({ state }) {
 function LiveTradeCard({ trade, brokerPosition, account, onState, onClassify }) {
   const plan = trade.originalPlan;
   if (trade.phase === "EXIT") {
+    const reversed = trade.broker.terminalEvent === "REVERSAL";
     return (
       <article className="rounded border border-sky-400/25 bg-ink-850 p-4 shadow-terminal">
-        <p className="section-label">Broker Exit Detected</p>
-        <h3 className="text-2xl font-bold">{plan.symbol} is FLAT</h3>
+        <p className="section-label">{reversed ? "Broker Reversal Detected" : "Broker Exit Detected"}</p>
+        <h3 className="text-2xl font-bold">{reversed ? `${plan.symbol} ${plan.direction} ended by REVERSAL` : `${plan.symbol} is FLAT`}</h3>
         <p className="mt-1 text-sm text-zinc-400">Entry {price(trade.broker.entryPrice)} · Exit VWAP {price(trade.broker.exitPrice)} · Peak qty {trade.broker.peakQuantity}</p>
+        {reversed && <div className="mt-3 rounded border border-amber-400/25 bg-amber-950/15 p-3 text-sm text-amber-100">Broker now {trade.broker.reversalSide} {trade.broker.reversalQuantity} @ {price(trade.broker.reversalAveragePrice)}. Opposite-side broker exposure is not owned by the original Trade Contract.</div>}
         <p className="mt-4 text-sm font-semibold">Classify why the trade ended:</p>
         <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <button onClick={() => onClassify(trade.id, "Planned target", "STRUCTURAL / PLANNED")} className="rounded border border-emerald-400/25 bg-emerald-400/10 px-3 py-3 font-semibold text-emerald-100">TARGET</button>
@@ -571,8 +573,35 @@ export default function ExecutionV23({ broker }) {
       const terminalMs = Date.parse(terminal.detectedAt);
       const closings = executions.filter((event) => event.symbol === trade.originalPlan.symbol && Date.parse(event.detectedAt) >= entryMs && Date.parse(event.detectedAt) <= terminalMs && String(event.positionEffect).toUpperCase() === "CLOSING");
       const exit = weightedVwap(closings);
+      const reversed = terminal.stateEvent === "REVERSAL";
       changed = true;
-      return { ...next, phase: "EXIT", broker: { ...next.broker, currentQuantity: 0, exitPrice: exit.price ?? terminal.price, exitQuantity: exit.quantity || Math.abs(terminal.previousQuantity || terminal.quantity || 0), flatDetectedAt: terminal.detectedAt }, decisions: [...next.decisions, decision("EXIT", next.currentState, "BROKER FLAT DETECTED", `${terminal.stateEvent}; exit VWAP ${price(exit.price ?? terminal.price)}`)] };
+      return {
+        ...next,
+        phase: "EXIT",
+        broker: {
+          ...next.broker,
+          currentQuantity: 0,
+          exitPrice: exit.price ?? terminal.price,
+          exitQuantity: reversed
+            ? Math.abs(Number(terminal.previousQuantity || 0))
+            : exit.quantity || Math.abs(terminal.previousQuantity || terminal.quantity || 0),
+          flatDetectedAt: terminal.stateEvent === "FLAT" ? terminal.detectedAt : next.broker.flatDetectedAt,
+          terminalDetectedAt: terminal.detectedAt,
+          terminalEvent: terminal.stateEvent,
+          reversalSide: reversed ? terminal.nextSide : null,
+          reversalQuantity: reversed ? Math.abs(Number(terminal.nextQuantity || 0)) : 0,
+          reversalAveragePrice: reversed ? Number(terminal.averagePrice) : null,
+        },
+        decisions: [
+          ...next.decisions,
+          decision(
+            "EXIT",
+            next.currentState,
+            reversed ? "BROKER REVERSAL DETECTED" : "BROKER FLAT DETECTED",
+            `${terminal.stateEvent}; exit VWAP ${price(exit.price ?? terminal.price)}`
+          ),
+        ],
+      };
     });
     if (changed) setStore((current) => ({ ...current, liveTrades: nextTrades }));
   }, [store.liveTrades, executions, positions]);
