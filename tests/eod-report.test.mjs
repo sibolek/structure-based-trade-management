@@ -67,6 +67,24 @@ test("flags closing-first activity instead of inventing P/L", () => {
   assert.equal(out.completedTrades[0].grossPnl, 5);
 });
 
+test("calculates average winner / average loser factor separately from gross profit factor", () => {
+  const summary = summarizeReport({
+    completedTrades: [
+      { grossPnl: 10, executionOs: null },
+      { grossPnl: 20, executionOs: null },
+      { grossPnl: -5, executionOs: null },
+    ],
+    openTrades: [],
+    incompleteActivity: [],
+    executionExportLoaded: false,
+  });
+
+  assert.equal(summary.averageWinner, 15);
+  assert.equal(summary.averageLoser, -5);
+  assert.equal(summary.profitFactor, 6);
+  assert.equal(summary.averageWinLossFactor, 3);
+});
+
 test("joins ExecutionOS history and calculates planned risk, R and process stats", () => {
   const rows = [
     row({ time: t(10), instruction: "BUY", effect: "OPENING", quantity: 10, price: 100 }),
