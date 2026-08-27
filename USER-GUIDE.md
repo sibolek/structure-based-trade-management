@@ -5,7 +5,7 @@
 **Status:** Living operator guide for the current V2.3 baseline  
 **Repository:** `sibolek/structure-based-trade-management`  
 **Current development baseline:** `v2-execution-system`  
-**Current documentation/preservation branch:** `analytics-preservation-v23`
+**Current documentation baseline:** `v2-execution-system`
 
 > **Operating principle:** Structure decides. P/L emotion does not.
 >
@@ -43,7 +43,7 @@
 26. [Historical analytics and research tools](#26-historical-analytics-and-research-tools)
 27. [Security and data handling](#27-security-and-data-handling)
 28. [Troubleshooting](#28-troubleshooting)
-29. [Current limitations and known release blockers](#29-current-limitations-and-known-release-blockers)
+29. [Current limitations and deferred work](#29-current-limitations-and-deferred-work)
 30. [Repository and branch discipline](#30-repository-and-branch-discipline)
 31. [Recommended daily operating procedure](#31-recommended-daily-operating-procedure)
 32. [Glossary](#32-glossary)
@@ -122,7 +122,7 @@ This matters operationally: **thinkorswim remains the execution venue for equiti
 
 ## 4.1 Current baseline
 
-The active product baseline is **V2.3** on branch `v2-execution-system`. The current documentation and analytics-preservation work lives on `analytics-preservation-v23` and targets V2.3.
+The active product and documentation baseline is **V2.3** on branch `v2-execution-system`. The analytics-preservation work was merged into this branch through PR #2 and is now part of the V2.3 baseline.
 
 V2.3 supports:
 
@@ -139,17 +139,24 @@ V2.3 supports:
 - browser-local persistence;
 - a read-only Schwab broker-status panel.
 
-## 4.2 What is still being closed out
+## 4.2 Release-validation status
 
-The system is functionally mature, but V2.3 is **not yet a tagged release**. Final acceptance still needs focused edge-case validation for:
+V2.3 completed its release-validation gate on 27 August 2026.
 
-- ADD behavior;
-- PARTIAL exit behavior;
-- complete SHORT-path UI behavior;
-- two executions occurring very close together;
-- REVERSAL semantics.
+Validated release gates include:
 
-These are release-hardening tasks, not a redesign of the system.
+- analytics regression: 14/14 passing;
+- deterministic broker trade-state regression: 10/10 passing;
+- production Vite build;
+- clean tracked working tree after install/build;
+- exact validation against the remote `v2-execution-system` head;
+- read-only `/health` and `/api/state` runtime smoke tests;
+- live ADD, PARTIAL, FLAT, and SHORT-path acceptance;
+- synthetic end-to-end REVERSAL acceptance in the React lifecycle.
+
+A true live cross-zero REVERSAL could not be forced through thinkorswim because the broker rejected the attempted cross-zero order. The exact same-poll cross-symbol execution case also remains deferred as a non-blocking edge case before any future broker-write or automated simultaneous-entry capability.
+
+V2.3 is therefore release-validated, but PR #1 remains unmerged and no V2.3 release tag should be created without explicit approval.
 
 ## 4.3 Analytics preservation status
 
@@ -255,7 +262,7 @@ To update the branch you are already on:
 git pull
 ```
 
-Do not merge, rebase, or overwrite `main` casually. V2.3 and the newer main-side pre-V2 work still require deliberate reconciliation.
+Do not casually rebase or overwrite `main`. The useful pre-V2 documentation has been preserved and `main` history has been reconciled into the V2.3 line without changing the validated V2.3 file tree.
 
 ---
 
@@ -745,7 +752,7 @@ or:
 SHORT 20 -> SHORT 40
 ```
 
-The state engine updates the blended average price and peak quantity. Final end-to-end ADD UI acceptance is still part of V2.3 release hardening.
+The state engine updates the blended average price and peak quantity. End-to-end ADD behavior has been accepted for V2.3.
 
 ## PARTIAL
 
@@ -755,7 +762,7 @@ Exposure decreases but remains open in the same direction.
 LONG 40 -> LONG 20
 ```
 
-A partial exit should **not** mark the trade flat or archive it as completed. Final end-to-end PARTIAL validation is still a release-hardening item.
+A partial exit should **not** mark the trade flat or archive it as completed. End-to-end PARTIAL behavior has been accepted for V2.3.
 
 ## FLAT
 
@@ -1161,7 +1168,7 @@ Many research datasets are intentionally local and Git-ignored. Reconstruct or r
 
 ---
 
-# 29. Current limitations and known release blockers
+# 29. Current limitations and deferred work
 
 The following are important **current-state facts**, not defects to work around with assumptions.
 
@@ -1176,39 +1183,39 @@ The following are important **current-state facts**, not defects to work around 
 - full durable execution database;
 - AI in the split-second management path.
 
-## V2.3 release-hardening items
+## V2.3 deferred edge cases
 
-The following still require final end-to-end acceptance before V2.3 is considered fully closed:
+The V2.3 release-validation gate is complete. The following are documented deferred items rather than V2.3 release blockers:
 
-- ADD;
-- PARTIAL;
-- SHORT;
-- near-simultaneous fills;
-- REVERSAL.
+- exact same-poll cross-symbol execution ownership remains deferred before any broker-write or automated simultaneous-entry capability;
+- true live cross-zero REVERSAL could not be broker-validated because thinkorswim rejected the attempted cross-zero order;
+- REVERSAL lifecycle behavior has nevertheless passed deterministic state tests and synthetic end-to-end React acceptance.
 
-Do not add unrelated V3 architecture work while these release blockers remain open.
+Do not expand these deferred cases into unrelated V3 architecture work during V2.3 release closeout.
 
 ---
 
 # 30. Repository and branch discipline
 
-ExecutionOS is currently in a sensitive reconciliation stage.
+ExecutionOS is currently in V2.3 release closeout.
 
 The key rules are:
 
-- do not merge PR #1 or PR #2 without explicit approval;
+- do not merge PR #1 without explicit approval;
 - do not casually rebase or overwrite `main`;
-- preserve useful main-side pre-V2 execution-discipline work during reconciliation;
-- preserve the V2.3 broker-aware architecture;
-- update PR #1 to describe V2.3 reality only during V2.3 closeout;
-- create the V3 branch only after V2.3 is cleanly accepted and tagged.
+- preserve the validated V2.3 broker-aware architecture and release-tested file tree;
+- keep historical analytics and preserved pre-V2 execution-discipline material intact;
+- update PR #1 to describe actual V2.3 behavior before final merge consideration;
+- create the V3 branch only after V2.3 is cleanly merged and tagged.
 
-Current pull requests:
+Pull-request status:
 
-- **PR #1** - V2 execution system, `v2-execution-system` -> `main`;
-- **PR #2** - analytics preservation, `analytics-preservation-v23` -> `v2-execution-system`.
+- **PR #1** - V2 execution system, `v2-execution-system` -> `main`; still open and unmerged;
+- **PR #2** - analytics preservation -> `v2-execution-system`; merged;
+- **PR #3** - pre-V2 execution-discipline documentation reconciliation; merged;
+- **PR #4** - history-only `main` reconciliation with no V2.3 tree changes; merged.
 
-The user guide should be updated again when these branches are merged and the normal working branch changes.
+The user guide should be updated again when PR #1 is merged and the normal working branch changes.
 
 ---
 
@@ -1826,17 +1833,16 @@ execution-v23-store
 
 At the time of this guide's publication, the intended project sequence is:
 
-1. **Analytics preservation - complete.**
-2. **Documentation closeout - complete.**
-3. **V2.3 final edge-case acceptance:** ADD, PARTIAL, SHORT, near-simultaneous fills, REVERSAL.
-4. Run the full V2.3 release gate.
-5. Decide whether/when to merge PR #2 into `v2-execution-system`.
-6. Deliberately reconcile the newer `main`-side pre-V2 work.
-7. Rewrite PR #1 to describe actual V2.3 behavior.
-8. Merge/tag V2.3 only after explicit approval and a green release gate.
-9. Begin V3 Management Governor from the clean merged baseline.
-10. Add the broker-agnostic event/adapter boundary, then a read-only NinjaTrader observer.
-11. Implement Governor Observe/Govern mode before any broker-write enforcement.
+1. **Analytics preservation - complete; PR #2 merged.**
+2. **Pre-V2 documentation preservation - complete; PR #3 merged.**
+3. **`main` history reconciliation - complete; PR #4 merged with no V2.3 tree changes.**
+4. **V2.3 final acceptance and full release gate - complete.**
+5. Rewrite PR #1 to describe actual V2.3 behavior and validated release status.
+6. Merge PR #1 only after explicit approval.
+7. Tag V2.3 only after the intended merge state is confirmed and explicitly approved.
+8. Begin V3 Management Governor from the clean merged baseline.
+9. Add the broker-agnostic event/adapter boundary, then a read-only NinjaTrader observer.
+10. Implement Governor Observe/Govern mode before any broker-write enforcement.
 
 The sequence is intentionally conservative. ExecutionOS is becoming a system that can influence live management decisions; correctness and auditability are more important than feature velocity.
 
