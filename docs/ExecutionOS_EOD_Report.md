@@ -1,8 +1,8 @@
 # ExecutionOS End-of-Day Report
 
-**Status:** Current read-only reporting reference  
-**Added:** 27 August 2026  
-**Current branch:** `main`  
+**Status:** Current read-only reporting reference<br>
+**Added:** 27 August 2026<br>
+**Current branch:** `main`<br>
 **Implementation merge:** PR #7, merge commit `bedd70979a3b18844386bcf8f927fd8a1f62307f`
 
 ## Purpose
