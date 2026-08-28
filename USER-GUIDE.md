@@ -1,10 +1,11 @@
 # ExecutionOS User Guide
 
-**Version:** 1.0  
-**Date:** 27 August 2026  
-**Status:** Living operator guide for the current V2.3 baseline  
-**Repository:** `sibolek/structure-based-trade-management`  
-**Current product baseline:** `main`
+**Version:** 1.1<br>
+**Date:** 27 August 2026<br>
+**Status:** Living operator guide for current `main` — frozen V2.3.0 execution baseline plus post-release EOD reporting<br>
+**Repository:** `sibolek/structure-based-trade-management`<br>
+**Current product baseline:** `main`<br>
+**Frozen execution release tag:** `v2.3.0`<br>
 **Current documentation baseline:** `main`
 
 > **Operating principle:** Structure decides. P/L emotion does not.
@@ -37,6 +38,7 @@
 20. [Management discipline while a trade is live](#20-management-discipline-while-a-trade-is-live)
 21. [Editing an armed candidate safely](#21-editing-an-armed-candidate-safely)
 22. [Ending a trade and using History](#22-ending-a-trade-and-using-history)
+   - [22.1 Generating an accurate enriched EOD report](#221-generating-an-accurate-enriched-eod-report)
 23. [Persistence and local state](#23-persistence-and-local-state)
 24. [Using ExecutionOS without the Schwab link](#24-using-executionos-without-the-schwab-link)
 25. [Futures and NinjaTrader status](#25-futures-and-ninjatrader-status)
@@ -122,7 +124,7 @@ This matters operationally: **thinkorswim remains the execution venue for equiti
 
 ## 4.1 Current baseline
 
-The active product and documentation baseline is **V2.3** on `main`. V2.3 was developed and release-validated on `v2-execution-system`, then merged into `main` through PR #1 on 27 August 2026. The `main` merge commit is `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`.
+The frozen execution release baseline is **V2.3.0**, tagged as `v2.3.0` at commit `baabb75f36050599f20e6c89e8db2f1f7d7769a1`. Current `main` contains that validated execution baseline plus the post-release read-only EOD reporting utility merged through PR #7 at `bedd70979a3b18844386bcf8f927fd8a1f62307f`. The EOD addition does not add broker-write authority or change the validated V2.3 trade-state engine.
 
 V2.3 supports:
 
@@ -156,7 +158,7 @@ Validated release gates include:
 
 A true live cross-zero REVERSAL could not be forced through thinkorswim because the broker rejected the attempted cross-zero order. The exact same-poll cross-symbol execution case also remains deferred as a non-blocking edge case before any future broker-write or automated simultaneous-entry capability.
 
-V2.3 is release-validated and merged into `main`. No V2.3 release tag should be created without explicit approval.
+V2.3 is release-validated, merged, and frozen under the annotated tag `v2.3.0`. V3 has not started and still requires separate explicit authorization.
 
 ## 4.3 Analytics preservation status
 
@@ -909,6 +911,204 @@ Review the timeline for:
 
 ---
 
+## 22.1 Generating an accurate enriched EOD report
+
+The EOD reporter combines **two independent data sources**. An accurate enriched report requires both sources to be understood correctly.
+
+### Source 1 — Schwab execution history
+
+Schwab is broker-authoritative for fills and position changes. The reporter uses read-only Schwab history to reconstruct complete flat-to-flat trade cycles and calculate broker-derived metrics such as:
+
+- completed trade cycles;
+- long/short direction;
+- peak quantity;
+- entry and exit VWAP;
+- reconstructed gross realized P/L;
+- winners, losers, and win rate;
+- average winner and average loser;
+- gross profit factor;
+- average win/loss factor;
+- largest winner and loser.
+
+A broker-only report can be generated from Schwab history alone.
+
+### Source 2 — ExecutionOS Execution Board / History export
+
+The **enriched** report requires the completed Trade Contracts stored in ExecutionOS browser History.
+
+The ExecutionOS History export supplies information Schwab does not know, including:
+
+- setup and timeframe;
+- thesis;
+- trigger;
+- invalidation;
+- structural stop;
+- target;
+- management plan;
+- expected entry and intended size;
+- original planned dollar risk;
+- realized R multiple;
+- exit classification / reason;
+- VALID / THREATENED / INVALID decision history;
+- whether the broker cycle was owned by an ExecutionOS Trade Contract.
+
+> **Critical operating rule:** Download the ExecutionOS History export before generating the enriched EOD report.
+
+Without the ExecutionOS export, broker reconstruction remains valid for complete-context Schwab cycles, but ExecutionOS-owned trades may appear as **broker-only**, and setup, planned-risk, R-multiple, and process statistics cannot be considered complete.
+
+### Step 1 — confirm completed trades are in History
+
+Before exporting, confirm every trade that should be enriched has completed its ExecutionOS lifecycle and is visible in **History**.
+
+The export helper reads the browser-persisted store:
+
+```text
+execution-v23-store
+```
+
+A trade that has not completed into History cannot be enriched from that export.
+
+### Step 2 — keep the Vite server running
+
+Do **not** stop Vite before exporting.
+
+Browser `localStorage` is origin-specific. The export helper must therefore be opened on the same browser origin and profile used for ExecutionOS.
+
+If ExecutionOS is running at:
+
+```text
+http://localhost:5173
+```
+
+open:
+
+```text
+http://localhost:5173/eod-export.html
+```
+
+Do not casually switch between `localhost`, `127.0.0.1`, another port, or another browser profile. Those can have different local-storage namespaces and may produce an empty or incomplete export.
+
+### Step 3 — download ExecutionOS EOD History
+
+On the helper page, choose:
+
+```text
+DOWNLOAD EXECUTIONOS EOD HISTORY
+```
+
+The downloaded file is named like:
+
+```text
+executionos-eod-history-2026-08-27.json
+```
+
+The helper reads only ExecutionOS browser History. It does not contact Schwab, place orders, or modify/delete History.
+
+The reporter can auto-detect the newest matching file in:
+
+```text
+~/Downloads
+```
+
+For deterministic reporting when more than one export exists, explicitly provide the intended file path.
+
+### Step 4 — generate the report
+
+For a specific date:
+
+```bash
+npm run schwab:eod -- --date=2026-08-27
+```
+
+Preferred explicit form when multiple exports may exist:
+
+```bash
+npm run schwab:eod -- --date=2026-08-27 --executionos=~/Downloads/executionos-eod-history-2026-08-27.json
+```
+
+The reporter prints a terminal summary and writes a self-contained HTML report to:
+
+```text
+reports/eod/YYYY-MM-DD.html
+```
+
+The `reports/eod/` directory is Git-ignored.
+
+### Step 5 — verify enrichment actually occurred
+
+Do not treat the existence of an HTML file as proof that the report is fully enriched.
+
+Check the terminal output and reconciliation:
+
+- confirm the intended ExecutionOS History export was loaded or auto-detected;
+- confirm the ExecutionOS-owned versus broker-only counts are plausible;
+- trades known to have been managed through ExecutionOS should not all appear broker-only;
+- owned trades should show setup/process fields;
+- owned trades should show planned risk and R when their original Trade Contracts support those calculations;
+- unmatched Schwab trades should remain explicitly broker-only.
+
+Matching is deliberately conservative. It uses normalized symbol, direction, and entry timing within the allowed matching window, with one-to-one ownership. The reporter does not fabricate ownership merely to increase the match count.
+
+If an expected ExecutionOS-owned trade appears broker-only, verify the date, downloaded export, completed History entry, browser origin/profile, symbol, direction, and timing before accepting the enriched statistics.
+
+### Step 6 — understand carry-in / incomplete-context warnings
+
+The reporter never invents a cost basis.
+
+If the first same-day execution for a symbol is `CLOSING`, the position may have been opened before the report date. That activity is treated as **context-incomplete** and excluded rather than assigning a fictional opening price.
+
+If a context warning appears, reconstructed gross realized P/L must **not** be described as definitive whole-account daily P/L.
+
+This is especially important for swing positions carried into the session.
+
+### Step 7 — understand planned risk and R
+
+For an ExecutionOS-owned trade:
+
+```text
+planned risk = abs(expected entry - structural stop) * intended size
+```
+
+and:
+
+```text
+realized R = reconstructed realized gross P/L / original planned risk
+```
+
+Broker-only trades do not receive fabricated planned risk or R.
+
+The optional close-of-business risk snapshot comes from the current read-only monitor. It is **not** a historical frozen per-trade 0.5% risk budget.
+
+### Step 8 — distinguish the two profit-factor metrics
+
+The report shows two different measures:
+
+```text
+Gross Profit Factor = gross profit / gross loss
+```
+
+```text
+Average Win/Loss Factor = average winner / abs(average loser)
+```
+
+They answer different questions and should not be conflated.
+
+### Step 9 — retain report artifacts appropriately
+
+The downloaded ExecutionOS History JSON contains trading-plan and execution-review data. Treat it as private local working data.
+
+Generated HTML reports are also local artifacts. Neither the History export nor generated EOD reports should be committed to Git.
+
+If long-term retention matters, preserve the downloaded History JSON and HTML report deliberately because browser `localStorage` is not a durable database.
+
+For implementation details and validation evidence, see:
+
+```text
+docs/ExecutionOS_EOD_Report.md
+```
+
+---
+
 # 23. Persistence and local state
 
 V2.3 stores its application state in browser `localStorage` under:
@@ -931,6 +1131,8 @@ Browser local storage is not cloud storage and is not a durable database backup.
 Clearing browser site data, using a different browser profile, or manually clearing local storage can remove the saved ExecutionOS UI state.
 
 Broker truth still exists independently at Schwab, but the local ExecutionOS decision record may not.
+
+For EOD reporting, the downloaded `executionos-eod-history-YYYY-MM-DD.json` file provides a portable snapshot of completed History used for enrichment. Preserve that export and the generated HTML report locally when long-term review is important.
 
 ## 23.2 Do not use browser storage as the only long-term archive
 
@@ -1166,6 +1368,36 @@ Browser local storage is local state. Clearing site data can remove it. The brok
 
 Many research datasets are intentionally local and Git-ignored. Reconstruct or regenerate them using the documented research pipeline rather than inventing rows.
 
+## 28.10 EOD report unexpectedly shows broker-only trades
+
+Check, in order:
+
+1. Was the trade completed into ExecutionOS History?
+2. Did you download **EXECUTIONOS EOD HISTORY** after the trade completed?
+3. Was the helper opened on the same browser origin/profile as the ExecutionOS UI?
+4. Did the reporter load or auto-detect the intended export?
+5. Is a newer unrelated `executionos-eod-history-*.json` file present in `~/Downloads`?
+6. If uncertain, rerun with an explicit `--executionos=<path>` argument.
+
+Do not manually force ownership merely to improve the match count.
+
+## 28.11 EOD History export is empty or incomplete
+
+Common causes include:
+
+- opening the helper on a different origin;
+- using another browser profile;
+- clearing browser site data;
+- exporting before completed trades reached History.
+
+Use the same origin/profile as the live ExecutionOS UI and export only after completed trades appear in History.
+
+## 28.12 EOD report has a carry-in/context warning
+
+A closing-first same-day execution can indicate exposure opened before the report date. The reporter excludes that incomplete context rather than inventing a cost basis.
+
+When this warning appears, do not treat reconstructed gross P/L as definitive whole-account daily P/L.
+
 ---
 
 # 29. Current limitations and deferred work
@@ -1191,32 +1423,35 @@ The V2.3 release-validation gate is complete. The following are documented defer
 - true live cross-zero REVERSAL could not be broker-validated because thinkorswim rejected the attempted cross-zero order;
 - REVERSAL lifecycle behavior has nevertheless passed deterministic state tests and synthetic end-to-end React acceptance.
 
-These deferred cases remain documented V2.3 limitations. Do not expand them into unrelated V3 architecture work before the V2.3 tag and V3 start are explicitly authorized.
+These deferred cases remain documented V2.3 limitations. The V2.3.0 tag is complete; do not expand them into unrelated V3 architecture work before a separate V3 start is explicitly authorized.
 
 ---
 
 # 30. Repository and branch discipline
 
-ExecutionOS V2.3 is merged into `main` and awaiting an explicitly approved release tag.
+ExecutionOS V2.3.0 is frozen under the annotated tag `v2.3.0`. Current `main` contains that frozen execution baseline plus the subsequently merged read-only EOD reporting utility.
 
 The key rules are:
 
-- treat `main` as the authoritative V2.3 baseline;
+- treat `v2.3.0` as the frozen execution-release reference;
+- treat current `main` as the authoritative operational/documentation baseline;
 - do not casually rebase, overwrite, or rewrite validated `main` history;
-- preserve the validated V2.3 broker-aware architecture and release-tested file tree;
+- preserve the validated V2.3 broker-aware architecture and release-tested execution semantics;
 - keep historical analytics and preserved pre-V2 execution-discipline material intact;
-- do not create the V2.3 release tag without explicit approval;
-- do not create the V3 branch or begin Management Governor implementation until the tagged V2.3 baseline is confirmed.
+- do not alter or move the `v2.3.0` tag;
+- do not create the V3 branch or begin Management Governor implementation until separately authorized.
 
 Pull-request status:
 
-- **PR #1** - V2 execution system, `v2-execution-system` -> `main`; merged on 27 August 2026 as `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`;
+- **PR #1** - V2 execution system, `v2-execution-system` -> `main`; merged on 27 August 2026;
 - **PR #2** - analytics preservation -> `v2-execution-system`; merged;
 - **PR #3** - pre-V2 execution-discipline documentation reconciliation; merged;
 - **PR #4** - history-only `main` reconciliation with no V2.3 tree changes; merged;
-- **PR #5** - V2.3 release-documentation closeout; merged.
+- **PR #5** - V2.3 release-documentation closeout; merged;
+- **PR #6** - post-merge V2.3 documentation finalization; merged;
+- **PR #7** - read-only ExecutionOS end-of-day reporting; merged into `main` at `bedd70979a3b18844386bcf8f927fd8a1f62307f`.
 
-The normal V2.3 repository baseline is now `main`.
+The frozen release reference remains `v2.3.0`; normal current operation and documentation use `main`. V3 has not started.
 
 ---
 
@@ -1261,10 +1496,40 @@ This is the concise operating sequence for a normal Schwab equity session.
 ## After the session
 
 1. Review History for execution decisions, not just P/L.
-2. Stop the monitor with `Ctrl+C`.
-3. Stop the Vite server with `Ctrl+C` if desired.
-4. Preserve any research/export artifacts that are intentionally local.
-5. Do not commit secrets or raw private broker data.
+2. Confirm trades that should be included in the enriched EOD report have completed into **ExecutionOS History**.
+3. **Keep the Vite server running** until the ExecutionOS History export is downloaded.
+4. In the same browser profile/origin used for ExecutionOS, open:
+
+   ```text
+   http://localhost:5173/eod-export.html
+   ```
+
+5. Choose **DOWNLOAD EXECUTIONOS EOD HISTORY**.
+6. Confirm the downloaded file is named like:
+
+   ```text
+   executionos-eod-history-YYYY-MM-DD.json
+   ```
+
+7. Generate the report:
+
+   ```bash
+   npm run schwab:eod -- --date=YYYY-MM-DD
+   ```
+
+8. When multiple exports may exist, prefer an explicit file:
+
+   ```bash
+   npm run schwab:eod -- --date=YYYY-MM-DD --executionos=~/Downloads/executionos-eod-history-YYYY-MM-DD.json
+   ```
+
+9. Confirm the terminal reports that the intended ExecutionOS export was loaded or auto-detected.
+10. Confirm ExecutionOS-owned versus broker-only counts are plausible.
+11. Review planned risk and R only for genuinely ExecutionOS-owned trades.
+12. Review the generated HTML at `reports/eod/YYYY-MM-DD.html`.
+13. If a carry-in/context warning appears, do not describe reconstructed gross P/L as definitive whole-account daily P/L.
+14. Only after the History export is complete, stop the monitor and Vite server if desired.
+15. Preserve intended local report/export artifacts, and do not commit secrets, raw private broker data, or ExecutionOS EOD History exports.
 
 ---
 
@@ -1467,6 +1732,60 @@ curl http://127.0.0.1:8787/health
 ```bash
 curl http://127.0.0.1:8787/api/state
 ```
+
+---
+
+## A.5.1 End-of-day reporting
+
+### Export enriched ExecutionOS History
+
+With the normal Vite UI still running on the same origin/profile used during the trading session, open:
+
+```text
+http://localhost:5173/eod-export.html
+```
+
+Choose **DOWNLOAD EXECUTIONOS EOD HISTORY**.
+
+### Generate an EOD report
+
+```bash
+npm run schwab:eod
+```
+
+### Generate a specific date
+
+```bash
+npm run schwab:eod -- --date=2026-08-27
+```
+
+### Explicitly provide the ExecutionOS History export
+
+```bash
+npm run schwab:eod -- --date=2026-08-27 --executionos=~/Downloads/executionos-eod-history-2026-08-27.json
+```
+
+### Restrict the report to one symbol
+
+```bash
+npm run schwab:eod -- --date=2026-08-27 --symbol=NVDA
+```
+
+### Write HTML to a custom path
+
+```bash
+npm run schwab:eod -- --date=2026-08-27 --out=~/Desktop/eod-2026-08-27.html
+```
+
+Default generated reports are written under:
+
+```text
+reports/eod/
+```
+
+and are Git-ignored.
+
+For an enriched report, confirm the reporter loaded an ExecutionOS History export. Without that export, Schwab cycle reconstruction still works for complete-context trades, but ExecutionOS plan/risk/R/process fields cannot be treated as complete.
 
 ---
 
@@ -1768,6 +2087,7 @@ The npm scripts above are preferred. For debugging, each script ultimately runs 
 schwab-bridge/index.mjs
 schwab-bridge/monitor.mjs
 schwab-bridge/history.mjs
+schwab-bridge/eod-report.mjs
 schwab-bridge/replay.mjs
 schwab-bridge/slippage.mjs
 schwab-bridge/state-test.mjs
@@ -1828,11 +2148,25 @@ The React application separately stores current UI state in browser `localStorag
 execution-v23-store
 ```
 
+The EOD export helper downloads a local file named like:
+
+```text
+executionos-eod-history-YYYY-MM-DD.json
+```
+
+Generated EOD HTML reports are stored by default under:
+
+```text
+reports/eod/
+```
+
+Both the downloaded ExecutionOS History export and generated EOD reports are local reporting/review artifacts and should not be committed to Git.
+
 ---
 
 # Appendix D - Current development sequence
 
-At the time of this guide's publication, the intended project sequence is:
+At the time of this guide's publication, the project sequence is:
 
 1. **Analytics preservation - complete; PR #2 merged.**
 2. **Pre-V2 documentation preservation - complete; PR #3 merged.**
@@ -1840,10 +2174,13 @@ At the time of this guide's publication, the intended project sequence is:
 4. **V2.3 final acceptance and full release gate - complete.**
 5. **V2.3 release-documentation closeout - complete; PR #5 merged.**
 6. **V2.3 merge into `main` - complete; PR #1 merged.**
-7. Tag V2.3 only after explicit approval.
-8. Begin V3 Management Governor only from the confirmed tagged V2.3 baseline.
-9. Add the broker-agnostic event/adapter boundary, then a read-only NinjaTrader observer.
-10. Implement Governor Observe/Govern mode before any broker-write enforcement.
+7. **Post-merge V2.3 documentation finalization - complete; PR #6 merged.**
+8. **Frozen annotated release tag `v2.3.0` - created and verified.**
+9. **Read-only EOD reporting - complete; PR #7 merged and validated.**
+10. **Current documentation closeout - in progress.**
+11. Begin V3 Management Governor only after separate explicit authorization.
+12. Add the broker-agnostic event/adapter boundary, then a read-only NinjaTrader observer.
+13. Implement Governor Observe/Govern mode before any broker-write enforcement.
 
 The sequence is intentionally conservative. ExecutionOS is becoming a system that can influence live management decisions; correctness and auditability are more important than feature velocity.
 

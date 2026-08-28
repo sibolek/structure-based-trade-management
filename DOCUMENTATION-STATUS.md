@@ -6,22 +6,33 @@ This file distinguishes current authoritative project records from historical pl
 
 ### `USER-GUIDE.md`
 
-The **living operator guide** for ExecutionOS as it exists now. This is the primary day-to-day reference for installation, Schwab authorization, session startup, candidate creation, risk sizing, ARMED/LIVE behavior, broker binding, VALID/THREATENED/INVALID state use, persistence, troubleshooting, security, and the complete command-line appendix.
+The **living operator guide** for ExecutionOS as it exists now. This is the primary day-to-day reference for installation, Schwab authorization, session startup, candidate creation, risk sizing, ARMED/LIVE behavior, broker binding, VALID/THREATENED/INVALID state use, persistence, troubleshooting, security, command-line operation, and the complete enriched End-of-Day reporting workflow.
 
-Update this file whenever the normal operating workflow, broker integration, plan/risk fields, lifecycle semantics, persistence model, supported instruments, safety boundaries, or CLI surface changes.
+The User Guide must be updated whenever the normal operating workflow, broker integration, plan/risk fields, lifecycle semantics, persistence model, supported instruments, safety boundaries, EOD reporting procedure, or CLI surface changes.
+
+### `docs/ExecutionOS_EOD_Report.md`
+
+The dedicated operational/technical reference for the read-only EOD reporter added after the frozen V2.3.0 release baseline.
+
+It defines:
+
+- Schwab broker-authoritative trade-cycle reconstruction;
+- the ExecutionOS browser-History export used for enrichment;
+- ownership matching rules;
+- planned-risk and realized-R interpretation;
+- carry-in / closing-first context protection;
+- gross profit factor versus average win/loss factor;
+- HTML output and validation expectations.
+
+For normal operator sequencing, defer to `USER-GUIDE.md`; for EOD-specific implementation/interpretation detail, use this document.
 
 ### ExecutionOS Management Governor Project Specification v1.2
 
-The current project/architecture decision record after completion of the analytics-preservation pass. It supersedes v1.1 for current project status while preserving prior versions as historical records.
+The architecture/project decision record dated 26 August 2026 after analytics preservation.
 
-Key v1.2 additions:
+Its embedded repository SHA, PR status, and pre-release sequencing are **historical snapshots of that date**. Do not rewrite v1.2 merely to make those dated fields agree with later merges, tagging, or the EOD reporting addition.
 
-- analytics-preservation completion status;
-- recovered 384-trade population and stop-management methodology;
-- high-confidence historical R reconstruction with the documented one-trade NVDA threshold discrepancy;
-- Schwab historical 1-minute price-history validation;
-- explicit conclusion that the exact original 19-trade MFE/counterfactual sample membership is unresolved and should not be curve-fit;
-- updated repository sequencing: preservation -> V2.3 validation -> reconciliation -> documentation closeout -> merge to `main` -> tag approval -> V3.
+A future architecture revision should be created as a new specification version rather than silently rewriting v1.2.
 
 ### `research/30-day-management-study/methodology.md`
 
@@ -29,7 +40,35 @@ Authoritative technical provenance for the preserved historical study, including
 
 ### Root `README.md`
 
-Current operational overview of ExecutionOS, V2.3 capabilities, Schwab/NinjaTrader architecture, common commands, analytics-preservation status, and development sequence. It links to the living User Guide for detailed operation.
+Current operational overview of ExecutionOS, the frozen V2.3.0 execution release, current `main`, Schwab/NinjaTrader architecture, EOD reporting, common commands, analytics-preservation status, and current development sequence.
+
+### `docs/ExecutionOS_Documentation_Index.md`
+
+Cross-document inventory and authority map. Update it when major project records, release states, or pull-request milestones change.
+
+## Current implementation / release state
+
+The frozen execution release is:
+
+```text
+v2.3.0
+```
+
+Tag target:
+
+```text
+baabb75f36050599f20e6c89e8db2f1f7d7769a1
+```
+
+Current `main` includes that execution baseline plus the subsequently merged read-only EOD reporting workflow.
+
+PR #7 merged EOD reporting into `main` at:
+
+```text
+bedd70979a3b18844386bcf8f927fd8a1f62307f
+```
+
+V3 has not started.
 
 ## Historical / superseded records
 
@@ -39,22 +78,32 @@ Current operational overview of ExecutionOS, V2.3 capabilities, Schwab/NinjaTrad
 
 ### `ExecutionOS_Architecture_Validation_and_Monday_Plan_2026-08-23.pdf`
 
-**Historical planning snapshot - superseded by Project Specification v1.2.**
+**Historical planning snapshot — superseded by later validated behavior and Project Specification v1.2.**
 
-This document accurately records the pre-live-test state as of Sunday, 23 Aug 2026. Its Monday live-test instructions and "still to test" sections are intentionally not rewritten because they are evidence of the decision process at that time. Subsequent work validated the Schwab live path, expanded V2.3, and completed the analytics-preservation phase.
+Its Monday live-test instructions and “still to test” sections are intentionally preserved because they record what was known at that time.
 
 ### Project Specification v1.0 / v1.1
 
-Preserved historical specifications. v1.1 remains valuable as the post-V2.3-validation rebaseline; v1.2 is authoritative for current analytics provenance and sequencing.
+Preserved historical specifications. v1.1 remains useful as a post-V2.3-validation rebaseline; v1.2 supersedes it for the dated architecture/analytics record.
 
-## Pull requests
+### Project Specification v1.2 repository-status fields
 
-- **PR #1** - V2.3 execution system. Merged into `main` on 2026-08-27 at merge commit `e35059482f88bd5ef802fd36eb4f3ce2cdd831d7`.
-- **PR #2** - analytics preservation. Merged into `v2-execution-system` on 2026-08-27 at merge commit `780b2a5`; its conversation remains a provenance record for the recovered historical methodology and unresolved 19-trade boundary.
-- **PR #3** - preserved useful pre-V2 execution-discipline Markdown without importing obsolete pre-V2 React/UI wiring.
-- **PR #4** - reconciled `main` history into the V2.3 lineage with no V2.3 tree-content changes.
-- **PR #5** - completed the V2.3 README/User Guide release-state closeout before the final PR #1 merge.
+The architecture/design content remains authoritative for the decisions it records, but its embedded branch SHA / open-PR / untagged-release status is a **dated snapshot**, not current repository state.
+
+## Pull requests as project records
+
+- **PR #1** — V2.3 execution system. Merged into `main` on 2026-08-27.
+- **PR #2** — analytics preservation. Preserves the recovered historical methodology and unresolved 19-trade boundary.
+- **PR #3** — preserved useful pre-V2 execution-discipline Markdown without importing obsolete pre-V2 React/UI wiring.
+- **PR #4** — reconciled `main` history into the V2.3 lineage with no V2.3 tree-content changes.
+- **PR #5** — completed V2.3 release-documentation closeout before the final release merge.
+- **PR #6** — post-merge V2.3 documentation finalization.
+- **PR #7** — read-only ExecutionOS End-of-Day reporting. Merged into `main` at `bedd70979a3b18844386bcf8f927fd8a1f62307f` after deterministic, real-data, and HTML validation.
 
 ## Documentation rule
 
-Do not rewrite historical documents merely because later evidence changed the project state. Preserve them as dated snapshots and point readers to the current authoritative User Guide and Project Specification instead.
+Do not rewrite historical documents merely because later evidence changed project state. Preserve dated snapshots and point readers to the current User Guide, README, Documentation Index, EOD reference, and current code/validated behavior.
+
+When a change affects day-to-day operation, update the User Guide as part of the same documentation closeout.
+
+When a change affects architecture or a major project decision, create a new specification revision if the old specification is a dated historical record.
