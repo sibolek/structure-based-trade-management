@@ -1,9 +1,8 @@
-import { Activity, History, Radio, ShieldCheck, WifiOff } from "lucide-react";
+import { Activity, Radio, ShieldCheck, WifiOff } from "lucide-react";
 
 const WORKSPACES = [
   { id: "PRETRADE", label: "PRE-TRADE" },
   { id: "EXECUTION", label: "EXECUTION" },
-  { id: "HISTORY", label: "HISTORY" },
 ];
 
 function StatusChip({ connected, label, offlineLabel }) {
@@ -33,10 +32,10 @@ export default function WorkspaceNav({ workspace, onChange, broker, pretrade }) 
         </div>
       </div>
 
-      <nav className="grid grid-cols-3" aria-label="ExecutionOS workspaces">
+      <nav className="grid grid-cols-2" aria-label="ExecutionOS workspaces">
         {WORKSPACES.map((item) => {
           const active = workspace === item.id;
-          const Icon = item.id === "PRETRADE" ? Radio : item.id === "HISTORY" ? History : Activity;
+          const Icon = item.id === "PRETRADE" ? Radio : Activity;
           return (
             <button
               key={item.id}
