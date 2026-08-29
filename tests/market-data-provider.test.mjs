@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateMinuteBars, freshness, normalizeBars } from "../schwab-bridge/market-data-provider.mjs";
+import {
+  aggregateMinuteBars,
+  freshness,
+  isRegularTradingHours,
+  minuteContinuity,
+  normalizeBars,
+  selectSessionBars,
+  tradingDateKey,
+} from "../schwab-bridge/market-data-provider.mjs";
 import { SchwabMarketDataProvider, normalizeSchwabQuote } from "../schwab-bridge/schwab-market-data-provider.mjs";
 
 function oneMinute(timestamp, { open, high, low, close, volume = 100 } = {}) {
@@ -52,6 +60,61 @@ test("normalizes and sorts candles", () => {
   assert.deepEqual(bars.map((bar) => bar.timestamp), [60_000, 120_000]);
   assert.equal(bars[0].symbol, "NVDA");
   assert.equal(bars[0].timeframe, "1m");
+});
+
+test("RTH session selection uses America/New_York and honors DST", () => {
+  const edt = [
+    oneMinute(Date.parse("2026-08-28T13:29:00.000Z"), { open: 1, high: 1, low: 1, close: 1 }),
+    oneMinute(Date.parse("2026-08-28T13:30:00.000Z"), { open: 2, high: 2, low: 2, close: 2 }),
+    oneMinute(Date.parse("2026-08-28T19:59:00.000Z"), { open: 3, high: 3, low: 3, close: 3 }),
+    oneMinute(Date.parse("2026-08-28T20:00:00.000Z"), { open: 4, high: 4, low: 4, close: 4 }),
+  ];
+  const rth = selectSessionBars(edt, { session: "RTH", tradingDate: "2026-08-28" });
+  assert.deepEqual(rth.map((bar) => bar.timestamp), [Date.parse("2026-08-28T13:30:00.000Z"), Date.parse("2026-08-28T19:59:00.000Z")]);
+  assert.equal(isRegularTradingHours(Date.parse("2026-08-28T13:30:00.000Z")), true);
+  assert.equal(isRegularTradingHours(Date.parse("2026-08-28T20:00:00.000Z")), false);
+  assert.equal(tradingDateKey(Date.parse("2026-08-28T03:59:00.000Z")), "2026-08-27");
+
+  assert.equal(isRegularTradingHours(Date.parse("2026-01-05T14:30:00.000Z")), true); // 09:30 EST
+  assert.equal(isRegularTradingHours(Date.parse("2026-01-05T21:00:00.000Z")), false); // 16:00 EST
+});
+
+test("minute continuity detects missing and duplicate slots", () => {
+  const base = Date.parse("2026-08-28T13:30:00.000Z");
+  const bars = [
+    oneMinute(base, { open: 1, high: 1, low: 1, close: 1 }),
+    oneMinute(base + 60_000, { open: 1, high: 1, low: 1, close: 1 }),
+    oneMinute(base + 60_000, { open: 1, high: 1, low: 1, close: 1 }),
+    oneMinute(base + 180_000, { open: 1, high: 1, low: 1, close: 1 }),
+  ];
+
+  const report = minuteContinuity(bars);
+  assert.equal(report.uniqueSlots, 3);
+  assert.equal(report.duplicates, 1);
+  assert.equal(report.missingSlots, 1);
+  assert.equal(report.contiguous, false);
+});
+
+test("full 390-minute RTH session aggregates to 195 complete 2-minute bars", () => {
+  const base = Date.parse("2026-08-28T13:30:00.000Z");
+  const bars = Array.from({ length: 390 }, (_, index) => oneMinute(base + index * 60_000, {
+    open: 100 + index,
+    high: 101 + index,
+    low: 99 + index,
+    close: 100.5 + index,
+    volume: 100,
+  }));
+  const selected = selectSessionBars(bars, { session: "RTH", tradingDate: "2026-08-28" });
+  const continuity = minuteContinuity(selected);
+  const aggregated = aggregateMinuteBars(selected, { minutes: 2 });
+
+  assert.equal(selected.length, 390);
+  assert.equal(continuity.missingSlots, 0);
+  assert.equal(continuity.duplicates, 0);
+  assert.equal(aggregated.length, 195);
+  assert.equal(aggregated.every((bar) => bar.complete), true);
+  assert.equal(aggregated[0].timestamp, base);
+  assert.equal(aggregated.at(-1).timestamp, Date.parse("2026-08-28T19:58:00.000Z"));
 });
 
 test("aggregates aligned 1-minute candles into deterministic complete and incomplete 2-minute bars", () => {
