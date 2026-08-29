@@ -1,6 +1,5 @@
 import { useState } from "react";
 import BrokerStatusPanel from "./components/BrokerStatusPanel.jsx";
-import ExecutionHistoryWorkspace from "./components/ExecutionHistoryWorkspace.jsx";
 import PreTradeWaitingBoard from "./components/PreTradeWaitingBoard.jsx";
 import WorkspaceNav from "./components/WorkspaceNav.jsx";
 import useBrokerState from "./hooks/useBrokerState.js";
@@ -22,12 +21,6 @@ export default function App() {
       <div className={workspace === "PRETRADE" ? "block" : "hidden"}>
         <div className="mx-auto max-w-7xl px-3 py-4 md:px-5">
           <PreTradeWaitingBoard pretrade={pretrade} />
-        </div>
-      </div>
-
-      <div className={workspace === "HISTORY" ? "block" : "hidden"}>
-        <div className="mx-auto max-w-7xl px-3 py-4 md:px-5">
-          <ExecutionHistoryWorkspace />
         </div>
       </div>
 
