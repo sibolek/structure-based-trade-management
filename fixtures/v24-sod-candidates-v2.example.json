@@ -1,0 +1,40 @@
+{
+  "source": "SOD",
+  "bundleId": "example-2026-08-29-morning-v2",
+  "candidates": [
+    {
+      "candidateId": "sod-2026-08-29-NVDA-1",
+      "contractVersion": 2,
+      "schemaVersion": 1,
+      "source": "SOD_A_PLUS",
+      "sourceDate": "2026-08-29",
+      "generatedAt": "2026-08-29T15:55:00.000Z",
+      "symbol": "NVDA",
+      "direction": "LONG",
+      "setup": "Liquidity sweep reclaim continuation",
+      "timeframe": "2m",
+      "thesis": "Updated proposal: sweep and reclaim at structural support, requiring a firmer hold before continuation.",
+      "trigger": {
+        "type": "RECLAIM_AND_HOLD",
+        "level": 225.55
+      },
+      "structuralInvalidation": {
+        "price": 224.8,
+        "rule": "break below updated sweep low",
+        "referenceType": "SWEEP_LOW",
+        "reason": "updated long thesis invalid below the revised swept structural low"
+      },
+      "plannedEntryReference": 225.6,
+      "targets": [226.5, 227.2],
+      "managementPlan": "Manage against structure.",
+      "context": {
+        "note": "Version-supersession fixture only; not a live trade recommendation."
+      },
+      "rating": "A+",
+      "validity": null,
+      "armPolicy": {
+        "requestedMode": "AUTO"
+      }
+    }
+  ]
+}
