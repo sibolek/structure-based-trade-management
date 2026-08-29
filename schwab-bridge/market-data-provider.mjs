@@ -16,6 +16,8 @@ export class MarketDataProvider {
   }
 }
 
+export const EASTERN_TIME_ZONE = "America/New_York";
+
 function finite(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
@@ -24,6 +26,95 @@ function finite(value) {
 function isoFromMs(value) {
   const number = Number(value);
   return Number.isFinite(number) ? new Date(number).toISOString() : null;
+}
+
+function zonedParts(timestamp, timeZone = EASTERN_TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    year: Number(value.year),
+    month: Number(value.month),
+    day: Number(value.day),
+    hour: Number(value.hour),
+    minute: Number(value.minute),
+  };
+}
+
+export function tradingDateKey(timestamp, { timeZone = EASTERN_TIME_ZONE } = {}) {
+  const number = Number(timestamp);
+  if (!Number.isFinite(number)) return null;
+  const parts = zonedParts(number, timeZone);
+  return `${String(parts.year).padStart(4, "0")}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+export function isRegularTradingHours(timestamp, { timeZone = EASTERN_TIME_ZONE } = {}) {
+  const number = Number(timestamp);
+  if (!Number.isFinite(number)) return false;
+  const parts = zonedParts(number, timeZone);
+  const minuteOfDay = parts.hour * 60 + parts.minute;
+  return minuteOfDay >= 9 * 60 + 30 && minuteOfDay < 16 * 60;
+}
+
+export function selectSessionBars(bars, {
+  session = "ALL",
+  tradingDate = null,
+  timeZone = EASTERN_TIME_ZONE,
+} = {}) {
+  const normalizedSession = String(session || "ALL").toUpperCase();
+  if (!["ALL", "RTH"].includes(normalizedSession)) {
+    throw new Error("session must be ALL or RTH");
+  }
+
+  return (Array.isArray(bars) ? bars : [])
+    .filter((bar) => Number.isFinite(Number(bar?.timestamp)))
+    .filter((bar) => !tradingDate || tradingDateKey(bar.timestamp, { timeZone }) === tradingDate)
+    .filter((bar) => normalizedSession === "ALL" || isRegularTradingHours(bar.timestamp, { timeZone }))
+    .slice()
+    .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+}
+
+export function minuteContinuity(bars, { intervalMs = 60_000 } = {}) {
+  const interval = Number(intervalMs);
+  if (!Number.isFinite(interval) || interval <= 0) {
+    throw new Error("intervalMs must be a positive number");
+  }
+
+  const valid = (Array.isArray(bars) ? bars : [])
+    .map((bar) => Number(bar?.timestamp))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+
+  const unique = [...new Set(valid.map((timestamp) => Math.floor(timestamp / interval) * interval))];
+  if (!unique.length) {
+    return {
+      firstTimestamp: null,
+      lastTimestamp: null,
+      uniqueSlots: 0,
+      duplicates: 0,
+      missingSlots: 0,
+      contiguous: false,
+    };
+  }
+
+  const spanSlots = Math.floor((unique[unique.length - 1] - unique[0]) / interval) + 1;
+  const missingSlots = Math.max(0, spanSlots - unique.length);
+
+  return {
+    firstTimestamp: unique[0],
+    lastTimestamp: unique[unique.length - 1],
+    uniqueSlots: unique.length,
+    duplicates: Math.max(0, valid.length - unique.length),
+    missingSlots,
+    contiguous: missingSlots === 0,
+  };
 }
 
 export function normalizeBar(input, { symbol, timeframe = "1m", source = "UNKNOWN" } = {}) {
