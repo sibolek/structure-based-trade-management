@@ -1,16 +1,11 @@
 import http from "node:http";
+import { isAllowedLocalOrigin } from "./local-origin.mjs";
 import { PreTradeStore, DEFAULT_PRETRADE_STATE_FILE } from "./pretrade-state.mjs";
 
 const HOST = process.env.EXECUTIONOS_V24_HOST || "127.0.0.1";
 const PORT = Number(process.env.EXECUTIONOS_V24_PORT || 8788);
 const STATE_FILE = process.env.EXECUTIONOS_V24_STATE_FILE || DEFAULT_PRETRADE_STATE_FILE;
 const MAX_BODY_BYTES = 1024 * 1024;
-const ALLOWED_ORIGINS = new Set([
-  "http://127.0.0.1:5173",
-  "http://localhost:5173",
-  "http://127.0.0.1:4173",
-  "http://localhost:4173",
-]);
 
 const store = new PreTradeStore({ filePath: STATE_FILE });
 store.load();
@@ -22,7 +17,7 @@ function json(res, statusCode, payload, origin = null) {
     "content-length": Buffer.byteLength(body),
     "cache-control": "no-store",
   };
-  if (origin && ALLOWED_ORIGINS.has(origin)) {
+  if (origin && isAllowedLocalOrigin(origin)) {
     headers["access-control-allow-origin"] = origin;
     headers.vary = "Origin";
   }
@@ -62,7 +57,7 @@ const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin || null;
 
   if (req.method === "OPTIONS") {
-    if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+    if (!origin || !isAllowedLocalOrigin(origin)) {
       res.writeHead(403);
       res.end();
       return;
@@ -94,7 +89,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "POST" && req.url === "/api/candidates/import") {
-    if (origin && !ALLOWED_ORIGINS.has(origin)) {
+    if (origin && !isAllowedLocalOrigin(origin)) {
       json(res, 403, { error: "origin not allowed" });
       return;
     }
