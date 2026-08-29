@@ -1,11 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
-import { aggregateMinuteBars, freshness } from "./market-data-provider.mjs";
+import {
+  aggregateMinuteBars,
+  freshness,
+  minuteContinuity,
+  selectSessionBars,
+} from "./market-data-provider.mjs";
 import { SchwabMarketDataProvider } from "./schwab-market-data-provider.mjs";
 
 const AUTH_DIR = path.resolve(process.env.EXECUTIONOS_SCHWAB_AUTH_DIR || process.cwd());
 const TOKEN_PATH = path.join(AUTH_DIR, ".schwab-tokens.json");
 const ACCESS_SAFETY_MS = 30_000;
+const FULL_RTH_MINUTES = 390;
 
 function readCurrentAccessToken() {
   if (!fs.existsSync(TOKEN_PATH)) {
@@ -18,17 +24,6 @@ function readCurrentAccessToken() {
     throw new Error("Schwab access token is expired or near expiry. Refresh it through the existing Schwab monitor/auth flow, then rerun this read-only probe.");
   }
   return { accessToken: tokens.accessToken, expiresAt };
-}
-
-function easternDate(timestamp) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(timestamp));
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${value.year}-${value.month}-${value.day}`;
 }
 
 function broadDateWindow(date) {
@@ -82,14 +77,21 @@ async function main() {
   const quote = await provider.getQuote(symbol);
   const window = broadDateWindow(date);
   const minuteBars = await provider.getMinuteBars(symbol, { ...window, extendedHours: true });
-  const selectedMinuteBars = minuteBars.filter((bar) => easternDate(bar.timestamp) === date);
-  const twoMinuteBars = aggregateMinuteBars(selectedMinuteBars, { minutes: 2 });
-  const completeTwoMinuteBars = twoMinuteBars.filter((bar) => bar.complete);
+  const selectedMinuteBars = selectSessionBars(minuteBars, { session: "ALL", tradingDate: date });
+  const rthMinuteBars = selectSessionBars(minuteBars, { session: "RTH", tradingDate: date });
+  const rthContinuity = minuteContinuity(rthMinuteBars);
+  const rthTwoMinuteBars = aggregateMinuteBars(rthMinuteBars, { minutes: 2 });
+  const completeRthTwoMinuteBars = rthTwoMinuteBars.filter((bar) => bar.complete);
   const dailyBars = await provider.getDailyBars(symbol);
   const quoteFreshness = freshness(quote.asOf, { maxAgeMs: 15_000 });
 
   const quoteHasPrice = [quote.bid, quote.ask, quote.last].some(Number.isFinite);
-  const capabilityPass = quoteHasPrice && selectedMinuteBars.length > 0 && completeTwoMinuteBars.length > 0 && dailyBars.length > 0;
+  const capabilityPass = quoteHasPrice && selectedMinuteBars.length > 0 && completeRthTwoMinuteBars.length > 0 && dailyBars.length > 0;
+  const rthIntegrityPass = rthMinuteBars.length === FULL_RTH_MINUTES
+    && rthContinuity.missingSlots === 0
+    && rthContinuity.duplicates === 0
+    && rthTwoMinuteBars.length === FULL_RTH_MINUTES / 2
+    && completeRthTwoMinuteBars.length === FULL_RTH_MINUTES / 2;
 
   console.log("\nExecutionOS V2.4 MarketDataProvider live capability probe");
   console.log("================================================================================");
@@ -100,17 +102,19 @@ async function main() {
   console.log("");
   console.log(`Quote:            bid ${price(quote.bid)} · ask ${price(quote.ask)} · last ${price(quote.last)} · mark ${price(quote.mark)}`);
   console.log(`Quote as-of:      ${quote.asOf || "—"} · age ${ageLabel(quoteFreshness.ageMs)} · ${quoteFreshness.isStale ? "STALE" : "FRESH"}`);
-  console.log(`1-minute bars:    ${selectedMinuteBars.length} for ${date} ET`);
-  console.log(`2-minute bars:    ${twoMinuteBars.length} total · ${completeTwoMinuteBars.length} complete`);
+  console.log(`ET-day 1m bars:   ${selectedMinuteBars.length}`);
+  console.log(`RTH 1m bars:      ${rthMinuteBars.length} · missing ${rthContinuity.missingSlots} · duplicates ${rthContinuity.duplicates}`);
+  console.log(`RTH 2m bars:      ${rthTwoMinuteBars.length} total · ${completeRthTwoMinuteBars.length} complete`);
   console.log(`Daily bars:       ${dailyBars.length}`);
-  if (completeTwoMinuteBars.length) {
-    const first = completeTwoMinuteBars[0];
-    const last = completeTwoMinuteBars[completeTwoMinuteBars.length - 1];
-    console.log(`First complete 2m: ${first.time} O=${price(first.open)} H=${price(first.high)} L=${price(first.low)} C=${price(first.close)} V=${first.volume}`);
-    console.log(`Last complete 2m:  ${last.time} O=${price(last.open)} H=${price(last.high)} L=${price(last.low)} C=${price(last.close)} V=${last.volume}`);
+  if (completeRthTwoMinuteBars.length) {
+    const first = completeRthTwoMinuteBars[0];
+    const last = completeRthTwoMinuteBars[completeRthTwoMinuteBars.length - 1];
+    console.log(`First RTH 2m:     ${first.time} O=${price(first.open)} H=${price(first.high)} L=${price(first.low)} C=${price(first.close)} V=${first.volume}`);
+    console.log(`Last RTH 2m:      ${last.time} O=${price(last.open)} H=${price(last.high)} L=${price(last.low)} C=${price(last.close)} V=${last.volume}`);
   }
   console.log("");
   console.log(`Capability result: ${capabilityPass ? "PASS" : "FAIL"}`);
+  console.log(`RTH integrity:     ${rthIntegrityPass ? "PASS — 390 contiguous 1m bars → 195 complete 2m bars" : "FAIL — selected historical RTH session is not complete/contiguous"}`);
   if (quoteFreshness.isStale) {
     console.log("Freshness result:  NOT ACCEPTED YET — stale data fails closed. Market-open freshness must be validated separately.");
   } else {
@@ -118,7 +122,7 @@ async function main() {
   }
   console.log("No credentials, tokens, or account identifiers were printed.\n");
 
-  if (!capabilityPass) process.exitCode = 2;
+  if (!capabilityPass || !rthIntegrityPass) process.exitCode = 2;
 }
 
 main().catch((error) => {
