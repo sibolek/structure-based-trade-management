@@ -12,7 +12,7 @@ The **living operator guide** for ExecutionOS as it exists operationally. This r
 
 Update the User Guide whenever normal operator procedure, broker integration, risk fields, lifecycle semantics, persistence, supported instruments, safety boundaries, EOD procedure, or CLI surface changes.
 
-Phase 3 DSS closeout did not yet change the downstream V2.3 operator execution workflow, so no User Guide rewrite is required solely to record Phase 3 acceptance.
+Phase 3 DSS closeout did not change the downstream V2.3 operator execution workflow, so no User Guide rewrite was required solely to record Phase 3 acceptance.
 
 ### `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md`
 
@@ -87,19 +87,29 @@ Tag target:
 baabb75f36050599f20e6c89e8db2f1f7d7769a1
 ```
 
-At the 2026-08-31 Phase 3 closeout, current `main` is:
+Phase 3 was merged to `main` on 2026-08-31 through **PR #12**.
+
+Current post-Phase-3 merge commit:
 
 ```text
-88cbac95381c2e0292cfea8fd7f4844100600ab7
+ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e
 ```
 
 V2.4 status at that checkpoint:
 
 - Phase 1 Candidate Ingestion — **COMPLETE / MERGED**;
 - Phase 2 MarketDataProvider — **COMPLETE / MERGED / LIVE-ACCEPTED**;
-- Phase 3 DSS / Micro-Volatility Buffer — **IMPLEMENTATION COMPLETE / ACCEPTED on `v24-dss-phase3`; not yet merged**;
+- Phase 3 DSS / Micro-Volatility Buffer — **IMPLEMENTATION COMPLETE / ACCEPTED / MERGED via PR #12**;
 - Phase 4 Effective-Stop Risk Sizing — **NOT YET IMPLEMENTED**;
 - later READY/CAUTION/PASS and ARM work — **NOT YET IMPLEMENTED**.
+
+A clean Phase 4 branch now exists:
+
+```text
+v24-phase4-risk-sizing
+```
+
+It was created from the exact post-Phase-3 mainline merge commit before any Phase 4 implementation work began.
 
 Final Phase 3 local acceptance gate:
 
@@ -149,8 +159,9 @@ The V2.4 design baseline remains authoritative for design. Its statement that Ph
 - **PR #5** — V2.3 release-documentation closeout.
 - **PR #6** — post-merge V2.3 documentation finalization.
 - **PR #7** — read-only ExecutionOS End-of-Day reporting; historical merge commit `bedd70979a3b18844386bcf8f927fd8a1f62307f`.
+- **PR #12** — V2.4 Phase 3 DSS / Micro-Volatility Buffer; merged to `main` at `ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e`.
 
-Later V2.4 merges advanced `main` beyond that historical PR #7 state. Use current repository history and the Documentation Index for present branch/main status.
+Use current repository history and the Documentation Index for present branch/main status.
 
 ## Documentation rule
 
