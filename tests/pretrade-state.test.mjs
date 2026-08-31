@@ -53,6 +53,24 @@ test("valid candidate imports into WAITING and survives reload", () => {
   assert.equal(state.candidates[0].symbol, "NVDA");
 });
 
+test("legacy TRIGGER_EVALUATING state loads and saves using canonical Phase 3 lifecycle name", () => {
+  const filePath = tempStatePath();
+  fs.writeFileSync(filePath, `${JSON.stringify({
+    schemaVersion: 1,
+    updatedAt: "2026-08-28T12:05:00.000Z",
+    candidates: [{ candidateId: "legacy-1", lifecycleState: "TRIGGER_EVALUATING" }],
+    importLog: [],
+  }, null, 2)}\n`, "utf8");
+
+  const store = new PreTradeStore({ filePath });
+  const loaded = store.load();
+  assert.equal(loaded.candidates[0].lifecycleState, "PRETRADE_TRIGGER_EVALUATING");
+
+  store.save();
+  const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  assert.equal(persisted.candidates[0].lifecycleState, "PRETRADE_TRIGGER_EVALUATING");
+});
+
 test("exact same candidate version and content is idempotent", () => {
   const store = new PreTradeStore({ filePath: tempStatePath(), clock: () => "2026-08-28T12:05:00.000Z" });
   store.load();
