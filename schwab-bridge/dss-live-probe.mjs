@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { DssLiveInputAssembler } from "./dss-live-input-assembler.mjs";
 import { DssInputAssemblyError } from "./dss-input-assembler.mjs";
 import { evaluateDss } from "./dss-evaluator.mjs";
+import { RegNmsEquityPriceIncrementResolver } from "./reg-nms-equity-price-increment.mjs";
 import { SchwabMarketDataProvider } from "./schwab-market-data-provider.mjs";
 
 const ACCESS_SAFETY_MS = 30_000;
@@ -111,6 +112,7 @@ export function buildLiveProbeContext({ symbol, direction, structuralPrice, eval
 
 export async function runDssLiveProbe({
   marketDataProvider,
+  instrumentMetadataResolver = null,
   symbol,
   direction,
   structuralPrice,
@@ -130,8 +132,10 @@ export async function runDssLiveProbe({
     evaluatedAt: new Date(contextTimeMs).toISOString(),
   });
 
+  const resolver = instrumentMetadataResolver || new RegNmsEquityPriceIncrementResolver({ now });
   const assembler = new DssLiveInputAssembler({
     marketDataProvider,
+    instrumentMetadataResolver: resolver,
     now,
     snapshotIdFactory,
   });
@@ -189,6 +193,7 @@ function printReport({ args, result, authDir, expiresAt }) {
   const quote = input.marketSnapshot.quote || {};
   const integrity = input.marketSnapshot.sourceIntegrity || {};
   const instrument = input.instrument || {};
+  const regulatory = instrument.instrumentValueMetadata || {};
   const quoteAge = ageMs(quote.asOf, evaluationNowMs);
 
   console.log("\nExecutionOS V2.4 Phase 3 live DSS assembly probe");
@@ -203,10 +208,13 @@ function printReport({ args, result, authDir, expiresAt }) {
   console.log(`Quote as-of:      ${quote.asOf || "—"} · age at DSS ${ageLabel(quoteAge)}`);
   console.log(`Final refresh:    ${input.marketSnapshot.finalQuoteRefresh?.refreshedAt || "—"}`);
   console.log(`Instrument:       ${instrument.instrumentType || quote.assetMainType || "—"}`);
+  console.log(`Listing evidence: ${quote.exchangeName || "—"}${quote.exchange ? ` (${quote.exchange})` : ""} · ${quote.quoteType || "—"}${quote.otcMarketTier ? ` · OTC ${quote.otcMarketTier}` : ""}`);
   console.log(`Schwab tick:      ${price(quote.tick)}`);
   console.log(`Price increment:  ${price(instrument.priceIncrement)} · source ${instrument.priceIncrementSource || "UNVERIFIED / UNAVAILABLE"}`);
-  console.log(`Tick amount:      ${price(instrument.instrumentValueMetadata?.tickAmount)}`);
-  console.log(`Multiplier:       ${price(instrument.instrumentValueMetadata?.futureMultiplier)}`);
+  console.log(`Metadata provider:${instrument.metadataProvider ? ` ${instrument.metadataProvider}` : " —"}`);
+  console.log(`Reg NMS regime:   ${regulatory.regulatoryRegime || "—"}`);
+  console.log(`Tick amount:      ${price(regulatory.tickAmount)}`);
+  console.log(`Multiplier:       ${price(regulatory.futureMultiplier)}`);
   console.log("");
   console.log(`ATR sessions:     ${integrity.completedRthSessionsIncluded ?? "—"}/${integrity.requiredCompletedRthSessions ?? "—"} completed RTH`);
   console.log(`Evaluation sess.: ${integrity.evaluationSession || evaluation.evaluationSession || "—"}`);
