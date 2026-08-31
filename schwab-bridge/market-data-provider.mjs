@@ -63,6 +63,18 @@ export function isRegularTradingHours(timestamp, { timeZone = EASTERN_TIME_ZONE 
   return minuteOfDay >= 9 * 60 + 30 && minuteOfDay < 16 * 60;
 }
 
+export function expectedClosedRthMinutes(timestamp, { timeZone = EASTERN_TIME_ZONE } = {}) {
+  const number = Number(timestamp);
+  if (!Number.isFinite(number)) return null;
+  const parts = zonedParts(number, timeZone);
+  const minuteOfDay = parts.hour * 60 + parts.minute;
+  const rthOpenMinute = 9 * 60 + 30;
+  const rthCloseMinute = 16 * 60;
+  if (minuteOfDay < rthOpenMinute) return 0;
+  if (minuteOfDay >= rthCloseMinute) return rthCloseMinute - rthOpenMinute;
+  return minuteOfDay - rthOpenMinute;
+}
+
 export function selectSessionBars(bars, {
   session = "ALL",
   tradingDate = null,
@@ -150,12 +162,14 @@ export function normalizeBars(inputs, options = {}) {
     .sort((a, b) => a.timestamp - b.timestamp);
 }
 
-export function aggregateMinuteBars(bars, { minutes = 2 } = {}) {
+export function aggregateMinuteBars(bars, { minutes = 2, nowMs = Date.now() } = {}) {
   const bucketMinutes = Number(minutes);
   if (!Number.isInteger(bucketMinutes) || bucketMinutes < 1) {
     throw new Error("minutes must be an integer >= 1");
   }
 
+  const currentTime = Number(nowMs);
+  const hasValidCurrentTime = Number.isFinite(currentTime);
   const bucketMs = bucketMinutes * 60_000;
   const normalized = Array.isArray(bars)
     ? bars.filter((bar) => Number.isFinite(Number(bar?.timestamp))).slice().sort((a, b) => Number(a.timestamp) - Number(b.timestamp))
@@ -175,6 +189,8 @@ export function aggregateMinuteBars(bars, { minutes = 2 } = {}) {
     .map(([bucketStart, list]) => {
       const ordered = list.slice().sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
       const uniqueSlots = new Set(ordered.map((bar) => Math.floor(Number(bar.timestamp) / 60_000)));
+      const sourceComplete = uniqueSlots.size === bucketMinutes;
+      const temporallyClosed = hasValidCurrentTime && currentTime >= bucketStart + bucketMs;
       return {
         symbol: ordered[0]?.symbol || "",
         timeframe: `${bucketMinutes}m`,
@@ -187,7 +203,9 @@ export function aggregateMinuteBars(bars, { minutes = 2 } = {}) {
         close: Number(ordered[ordered.length - 1].close),
         volume: ordered.reduce((sum, bar) => sum + Number(bar.volume || 0), 0),
         sampleCount: uniqueSlots.size,
-        complete: uniqueSlots.size === bucketMinutes,
+        sourceComplete,
+        temporallyClosed,
+        complete: sourceComplete && temporallyClosed,
         lastSourceTimestamp: Number(ordered[ordered.length - 1].timestamp),
       };
     });

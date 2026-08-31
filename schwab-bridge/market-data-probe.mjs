@@ -2,9 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   aggregateMinuteBars,
+  expectedClosedRthMinutes,
   freshness,
   minuteContinuity,
   selectSessionBars,
+  tradingDateKey,
 } from "./market-data-provider.mjs";
 import { SchwabMarketDataProvider } from "./schwab-market-data-provider.mjs";
 
@@ -12,6 +14,7 @@ const AUTH_DIR = path.resolve(process.env.EXECUTIONOS_SCHWAB_AUTH_DIR || process
 const TOKEN_PATH = path.join(AUTH_DIR, ".schwab-tokens.json");
 const ACCESS_SAFETY_MS = 30_000;
 const FULL_RTH_MINUTES = 390;
+const QUOTE_MAX_AGE_MS = 5_000;
 
 function readCurrentAccessToken() {
   if (!fs.existsSync(TOKEN_PATH)) {
@@ -48,6 +51,14 @@ function ageLabel(ms) {
   return `${(number / 3_600_000).toFixed(1)}h`;
 }
 
+function expectedClosedMinutesForDate(date, nowMs) {
+  const currentTradingDate = tradingDateKey(nowMs);
+  if (!currentTradingDate) return null;
+  if (date < currentTradingDate) return FULL_RTH_MINUTES;
+  if (date > currentTradingDate) return 0;
+  return expectedClosedRthMinutes(nowMs);
+}
+
 async function main() {
   const symbol = String(process.argv[2] || "").toUpperCase();
   const date = process.argv[3];
@@ -73,25 +84,42 @@ async function main() {
     return payload;
   };
 
+  const nowMs = Date.now();
   const provider = new SchwabMarketDataProvider({ requestJson });
   const quote = await provider.getQuote(symbol);
   const window = broadDateWindow(date);
   const minuteBars = await provider.getMinuteBars(symbol, { ...window, extendedHours: true });
   const selectedMinuteBars = selectSessionBars(minuteBars, { session: "ALL", tradingDate: date });
   const rthMinuteBars = selectSessionBars(minuteBars, { session: "RTH", tradingDate: date });
-  const rthContinuity = minuteContinuity(rthMinuteBars);
-  const rthTwoMinuteBars = aggregateMinuteBars(rthMinuteBars, { minutes: 2 });
+  const closedRthMinuteBars = rthMinuteBars.filter((bar) => Number(bar.timestamp) + 60_000 <= nowMs);
+  const rthContinuity = minuteContinuity(closedRthMinuteBars);
+  const rthTwoMinuteBars = aggregateMinuteBars(rthMinuteBars, { minutes: 2, nowMs });
   const completeRthTwoMinuteBars = rthTwoMinuteBars.filter((bar) => bar.complete);
   const dailyBars = await provider.getDailyBars(symbol);
-  const quoteFreshness = freshness(quote.asOf, { maxAgeMs: 15_000 });
+  const quoteFreshness = freshness(quote.asOf, { nowMs, maxAgeMs: QUOTE_MAX_AGE_MS });
 
+  const expectedClosedMinutes = expectedClosedMinutesForDate(date, nowMs);
+  const expectedCompleteTwoMinuteBars = Number.isFinite(expectedClosedMinutes)
+    ? Math.floor(expectedClosedMinutes / 2)
+    : null;
   const quoteHasPrice = [quote.bid, quote.ask, quote.last].some(Number.isFinite);
-  const capabilityPass = quoteHasPrice && selectedMinuteBars.length > 0 && completeRthTwoMinuteBars.length > 0 && dailyBars.length > 0;
-  const rthIntegrityPass = rthMinuteBars.length === FULL_RTH_MINUTES
-    && rthContinuity.missingSlots === 0
-    && rthContinuity.duplicates === 0
-    && rthTwoMinuteBars.length === FULL_RTH_MINUTES / 2
-    && completeRthTwoMinuteBars.length === FULL_RTH_MINUTES / 2;
+  const capabilityPass = quoteHasPrice
+    && !quoteFreshness.isStale
+    && selectedMinuteBars.length > 0
+    && completeRthTwoMinuteBars.length > 0
+    && dailyBars.length > 0;
+  const continuityPass = expectedClosedMinutes === 0
+    ? closedRthMinuteBars.length === 0
+    : rthContinuity.missingSlots === 0 && rthContinuity.duplicates === 0;
+  const rthIntegrityPass = Number.isFinite(expectedClosedMinutes)
+    && closedRthMinuteBars.length === expectedClosedMinutes
+    && continuityPass
+    && completeRthTwoMinuteBars.length === expectedCompleteTwoMinuteBars;
+
+  const integrityPassLabel = expectedClosedMinutes === FULL_RTH_MINUTES
+    ? "PASS — 390 contiguous closed RTH 1m bars → 195 complete 2m bars"
+    : `PASS — ${expectedClosedMinutes} contiguous closed RTH 1m bars → ${expectedCompleteTwoMinuteBars} complete 2m bars`;
+  const integrityFailLabel = `FAIL — expected ${expectedClosedMinutes ?? "?"} closed RTH 1m bars, received ${closedRthMinuteBars.length}; missing ${rthContinuity.missingSlots}, duplicates ${rthContinuity.duplicates}; complete 2m ${completeRthTwoMinuteBars.length}/${expectedCompleteTwoMinuteBars ?? "?"}`;
 
   console.log("\nExecutionOS V2.4 MarketDataProvider live capability probe");
   console.log("================================================================================");
@@ -103,7 +131,7 @@ async function main() {
   console.log(`Quote:            bid ${price(quote.bid)} · ask ${price(quote.ask)} · last ${price(quote.last)} · mark ${price(quote.mark)}`);
   console.log(`Quote as-of:      ${quote.asOf || "—"} · age ${ageLabel(quoteFreshness.ageMs)} · ${quoteFreshness.isStale ? "STALE" : "FRESH"}`);
   console.log(`ET-day 1m bars:   ${selectedMinuteBars.length}`);
-  console.log(`RTH 1m bars:      ${rthMinuteBars.length} · missing ${rthContinuity.missingSlots} · duplicates ${rthContinuity.duplicates}`);
+  console.log(`RTH 1m bars:      ${rthMinuteBars.length} received · ${closedRthMinuteBars.length} closed · missing ${rthContinuity.missingSlots} · duplicates ${rthContinuity.duplicates}`);
   console.log(`RTH 2m bars:      ${rthTwoMinuteBars.length} total · ${completeRthTwoMinuteBars.length} complete`);
   console.log(`Daily bars:       ${dailyBars.length}`);
   if (completeRthTwoMinuteBars.length) {
@@ -114,11 +142,11 @@ async function main() {
   }
   console.log("");
   console.log(`Capability result: ${capabilityPass ? "PASS" : "FAIL"}`);
-  console.log(`RTH integrity:     ${rthIntegrityPass ? "PASS — 390 contiguous 1m bars → 195 complete 2m bars" : "FAIL — selected historical RTH session is not complete/contiguous"}`);
+  console.log(`RTH integrity:     ${rthIntegrityPass ? integrityPassLabel : integrityFailLabel}`);
   if (quoteFreshness.isStale) {
-    console.log("Freshness result:  NOT ACCEPTED YET — stale data fails closed. Market-open freshness must be validated separately.");
+    console.log("Freshness result:  FAIL — quote exceeds the configured 5-second threshold.");
   } else {
-    console.log("Freshness result:  PASS for the configured 15-second quote threshold in this probe.");
+    console.log("Freshness result:  PASS for the configured 5-second quote threshold in this probe.");
   }
   console.log("No credentials, tokens, or account identifiers were printed.\n");
 

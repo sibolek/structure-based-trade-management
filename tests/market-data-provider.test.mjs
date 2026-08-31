@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   aggregateMinuteBars,
+  expectedClosedRthMinutes,
   freshness,
   isRegularTradingHours,
   minuteContinuity,
@@ -79,6 +80,15 @@ test("RTH session selection uses America/New_York and honors DST", () => {
   assert.equal(isRegularTradingHours(Date.parse("2026-01-05T21:00:00.000Z")), false); // 16:00 EST
 });
 
+test("expected closed RTH minute count follows the New York session clock", () => {
+  assert.equal(expectedClosedRthMinutes(Date.parse("2026-08-31T13:29:59.000Z")), 0);
+  assert.equal(expectedClosedRthMinutes(Date.parse("2026-08-31T13:30:59.000Z")), 0);
+  assert.equal(expectedClosedRthMinutes(Date.parse("2026-08-31T13:31:00.000Z")), 1);
+  assert.equal(expectedClosedRthMinutes(Date.parse("2026-08-31T13:45:37.000Z")), 15);
+  assert.equal(expectedClosedRthMinutes(Date.parse("2026-08-31T13:52:02.000Z")), 22);
+  assert.equal(expectedClosedRthMinutes(Date.parse("2026-08-31T20:00:00.000Z")), 390);
+});
+
 test("minute continuity detects missing and duplicate slots", () => {
   const base = Date.parse("2026-08-28T13:30:00.000Z");
   const bars = [
@@ -106,12 +116,14 @@ test("full 390-minute RTH session aggregates to 195 complete 2-minute bars", () 
   }));
   const selected = selectSessionBars(bars, { session: "RTH", tradingDate: "2026-08-28" });
   const continuity = minuteContinuity(selected);
-  const aggregated = aggregateMinuteBars(selected, { minutes: 2 });
+  const aggregated = aggregateMinuteBars(selected, { minutes: 2, nowMs: Date.parse("2026-08-28T20:00:01.000Z") });
 
   assert.equal(selected.length, 390);
   assert.equal(continuity.missingSlots, 0);
   assert.equal(continuity.duplicates, 0);
   assert.equal(aggregated.length, 195);
+  assert.equal(aggregated.every((bar) => bar.sourceComplete), true);
+  assert.equal(aggregated.every((bar) => bar.temporallyClosed), true);
   assert.equal(aggregated.every((bar) => bar.complete), true);
   assert.equal(aggregated[0].timestamp, base);
   assert.equal(aggregated.at(-1).timestamp, Date.parse("2026-08-28T19:58:00.000Z"));
@@ -125,7 +137,7 @@ test("aggregates aligned 1-minute candles into deterministic complete and incomp
     oneMinute(base + 120_000, { open: 101.75, high: 102.25, low: 101.5, close: 102, volume: 90 }),
   ];
 
-  const aggregated = aggregateMinuteBars(bars, { minutes: 2 });
+  const aggregated = aggregateMinuteBars(bars, { minutes: 2, nowMs: base + 4 * 60_000 });
   assert.equal(aggregated.length, 2);
   assert.deepEqual(aggregated[0], {
     symbol: "NVDA",
@@ -139,11 +151,45 @@ test("aggregates aligned 1-minute candles into deterministic complete and incomp
     close: 101.75,
     volume: 250,
     sampleCount: 2,
+    sourceComplete: true,
+    temporallyClosed: true,
     complete: true,
     lastSourceTimestamp: base + 60_000,
   });
   assert.equal(aggregated[1].sampleCount, 1);
+  assert.equal(aggregated[1].sourceComplete, false);
+  assert.equal(aggregated[1].temporallyClosed, true);
   assert.equal(aggregated[1].complete, false);
+});
+
+test("forming 2-minute bar is source-complete but not temporally closed", () => {
+  const base = Date.parse("2026-08-31T13:44:00.000Z");
+  const bars = [
+    oneMinute(base, { open: 218.06, high: 218.21, low: 217.8, close: 217.86, volume: 150_000 }),
+    oneMinute(base + 60_000, { open: 217.86, high: 218.1, low: 217.78, close: 218.025, volume: 196_640 }),
+  ];
+
+  const forming = aggregateMinuteBars(bars, { minutes: 2, nowMs: Date.parse("2026-08-31T13:45:37.000Z") })[0];
+  assert.equal(forming.sourceComplete, true);
+  assert.equal(forming.temporallyClosed, false);
+  assert.equal(forming.complete, false);
+
+  const closed = aggregateMinuteBars(bars, { minutes: 2, nowMs: Date.parse("2026-08-31T13:46:02.000Z") })[0];
+  assert.equal(closed.sourceComplete, true);
+  assert.equal(closed.temporallyClosed, true);
+  assert.equal(closed.complete, true);
+});
+
+test("closed 2-minute interval with a missing source minute remains incomplete", () => {
+  const base = Date.parse("2026-08-31T13:44:00.000Z");
+  const bars = [
+    oneMinute(base, { open: 218.06, high: 218.21, low: 217.8, close: 217.86, volume: 150_000 }),
+  ];
+
+  const aggregated = aggregateMinuteBars(bars, { minutes: 2, nowMs: Date.parse("2026-08-31T13:46:10.000Z") })[0];
+  assert.equal(aggregated.sourceComplete, false);
+  assert.equal(aggregated.temporallyClosed, true);
+  assert.equal(aggregated.complete, false);
 });
 
 test("freshness fails closed for invalid timestamps and marks old data stale", () => {
