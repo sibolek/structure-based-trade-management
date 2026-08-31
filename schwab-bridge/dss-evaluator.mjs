@@ -1,8 +1,5 @@
 import crypto from "node:crypto";
-import {
-  DSS_POLICY_VERSION,
-  dssPolicyForVersion,
-} from "./dss-policy.mjs";
+import { dssPolicyForVersion } from "./dss-policy.mjs";
 import { calculateEffectiveStop } from "./effective-stop.mjs";
 import {
   EASTERN_TIME_ZONE,
@@ -98,6 +95,17 @@ function easternSession(timestamp) {
   if (minuteOfDay < 9 * 60 + 30) return "PREMARKET";
   if (minuteOfDay < 16 * 60) return "RTH";
   return "AFTER_HOURS";
+}
+
+function easternMinuteOfDay(timestamp) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Number(fields.hour) * 60 + Number(fields.minute);
 }
 
 class DssContractError extends Error {
@@ -282,11 +290,16 @@ function inspectExecutionBars(bars, {
     reasons.push("INSUFFICIENT_ATR_RECONSTRUCTION_SESSIONS");
   }
 
+  const currentBars = (grouped.get(currentTradingDate) || [])
+    .slice()
+    .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+
+  if (currentBars.length > 0 && easternMinuteOfDay(currentBars[0].timestamp) !== 9 * 60 + 30) {
+    reasons.push("CURRENT_SESSION_OPEN_BAR_MISSING");
+  }
+
   if (evaluationSession === "RTH") {
     const expectedClosedMinutes = expectedClosedRthMinutes(nowMs);
-    const currentBars = (grouped.get(currentTradingDate) || [])
-      .slice()
-      .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
 
     if (!Number.isFinite(expectedClosedMinutes) || expectedClosedMinutes < 2 || currentBars.length === 0) {
       reasons.push("CURRENT_SESSION_WARMUP_INCOMPLETE");
@@ -311,6 +324,14 @@ function inspectExecutionBars(bars, {
         reasons.push("UNEXPECTED_EXECUTION_BAR_STATE");
       }
     }
+  }
+
+  if (
+    evaluationSession === "AFTER_HOURS"
+    && currentBars.length > 0
+    && easternMinuteOfDay(currentBars[currentBars.length - 1].timestamp) !== 15 * 60 + 58
+  ) {
+    reasons.push("CURRENT_SESSION_RTH_INCOMPLETE");
   }
 
   return {
