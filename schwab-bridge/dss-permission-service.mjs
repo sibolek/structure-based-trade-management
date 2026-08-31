@@ -102,25 +102,14 @@ export class DssPermissionService {
         "INVALID_DSS_PERMISSION_CANDIDATE_IDENTITY",
       );
     }
-    if (!structuralInvalidationDefinition || typeof structuralInvalidationDefinition !== "object") {
-      throw serviceError(
-        "structuralInvalidationDefinition is required before DSS permission evaluation",
-        "MISSING_DSS_PERMISSION_STRUCTURE_DEFINITION",
-      );
-    }
-    if (!structureEvaluation || typeof structureEvaluation !== "object") {
-      throw serviceError(
-        "structureEvaluation is required before DSS permission evaluation",
-        "MISSING_DSS_PERMISSION_STRUCTURE_EVALUATION",
-      );
-    }
 
     const state = this.store.snapshot();
     const candidate = findPersistedCandidate(state, identity);
     const compactIdentityInput = identityInput(candidate);
 
     // Authorized DSS identity is already frozen. Let DssRuntime enforce the exact
-    // persisted-evaluation audit invariant without performing market-data reads.
+    // persisted-evaluation audit invariant without performing market-data reads or
+    // requiring upstream structure reevaluation.
     if (candidate.authorizedDssEvaluationId) {
       return immutable(this.runtime.evaluate(compactIdentityInput));
     }
@@ -134,7 +123,8 @@ export class DssPermissionService {
     }
 
     // A fresh VALID evaluation is reusable until a newer completed 2m bar makes it
-    // stale. Avoid unnecessary quote/history reads on quote-only permission activity.
+    // stale. Avoid unnecessary structure work and market-data reads on quote-only
+    // permission activity.
     if (candidate.currentDssEvaluationId && !candidate.currentDssEvaluationStale) {
       const current = findEvaluation(state, candidate.currentDssEvaluationId);
       if (!current) {
@@ -146,6 +136,19 @@ export class DssPermissionService {
       }
       // BLOCKED/ERROR evaluations are retryable and therefore fall through to a
       // newly assembled live input.
+    }
+
+    if (!structuralInvalidationDefinition || typeof structuralInvalidationDefinition !== "object") {
+      throw serviceError(
+        "structuralInvalidationDefinition is required when a new DSS evaluation must be assembled",
+        "MISSING_DSS_PERMISSION_STRUCTURE_DEFINITION",
+      );
+    }
+    if (!structureEvaluation || typeof structureEvaluation !== "object") {
+      throw serviceError(
+        "structureEvaluation is required when a new DSS evaluation must be assembled",
+        "MISSING_DSS_PERMISSION_STRUCTURE_EVALUATION",
+      );
     }
 
     const input = await this.inputAssembler.assemble({
