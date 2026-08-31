@@ -52,7 +52,7 @@ export function parseLiveProbeArgs(argv = []) {
   const direction = upper(directionRaw);
   const structuralPrice = finiteNumber(structuralPriceRaw);
 
-  if (!symbol || !["LONG", "SHORT"].includes(direction) || structuralPrice === null) {
+  if (!symbol || !["LONG", "SHORT"].includes(direction) || structuralPrice === null || structuralPrice <= 0) {
     const error = new Error("Usage: npm run v24:dss-live-probe -- SYMBOL LONG|SHORT STRUCTURAL_PRICE");
     error.code = "INVALID_DSS_LIVE_PROBE_ARGS";
     throw error;
@@ -66,8 +66,14 @@ export function buildLiveProbeContext({ symbol, direction, structuralPrice, eval
   const normalizedDirection = upper(direction);
   const resolvedPrice = finiteNumber(structuralPrice);
   const timestamp = text(evaluatedAt);
-  if (!normalizedSymbol || !["LONG", "SHORT"].includes(normalizedDirection) || resolvedPrice === null || Number.isNaN(Date.parse(timestamp))) {
-    throw new Error("valid symbol, direction, structuralPrice, and evaluatedAt are required");
+  if (
+    !normalizedSymbol
+    || !["LONG", "SHORT"].includes(normalizedDirection)
+    || resolvedPrice === null
+    || resolvedPrice <= 0
+    || Number.isNaN(Date.parse(timestamp))
+  ) {
+    throw new Error("valid symbol, direction, positive structuralPrice, and evaluatedAt are required");
   }
 
   const identitySeed = {
