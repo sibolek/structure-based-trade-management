@@ -1,4 +1,4 @@
-import { DSS_POLICY_V1 } from "./dss-policy.mjs";
+import { DSS_POLICY_VERSION, dssPolicyForVersion } from "./dss-policy.mjs";
 
 function finiteNumber(value, label) {
   const number = Number(value);
@@ -79,19 +79,14 @@ export function calculateEffectiveStop({
   structuralInvalidationPrice,
   atrValue,
   priceIncrement,
-  policy = DSS_POLICY_V1,
+  policyVersion = DSS_POLICY_VERSION,
 } = {}) {
   const normalizedDirection = normalizeDirection(direction);
   const structuralPrice = finiteNumber(structuralInvalidationPrice, "structuralInvalidationPrice");
   const atr = nonNegativeNumber(atrValue, "atrValue");
   const increment = positiveNumber(priceIncrement, "priceIncrement");
-
-  if (!policy || typeof policy !== "object") throw new Error("policy is required");
-  const bufferMultiplier = nonNegativeNumber(policy.bufferMultiplier, "policy.bufferMultiplier");
-  const policyVersion = Number(policy.policyVersion);
-  if (!policy.policyId || !Number.isInteger(policyVersion) || policyVersion < 1) {
-    throw new Error("policy must include policyId and integer policyVersion >= 1");
-  }
+  const policy = dssPolicyForVersion(policyVersion);
+  const bufferMultiplier = policy.bufferMultiplier;
 
   const rawVolatilityBuffer = atr * bufferMultiplier;
   const rawEffectiveStop = normalizedDirection === "LONG"
@@ -115,7 +110,7 @@ export function calculateEffectiveStop({
 
   return {
     policyId: policy.policyId,
-    policyVersion,
+    policyVersion: policy.policyVersion,
     direction: normalizedDirection,
     structuralInvalidationPrice: structuralPrice,
     atrValue: atr,
