@@ -201,7 +201,7 @@ test("runtime refuses evaluation outside PERMISSION_EVALUATING before calling th
   assert.equal(store.snapshot().dssEvaluations.length, 0);
 });
 
-test("authorized DSS identity freezes Phase 3 runtime evaluation", () => {
+test("authorized DSS identity freezes Phase 3 runtime evaluation and must remain auditable", () => {
   const { filePath, store } = makeStore();
   const fake = fakeEvaluator();
   const runtime = new DssRuntime({ store, evaluator: fake.evaluator, now: () => Date.parse("2026-08-31T14:36:05.000Z") });
@@ -215,28 +215,35 @@ test("authorized DSS identity freezes Phase 3 runtime evaluation", () => {
   assert.equal(frozen.dssEvaluationId, "runtime-eval-1");
   assert.equal(fake.calls(), 1);
   assert.equal(store.snapshot().dssEvaluations.length, 1);
+
+  setCandidateState(filePath, "ARMED", { authorizedDssEvaluationId: "missing-evaluation" });
+  store.load();
+  assert.throws(
+    () => runtime.evaluate(dssInput(store)),
+    (error) => error.code === "DSS_RUNTIME_MISSING_AUTHORIZED_EVALUATION",
+  );
+  assert.equal(fake.calls(), 1);
 });
 
-test("completed-bar observer rejects forming and wrong-timeframe events", () => {
+test("completed-bar observer rejects forming, missing-timeframe, wrong-timeframe, and invalid-timestamp events", () => {
   const { store } = makeStore();
   const runtime = new DssRuntime({ store, evaluator: fakeEvaluator().evaluator });
 
-  assert.throws(
-    () => runtime.observeCompletedBar({
-      candidateId: "sod-2026-08-31-NVDA-1",
-      contractVersion: 1,
-      bar: { timestamp: Date.now(), timeframe: "2m", complete: false },
-    }),
-    (error) => error.code === "INVALID_DSS_COMPLETED_BAR_EVENT",
-  );
-  assert.throws(
-    () => runtime.observeCompletedBar({
-      candidateId: "sod-2026-08-31-NVDA-1",
-      contractVersion: 1,
-      bar: { timestamp: Date.now(), timeframe: "1m", complete: true },
-    }),
-    (error) => error.code === "INVALID_DSS_COMPLETED_BAR_EVENT",
-  );
+  for (const bar of [
+    { timestamp: Date.now(), timeframe: "2m", complete: false },
+    { timestamp: Date.now(), complete: true },
+    { timestamp: Date.now(), timeframe: "1m", complete: true },
+    { timestamp: false, timeframe: "2m", complete: true },
+  ]) {
+    assert.throws(
+      () => runtime.observeCompletedBar({
+        candidateId: "sod-2026-08-31-NVDA-1",
+        contractVersion: 1,
+        bar,
+      }),
+      (error) => error.code === "INVALID_DSS_COMPLETED_BAR_EVENT",
+    );
+  }
 });
 
 test("runtime fails before evaluation when source or candidate hash identity does not match persistence", () => {
