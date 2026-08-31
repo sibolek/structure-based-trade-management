@@ -19,6 +19,14 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function firstPositive(...values) {
+  for (const value of values) {
+    const number = finiteNumber(value);
+    if (number !== null && number > 0) return number;
+  }
+  return null;
+}
+
 function tradingDate(timestamp) {
   const number = Number(timestamp);
   if (!Number.isFinite(number)) return null;
@@ -58,10 +66,7 @@ export class RegNmsEquityPriceIncrementResolver {
     this.now = now;
   }
 
-  async getInstrumentMetadata(symbol, {
-    quote,
-    structureEvaluation,
-  } = {}) {
+  async getInstrumentMetadata(symbol, { quote } = {}) {
     const nowMs = Number(this.now());
     if (!Number.isFinite(nowMs)) {
       throw new Error("Reg NMS resolver clock must return epoch milliseconds");
@@ -69,7 +74,7 @@ export class RegNmsEquityPriceIncrementResolver {
 
     const date = tradingDate(nowMs);
     const instrumentType = upper(quote?.assetMainType);
-    const resolvedPrice = finiteNumber(structureEvaluation?.resolvedPrice);
+    const referencePrice = firstPositive(quote?.mark, quote?.last, quote?.bid, quote?.ask);
     const evidence = {
       symbol: upper(symbol),
       tradingDate: date,
@@ -79,7 +84,7 @@ export class RegNmsEquityPriceIncrementResolver {
       assetMainType: instrumentType || null,
       assetSubType: upper(quote?.assetSubType) || null,
       otcMarketTier: text(quote?.otcMarketTier) || null,
-      resolvedStructuralPrice: resolvedPrice,
+      referencePrice,
     };
 
     if (instrumentType !== "EQUITY") {
@@ -90,8 +95,8 @@ export class RegNmsEquityPriceIncrementResolver {
       return unverified("NMS_LISTING_NOT_VERIFIED", evidence);
     }
 
-    if (resolvedPrice === null || resolvedPrice < 1) {
-      return unverified("STRUCTURAL_PRICE_BELOW_ONE_NOT_SUPPORTED", evidence);
+    if (referencePrice === null || referencePrice < 1) {
+      return unverified("SUB_DOLLAR_EQUITY_NOT_SUPPORTED", evidence);
     }
 
     if (!date || date >= VARIABLE_MPI_FIRST_TRADING_DATE) {
