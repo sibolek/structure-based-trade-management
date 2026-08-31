@@ -38,14 +38,12 @@ Historical approval documents should not be rewritten merely because later imple
 | `research/30-day-management-study/methodology.md` | `research/30-day-management-study/` | Technical provenance for duration, stop-management, historical R, MFE/counterfactual work, unresolved sample boundary, anti-curve-fitting policy | **Current authoritative analytics provenance** |
 | `DOCUMENTATION-STATUS.md` | Repository root | Distinguishes current authoritative records from historical/superseded records | **Documentation-governance record** |
 | `README.md` | Repository root | Operational overview and project entry point | **Current overview; defer to the more specific sources above** |
-| `research/30-day-management-study/README.md` | Research folder | Research-folder orientation and reproduction entry point | **Supporting research documentation** |
-| `research/30-day-management-study/expected-results.json` | Research folder | Preserved numerical fingerprint for historical-study validation | **Historical benchmark artifact; not source data** |
 
 ---
 
 ## 3. Current implementation and release baseline
 
-### Frozen execution release
+### Frozen downstream execution release
 
 The immutable validated execution-release reference remains:
 
@@ -59,29 +57,48 @@ Annotated tag target:
 baabb75f36050599f20e6c89e8db2f1f7d7769a1
 ```
 
-The V2.3 tag remains the frozen downstream execution reference. V2.4 is an upstream pre-trade permission extension and must not silently change the trusted V2.3 broker-fill ownership or execution-management semantics.
+The V2.3 tag remains the frozen downstream execution reference. V2.4 is an upstream pre-trade permission extension and must not silently change trusted V2.3 broker-fill ownership or execution-management semantics.
 
 ### Current `main`
 
-As of the Phase 3 closeout on 2026-08-31, `main` is:
+Phase 3 was merged into `main` on 2026-08-31 through **PR #12**.
+
+Current post-Phase-3 merge commit:
 
 ```text
-88cbac95381c2e0292cfea8fd7f4844100600ab7
+ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e
 ```
 
-That mainline contains the previously merged V2.4 Phase 1/Phase 2 work and the approved consolidated V2.4 design baseline v0.4.
-
-### Current Phase 3 implementation branch
-
-Phase 3 implementation/acceptance work is on:
+Merge title:
 
 ```text
-v24-dss-phase3
+Merge ExecutionOS V2.4 Phase 3 DSS implementation (#12)
 ```
 
-At the time the Phase 3 closeout record was created, the branch was ahead of `main` and not behind it. The closeout documentation is branch-local until a later explicit merge decision.
+That mainline contains:
 
-Do not describe Phase 3 as merged to `main` until that merge actually occurs.
+- frozen/trusted V2.3 downstream execution behavior;
+- read-only EOD reporting and preserved analytics tooling;
+- V2.4 Phase 1 Candidate Ingestion;
+- V2.4 Phase 2 MarketDataProvider;
+- approved consolidated V2.4 design baseline v0.4;
+- V2.4 Phase 3 DSS / Micro-Volatility Buffer implementation and acceptance documentation.
+
+### Current Phase 4 development branch
+
+The Phase 4 branch was created from the exact post-Phase-3 mainline merge commit:
+
+```text
+v24-phase4-risk-sizing
+```
+
+Initial branch point:
+
+```text
+ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e
+```
+
+Phase 4 implementation has **not** started; the next step is formal Phase 4 Effective-Stop Risk Sizing design.
 
 V3 has **not** started.
 
@@ -93,7 +110,7 @@ V3 has **not** started.
 |---|---|---|
 | Phase 1 — Candidate Ingestion | **COMPLETE / MERGED** | V2.4 Design Baseline v0.4 + current code |
 | Phase 2 — MarketDataProvider | **COMPLETE / MERGED / LIVE-ACCEPTED** | V2.4 Design Baseline v0.4 + current code |
-| Phase 3 — DSS / Micro-Volatility Buffer | **IMPLEMENTATION COMPLETE / ACCEPTED; branch not yet merged** | `ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` |
+| Phase 3 — DSS / Micro-Volatility Buffer | **IMPLEMENTATION COMPLETE / ACCEPTED / MERGED via PR #12** | `ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` |
 | Phase 4 — Effective-Stop Risk Sizing | **NOT YET IMPLEMENTED; design session next** | V2.4 Design Baseline v0.4 Phase 3→4 handoff |
 | Later context / decision gate / ARM work | **NOT YET IMPLEMENTED** | V2.4 Design Baseline v0.4 |
 
@@ -109,7 +126,7 @@ The authoritative acceptance record is:
 docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md
 ```
 
-The accepted Phase 3 scope includes:
+Accepted Phase 3 scope includes:
 
 - deterministic RTH-only Wilder ATR(14) on 2-minute bars;
 - reconstruction from 20 completed RTH sessions plus current RTH session where applicable;
@@ -124,7 +141,7 @@ The accepted Phase 3 scope includes:
 - live read-only NVDA Phase 3 calculation acceptance;
 - candidate import → persistence → PRE-TRADE Waiting Candidate Board visual smoke acceptance.
 
-Final local acceptance gate:
+Final local acceptance gate before merge:
 
 ```text
 v24:dss-test       91/91 PASS
@@ -132,6 +149,8 @@ analytics:test     123/123 PASS
 schwab:state-test  10/10 PASS
 production build   PASS
 ```
+
+The commits after that functional gate were documentation-only.
 
 Live read-only NVDA diagnostic acceptance used a synthetic LONG structural invalidation of `216.25` and produced:
 
@@ -266,6 +285,7 @@ The full operator sequence is authoritative in `USER-GUIDE.md`. The technical/re
 | `ExecutionOS_Work_Session_Report_2026-08-27` | 2026-08-27 | **Dated V2.3 acceptance record** | Aug. 27 V2.3 edge testing, reversal defect/fix, regressions, deferred items |
 | PR #7 description / validation record | 2026-08-27 | **Dated EOD acceptance record** | Analytics, trade-state, build, real EOD reconciliation, HTML validation |
 | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` | 2026-08-31 | **Authoritative Phase 3 acceptance record** | Implemented DSS scope, live market-data proof, final deterministic gate, UI smoke acceptance, safety boundary, Phase 4 handoff |
+| PR #12 | 2026-08-31 | **Phase 3 merge record** | Merged accepted Phase 3 implementation and closeout documentation to `main` |
 
 A phase closeout record may supersede an older implementation-status statement while leaving the earlier approved design document intact as historical approval evidence.
 
@@ -290,8 +310,6 @@ Do not delete these simply because they are old. Their value is historical trace
 
 ### PR #1 — V2.3 execution-system release merge
 
-- Branch: `v2-execution-system`
-- Base: `main`
 - Status: **merged**
 - Records the broker-aware V2.3 execution system.
 
@@ -322,13 +340,19 @@ Do not delete these simply because they are old. Their value is historical trace
 
 ### PR #7 — read-only End-of-Day reporting
 
-- Branch: `eod-report-v1`
-- Base: `main`
 - Status: **merged**
-- Merge commit: `bedd70979a3b18844386bcf8f927fd8a1f62307f`
+- Historical merge commit: `bedd70979a3b18844386bcf8f927fd8a1f62307f`
 - Added Schwab flat-to-flat EOD reconstruction, browser-History enrichment, planned risk/R reporting, context protection, terminal/HTML output, and deterministic tests.
 
-Later V2.4 Phase 1/2 and approved-design merges have advanced `main` beyond PR #7. Use current repository history rather than this historical PR list to identify the present mainline head.
+### PR #12 — ExecutionOS V2.4 Phase 3 DSS implementation
+
+- Branch: `v24-dss-phase3`
+- Base: `main`
+- Status: **merged**
+- Merge commit: `ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e`
+- Merged the accepted Phase 3 DSS / Micro-Volatility Buffer implementation, live Schwab capability path, lifecycle/persistence integration, exact Phase 4 handoff, and formal Phase 3 closeout documentation.
+
+Use current repository history rather than old PR descriptions to identify the present mainline head.
 
 ---
 
@@ -344,49 +368,21 @@ Important classes include:
 - diagnostics for duration, initial-risk/R basis, stop provenance, minute alignment, fast-winner sampling, and market-data validation;
 - local raw/normalized/enriched broker data and Schwab minute-history caches — intentionally Git-ignored and not documentation.
 
-Preserve the distinction between:
-
-- historical evidence;
-- reconstruction methodology;
-- reproducible code;
-- local sensitive/raw data;
-- current production semantics;
-- current EOD reporting output.
+Preserve the distinction between historical evidence, reconstruction methodology, reproducible code, local sensitive/raw data, current production semantics, and current EOD reporting output.
 
 ---
 
-## 13. What is not guaranteed to be preserved as a standalone document
-
-Not every useful explanation from development chats is necessarily exported as a formal file.
-
-Examples include:
-
-- step-by-step terminal interpretation;
-- debugging discussion;
-- intermediate architecture reasoning;
-- command-by-command acceptance guidance;
-- explanations later summarized into formal documents.
-
-If a chat decision becomes important enough to affect architecture, operation, safety, analytics provenance, reporting accuracy, or release status, promote it into the appropriate authoritative repository file rather than relying on chat memory.
-
-Phase 3 is now an example of this rule: implementation facts, live evidence, and final acceptance have been promoted into a formal closeout record.
-
----
-
-## 14. Maintenance rules
+## 13. Maintenance rules
 
 Update this index when any of the following occurs:
 
 - a new authoritative specification, design baseline, phase closeout, or User Guide version is created;
 - a V2.4 phase changes implementation or merge status;
 - the EOD reporting workflow materially changes;
-- a historical document is superseded;
 - an important validation/work-session record is produced;
-- documentation moves between repository and exported/library surfaces;
 - a major pull request is merged or materially repurposed;
 - a release tag is created/replaced;
 - a V3 branch is explicitly authorized and created;
-- a new research study replaces or extends the preserved benchmark;
 - a chat decision becomes important enough to require permanent documentation.
 
 ### Do not
@@ -395,50 +391,50 @@ Update this index when any of the following occurs:
 - treat a dated planning report as current operating policy;
 - claim an unmerged branch is already present on `main`;
 - overwrite historical records to make them agree with newer evidence;
-- claim unresolved historical sample membership has been recovered;
 - fabricate ExecutionOS ownership/planned risk/R for broker-only trades;
 - commit credentials, tokens, private account identifiers, raw private broker history, or private ExecutionOS EOD exports;
 - let an old PR description or branch README silently supersede current authoritative documentation.
 
 ---
 
-## 15. Quick reference — where to look first
+## 14. Quick reference — where to look first
 
 | Question | First source |
 |---|---|
 | How do I operate ExecutionOS today? | `USER-GUIDE.md` |
 | What is the authoritative V2.4 architecture/design? | `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` |
 | What exactly did Phase 3 implement and validate? | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` |
-| What is the accepted Phase 3→4 handoff? | Phase 3 closeout + V2.4 Design Baseline § Phase 3→Phase 4 risk handoff |
-| Has a candidate actually appeared in the UI? | Phase 3 closeout § Candidate ingestion → PRE-TRADE UI smoke acceptance |
+| Is Phase 3 merged? | **Yes — PR #12, merge commit `ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e`** |
+| What is the accepted Phase 3→4 handoff? | Phase 3 closeout + V2.4 Design Baseline Phase 3→Phase 4 risk handoff |
+| Has a candidate actually appeared in the UI? | Phase 3 closeout candidate-ingestion → PRE-TRADE UI smoke acceptance |
 | Has a WAITING candidate reached the V2.3 Execution Board? | **No**; that requires later READY/ARM work |
+| What branch starts Phase 4? | `v24-phase4-risk-sizing` |
 | How do I generate an accurate enriched EOD report? | `USER-GUIDE.md` after-session/EOD instructions |
 | What exactly does the EOD reporter compute and what are its limitations? | `docs/ExecutionOS_EOD_Report.md` |
 | What is the longer-term architecture / Governor direction? | Project Specification v1.2, interpreted as a dated architecture record |
-| What does the historical analytics evidence support? | `research/30-day-management-study/methodology.md` |
-| Which documents are current versus historical? | `DOCUMENTATION-STATUS.md` + this index |
-| What code state is the frozen V2.3 execution release? | annotated tag `v2.3.0` |
-| What code state is current main? | current `main`; at Phase 3 closeout `88cbac95381c2e0292cfea8fd7f4844100600ab7` |
+| What code state is current main after Phase 3 merge? | `ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e` |
 
 ---
 
-## 16. Current project-documentation snapshot
+## 15. Current project-documentation snapshot
 
 As of **2026-08-31**:
 
 - V2.3 execution behavior remains release-validated and frozen under annotated tag `v2.3.0` at `baabb75f36050599f20e6c89e8db2f1f7d7769a1`.
 - Read-only EOD reporting remains part of the operational mainline documentation/analytics workflow.
-- V2.4 Phase 1 candidate ingestion is complete/merged.
+- V2.4 Phase 1 Candidate Ingestion is complete/merged.
 - V2.4 Phase 2 MarketDataProvider is complete/merged/live-accepted.
 - `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` is the authoritative V2.4 design baseline.
-- V2.4 Phase 3 DSS is implementation-complete and accepted on branch `v24-dss-phase3`.
+- V2.4 Phase 3 DSS is implementation-complete, accepted, and **merged via PR #12**.
+- Phase 3 merge commit is `ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e`.
 - The final Phase 3 gate is 91/91 focused DSS, 123/123 full tests, 10/10 frozen V2.3 trade state, production build PASS.
 - A live read-only NVDA Phase 3 probe returned a VALID effective stop from real Schwab market data and verified instrument metadata.
 - A synthetic candidate was accepted through the actual import API and visibly rendered in the PRE-TRADE Waiting Candidate Board.
 - A WAITING candidate has **not** yet crossed into the existing V2.3 Execution Board; that remains intentionally gated behind later permission/READY/ARM work.
+- `v24-phase4-risk-sizing` is the clean Phase 4 branch created from the post-Phase-3 mainline.
 - Phase 4 Effective-Stop Risk Sizing is the next V2.4 design/implementation phase.
 - V3 has not started.
 
 ---
 
-**Maintenance principle:** If a future contributor cannot answer “what is authoritative, what is historical, what has actually been implemented/accepted, what data is required, and what remains intentionally gated?” from this file and the linked records, update the documentation before adding more architecture.
+**Maintenance principle:** If a future contributor cannot answer “what is authoritative, what is historical, what has actually been implemented/accepted, what has merged, what data is required, and what remains intentionally gated?” from this file and the linked records, update the documentation before adding more architecture.
