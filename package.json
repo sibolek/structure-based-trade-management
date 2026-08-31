@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "v24:pretrade": "node schwab-bridge/pretrade-api.mjs",
+    "v24:market-data-test": "node --test tests/market-data-provider.test.mjs",
+    "v24:market-data-probe": "node schwab-bridge/market-data-probe.mjs",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
