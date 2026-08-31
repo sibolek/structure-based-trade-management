@@ -28,6 +28,13 @@ test("DSS V1 policy locks the approved Phase 3 volatility parameters", () => {
 test("DSS policy lookup rejects unsupported versions", () => {
   assert.equal(dssPolicyForVersion(1), DSS_POLICY_V1);
   assert.throws(() => dssPolicyForVersion(2), /unsupported DSS policy version/);
+  assert.throws(() => calculateEffectiveStop({
+    direction: "LONG",
+    structuralInvalidationPrice: 100,
+    atrValue: 1,
+    priceIncrement: 0.01,
+    policyVersion: 2,
+  }), /unsupported DSS policy version/);
 });
 
 test("LONG effective stop subtracts 0.30 ATR buffer and rounds down protectively", () => {
@@ -94,15 +101,22 @@ test("price already on a valid increment is not moved by rounding", () => {
   assert.ok(Math.abs(short.roundingAdjustment) < 1e-12);
 });
 
-test("candidate-like bufferMultiplier input cannot override trusted DSS policy", () => {
+test("candidate-like multiplier or policy input cannot override trusted DSS policy", () => {
   const result = calculateEffectiveStop({
     direction: "LONG",
     structuralInvalidationPrice: 100,
     atrValue: 1,
     priceIncrement: 0.01,
     bufferMultiplier: 99,
+    policy: {
+      policyId: "UNTRUSTED",
+      policyVersion: 1,
+      bufferMultiplier: 99,
+    },
   });
 
+  assert.equal(result.policyId, DSS_POLICY_V1.policyId);
+  assert.equal(result.policyVersion, DSS_POLICY_V1.policyVersion);
   assert.equal(result.bufferMultiplier, 0.30);
   assert.ok(Math.abs(result.rawVolatilityBuffer - 0.30) < 1e-12);
   assert.equal(result.effectiveStop, 99.70);
