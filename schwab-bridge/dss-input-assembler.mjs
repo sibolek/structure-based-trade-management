@@ -212,7 +212,11 @@ function normalizeInstrumentMetadata(quote, resolvedMetadata) {
   const quoteTick = finiteNumber(quote?.tick);
   const resolverValue = resolvedMetadata && typeof resolvedMetadata === "object" ? resolvedMetadata : {};
   const resolverIncrement = finiteNumber(resolverValue.priceIncrement);
-  const resolverVerified = resolverValue.verified === true && resolverIncrement !== null && resolverIncrement > 0;
+  const resolverProvider = text(resolverValue.provider);
+  const resolverVerified = resolverValue.verified === true
+    && resolverIncrement !== null
+    && resolverIncrement > 0
+    && Boolean(resolverProvider);
   const quoteVerified = quoteTick !== null && quoteTick > 0;
   const priceIncrement = quoteVerified ? quoteTick : (resolverVerified ? resolverIncrement : null);
 
@@ -230,7 +234,7 @@ function normalizeInstrumentMetadata(quote, resolvedMetadata) {
     instrumentType: text(resolverValue.instrumentType || quote?.assetMainType) || null,
     priceIncrement,
     instrumentValueMetadata,
-    metadataProvider: quoteVerified ? text(quote?.source || "SCHWAB") : (resolverVerified ? text(resolverValue.provider) || null : null),
+    metadataProvider: quoteVerified ? text(quote?.source || "SCHWAB") : (resolverVerified ? resolverProvider : null),
     metadataVerified: quoteVerified || resolverVerified,
     priceIncrementSource: quoteVerified ? "SCHWAB_QUOTE_TICK" : (resolverVerified ? "VERIFIED_METADATA_RESOLVER" : null),
   };
