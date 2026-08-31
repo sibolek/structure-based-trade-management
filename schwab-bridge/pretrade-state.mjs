@@ -277,6 +277,18 @@ export class PreTradeStore {
     if (candidate.authorizedDssEvaluationId) {
       throw storeError("authorized DSS evaluation is frozen; Phase 3 recalculation is prohibited", "DSS_EVALUATION_FROZEN");
     }
+    if (candidate.currentDssEvaluationId && !candidate.currentDssEvaluationStale) {
+      const currentEvaluation = this.#findDssEvaluation(candidate.currentDssEvaluationId);
+      if (upper(currentEvaluation.status) === "VALID") {
+        throw storeError(
+          "current VALID DSS evaluation is still fresh; recalculation requires a new completed 2-minute bar",
+          "DSS_RECALCULATION_NOT_REQUIRED",
+        );
+      }
+    }
+    if (upper(evaluation.sourceId) !== upper(candidate.source)) {
+      throw storeError("DSS evaluation sourceId does not match candidate source", "DSS_CANDIDATE_SOURCE_MISMATCH");
+    }
     if (candidateContentHash !== text(candidate.contentHash)) {
       throw storeError("DSS evaluation candidateContentHash does not match candidate version", "DSS_CANDIDATE_HASH_MISMATCH");
     }
@@ -370,6 +382,12 @@ export class PreTradeStore {
 
   currentDssEvaluationForRiskHandoff(candidateId, contractVersion) {
     const candidate = this.#findCandidate(text(candidateId), Number(contractVersion));
+    if (canonicalLifecycleState(candidate.lifecycleState) !== "PERMISSION_EVALUATING") {
+      throw storeError(
+        `Phase 4 DSS handoff is not allowed while candidate is ${candidate.lifecycleState}`,
+        "DSS_HANDOFF_NOT_ALLOWED_IN_STATE",
+      );
+    }
     if (!candidate.currentDssEvaluationId) {
       throw storeError("candidate has no current DSS evaluation", "NO_CURRENT_DSS_EVALUATION");
     }
