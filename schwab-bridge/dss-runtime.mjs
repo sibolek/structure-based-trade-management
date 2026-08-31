@@ -10,7 +10,8 @@ function upper(value) {
 }
 
 function finiteTimestamp(value) {
-  if (value === null || value === undefined || value === "") return null;
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  if (typeof value === "string" && !value.trim()) return null;
   const number = Number(value);
   if (Number.isFinite(number)) return number;
   const parsed = Date.parse(String(value));
@@ -63,8 +64,14 @@ export class DssRuntime {
     now = () => Date.now(),
     idFactory,
   } = {}) {
-    if (!store || typeof store.snapshot !== "function" || typeof store.recordDssEvaluation !== "function") {
-      throw new Error("DssRuntime requires a pre-trade store");
+    const requiredStoreMethods = [
+      "snapshot",
+      "recordDssEvaluation",
+      "markCurrentDssEvaluationStale",
+      "currentDssEvaluationForRiskHandoff",
+    ];
+    if (!store || requiredStoreMethods.some((method) => typeof store[method] !== "function")) {
+      throw new Error("DssRuntime requires a compatible pre-trade store");
     }
     if (typeof evaluator !== "function") throw new Error("evaluator must be a function");
     if (typeof now !== "function") throw new Error("now must be a function");
@@ -99,14 +106,18 @@ export class DssRuntime {
     }
 
     if (candidate.authorizedDssEvaluationId) {
-      const authorized = findEvaluation(state, text(candidate.authorizedDssEvaluationId));
+      const authorizedId = text(candidate.authorizedDssEvaluationId);
+      const authorized = findEvaluation(state, authorizedId);
+      if (!authorized) {
+        throw runtimeError("authorizedDssEvaluationId has no persisted immutable evaluation", "DSS_RUNTIME_MISSING_AUTHORIZED_EVALUATION");
+      }
       return immutableResult({
         action: "FROZEN",
         reason: "AUTHORIZED_DSS_EVALUATION",
         candidateId: identity.candidateId,
         contractVersion: identity.contractVersion,
-        dssEvaluationId: text(candidate.authorizedDssEvaluationId),
-        evaluation: authorized ? structuredClone(authorized) : null,
+        dssEvaluationId: authorizedId,
+        evaluation: structuredClone(authorized),
       });
     }
 
@@ -168,7 +179,7 @@ export class DssRuntime {
     if (bar.complete !== true) {
       throw runtimeError("DSS staleness event requires a completed bar", "INVALID_DSS_COMPLETED_BAR_EVENT");
     }
-    if (bar.timeframe && text(bar.timeframe) !== "2m") {
+    if (text(bar.timeframe) !== "2m") {
       throw runtimeError("DSS staleness event requires a 2m bar", "INVALID_DSS_COMPLETED_BAR_EVENT");
     }
 
