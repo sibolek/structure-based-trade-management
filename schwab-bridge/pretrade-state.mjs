@@ -4,11 +4,14 @@ import path from "node:path";
 
 export const PRETRADE_SCHEMA_VERSION = 1;
 export const DEFAULT_PRETRADE_STATE_FILE = ".executionos-v24-state.json";
+export const PRETRADE_TRIGGER_EVALUATING = "PRETRADE_TRIGGER_EVALUATING";
+
+const LEGACY_TRIGGER_EVALUATING = "TRIGGER_EVALUATING";
 
 const ACTIVE_PRETRADE_STATES = new Set([
   "INGESTED",
   "WAITING",
-  "TRIGGER_EVALUATING",
+  PRETRADE_TRIGGER_EVALUATING,
   "PERMISSION_EVALUATING",
   "READY",
   "CAUTION",
@@ -29,6 +32,10 @@ function text(value) {
 function finiteNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+export function canonicalLifecycleState(value) {
+  return value === LEGACY_TRIGGER_EVALUATING ? PRETRADE_TRIGGER_EVALUATING : value;
 }
 
 function canonicalize(value) {
@@ -119,10 +126,20 @@ function emptyState() {
 
 function normalizeState(raw) {
   const state = raw && typeof raw === "object" ? raw : {};
+  const candidates = Array.isArray(state.candidates)
+    ? state.candidates.map((candidate) => {
+        if (!candidate || typeof candidate !== "object") return candidate;
+        return {
+          ...candidate,
+          lifecycleState: canonicalLifecycleState(candidate.lifecycleState),
+        };
+      })
+    : [];
+
   return {
     schemaVersion: PRETRADE_SCHEMA_VERSION,
     updatedAt: state.updatedAt || null,
-    candidates: Array.isArray(state.candidates) ? state.candidates : [],
+    candidates,
     importLog: Array.isArray(state.importLog) ? state.importLog : [],
   };
 }
@@ -224,7 +241,7 @@ export class PreTradeStore {
     }
 
     for (const existing of versions) {
-      if (existing.contractVersion < normalized.contractVersion && ACTIVE_PRETRADE_STATES.has(existing.lifecycleState)) {
+      if (existing.contractVersion < normalized.contractVersion && ACTIVE_PRETRADE_STATES.has(canonicalLifecycleState(existing.lifecycleState))) {
         existing.lifecycleState = "SUPERSEDED";
         existing.supersededAt = importedAt;
         existing.supersededByVersion = normalized.contractVersion;
