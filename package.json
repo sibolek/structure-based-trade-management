@@ -10,7 +10,7 @@
     "v24:pretrade": "node schwab-bridge/pretrade-api.mjs",
     "v24:market-data-test": "node --test tests/market-data-provider.test.mjs",
     "v24:market-data-probe": "node schwab-bridge/market-data-probe.mjs",
-    "v24:dss-test": "node --test tests/pretrade-state.test.mjs tests/wilder-atr.test.mjs tests/effective-stop.test.mjs tests/dss-evaluator.test.mjs tests/dss-evaluation-lifecycle.test.mjs tests/dss-runtime.test.mjs",
+    "v24:dss-test": "node --test tests/pretrade-state.test.mjs tests/wilder-atr.test.mjs tests/effective-stop.test.mjs tests/dss-evaluator.test.mjs tests/dss-evaluation-lifecycle.test.mjs tests/dss-runtime.test.mjs tests/dss-input-assembler.test.mjs",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
