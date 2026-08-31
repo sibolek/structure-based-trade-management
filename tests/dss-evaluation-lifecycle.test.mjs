@@ -213,6 +213,45 @@ test("staleness is tracked only while permission remains active", () => {
   }
 });
 
+test("fresh VALID DSS does not recalculate on quote-only activity, but a new completed bar re-enables calculation", () => {
+  const { store } = permissionStore();
+  store.recordDssEvaluation(validEvaluation(store));
+
+  assert.throws(
+    () => store.recordDssEvaluation(validEvaluation(store, { dssEvaluationId: "dss-eval-quote-tick" })),
+    (error) => error.code === "DSS_RECALCULATION_NOT_REQUIRED",
+  );
+
+  store.markCurrentDssEvaluationStale({
+    candidateId: "sod-2026-08-31-NVDA-1",
+    contractVersion: 1,
+    completedBarTimestamp: Date.parse("2026-08-31T14:36:00.000Z"),
+  });
+  const second = validEvaluation(store, {
+    dssEvaluationId: "dss-eval-002",
+    latestCompletedBar: {
+      timestamp: Date.parse("2026-08-31T14:36:00.000Z"),
+      timeframe: "2m",
+      complete: true,
+    },
+  });
+  store.recordDssEvaluation(second);
+
+  const state = store.snapshot();
+  assert.equal(state.dssEvaluations.length, 2);
+  assert.equal(state.candidates[0].currentDssEvaluationId, "dss-eval-002");
+  assert.equal(state.candidates[0].currentDssEvaluationStale, false);
+});
+
+test("DSS evaluation source identity must match the candidate source", () => {
+  const { store } = permissionStore();
+  assert.throws(
+    () => store.recordDssEvaluation(validEvaluation(store, { sourceId: "OTHER_SOURCE" })),
+    (error) => error.code === "DSS_CANDIDATE_SOURCE_MISMATCH",
+  );
+  assert.equal(store.snapshot().dssEvaluations.length, 0);
+});
+
 test("risk handoff returns the exact fresh VALID evaluation without granting ARM authority", () => {
   const { store } = permissionStore();
   const evaluation = validEvaluation(store);
