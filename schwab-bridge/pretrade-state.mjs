@@ -4,11 +4,20 @@ import path from "node:path";
 
 export const PRETRADE_SCHEMA_VERSION = 1;
 export const DEFAULT_PRETRADE_STATE_FILE = ".executionos-v24-state.json";
+export const PRETRADE_TRIGGER_EVALUATING = "PRETRADE_TRIGGER_EVALUATING";
+
+const LEGACY_TRIGGER_EVALUATING = "TRIGGER_EVALUATING";
+const DSS_STATUSES = new Set(["VALID", "BLOCKED", "ERROR"]);
+const DSS_PERMISSION_ACTIVE_STATES = new Set([
+  "PERMISSION_EVALUATING",
+  "READY",
+  "CAUTION",
+]);
 
 const ACTIVE_PRETRADE_STATES = new Set([
   "INGESTED",
   "WAITING",
-  "TRIGGER_EVALUATING",
+  PRETRADE_TRIGGER_EVALUATING,
   "PERMISSION_EVALUATING",
   "READY",
   "CAUTION",
@@ -29,6 +38,38 @@ function text(value) {
 function finiteNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function finiteTimestamp(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  if (Number.isFinite(number)) return number;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function deepFreeze(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+function runtimeCandidate(candidate) {
+  if (!candidate || typeof candidate !== "object") return candidate;
+  return {
+    ...candidate,
+    lifecycleState: canonicalLifecycleState(candidate.lifecycleState),
+    currentDssEvaluationId: text(candidate.currentDssEvaluationId) || null,
+    authorizedDssEvaluationId: text(candidate.authorizedDssEvaluationId) || null,
+    currentDssEvaluationStale: Boolean(candidate.currentDssEvaluationStale),
+    currentDssEvaluationStaleAt: text(candidate.currentDssEvaluationStaleAt) || null,
+    currentDssEvaluationStaleReason: text(candidate.currentDssEvaluationStaleReason) || null,
+    currentDssEvaluationStaleBarTimestamp: finiteTimestamp(candidate.currentDssEvaluationStaleBarTimestamp),
+  };
+}
+
+export function canonicalLifecycleState(value) {
+  return value === LEGACY_TRIGGER_EVALUATING ? PRETRADE_TRIGGER_EVALUATING : value;
 }
 
 function canonicalize(value) {
@@ -113,18 +154,45 @@ function emptyState() {
     schemaVersion: PRETRADE_SCHEMA_VERSION,
     updatedAt: null,
     candidates: [],
+    dssEvaluations: [],
     importLog: [],
   };
 }
 
 function normalizeState(raw) {
   const state = raw && typeof raw === "object" ? raw : {};
+  const dssEvaluations = Array.isArray(state.dssEvaluations)
+    ? state.dssEvaluations
+        .filter((evaluation) => evaluation && typeof evaluation === "object")
+        .map((evaluation) => deepFreeze(structuredClone(evaluation)))
+    : [];
+  const evaluationIds = new Set(dssEvaluations.map((evaluation) => text(evaluation.dssEvaluationId)).filter(Boolean));
+  const candidates = Array.isArray(state.candidates)
+    ? state.candidates.map((candidate) => {
+        const normalized = runtimeCandidate(candidate);
+        if (!normalized || typeof normalized !== "object") return normalized;
+        if (normalized.currentDssEvaluationId && !evaluationIds.has(normalized.currentDssEvaluationId)) {
+          normalized.currentDssEvaluationStale = true;
+          normalized.currentDssEvaluationStaleAt ||= state.updatedAt || null;
+          normalized.currentDssEvaluationStaleReason = "MISSING_PERSISTED_DSS_EVALUATION";
+        }
+        return normalized;
+      })
+    : [];
+
   return {
     schemaVersion: PRETRADE_SCHEMA_VERSION,
     updatedAt: state.updatedAt || null,
-    candidates: Array.isArray(state.candidates) ? state.candidates : [],
+    candidates,
+    dssEvaluations,
     importLog: Array.isArray(state.importLog) ? state.importLog : [],
   };
+}
+
+function storeError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 export class PreTradeStore {
@@ -159,9 +227,7 @@ export class PreTradeStore {
 
   importBundle(bundle) {
     if (!bundle || typeof bundle !== "object" || !Array.isArray(bundle.candidates)) {
-      const error = new Error("Import bundle must be an object with a candidates array");
-      error.code = "INVALID_BUNDLE";
-      throw error;
+      throw storeError("Import bundle must be an object with a candidates array", "INVALID_BUNDLE");
     }
 
     const importedAt = this.clock();
@@ -179,6 +245,191 @@ export class PreTradeStore {
     });
     this.save();
     return { importedAt, outcomes };
+  }
+
+  recordDssEvaluation(evaluation) {
+    if (!evaluation || typeof evaluation !== "object") {
+      throw storeError("DSS evaluation must be an object", "INVALID_DSS_EVALUATION");
+    }
+
+    const dssEvaluationId = text(evaluation.dssEvaluationId);
+    const status = upper(evaluation.status);
+    const candidateId = text(evaluation.candidateId);
+    const contractVersion = Number(evaluation.candidateContractVersion);
+    const candidateContentHash = text(evaluation.candidateContentHash);
+
+    if (!dssEvaluationId) throw storeError("dssEvaluationId is required", "INVALID_DSS_EVALUATION");
+    if (!DSS_STATUSES.has(status)) throw storeError("status must be VALID, BLOCKED, or ERROR", "INVALID_DSS_EVALUATION");
+    if (!candidateId || !Number.isInteger(contractVersion) || contractVersion < 1) {
+      throw storeError("DSS evaluation candidate identity is invalid", "INVALID_DSS_EVALUATION");
+    }
+    if (this.state.dssEvaluations.some((item) => item.dssEvaluationId === dssEvaluationId)) {
+      throw storeError(`dssEvaluationId ${dssEvaluationId} already exists`, "DSS_EVALUATION_ID_CONFLICT");
+    }
+
+    const candidate = this.#findCandidate(candidateId, contractVersion);
+    if (canonicalLifecycleState(candidate.lifecycleState) !== "PERMISSION_EVALUATING") {
+      throw storeError(
+        `DSS evaluation cannot be recorded while candidate is ${candidate.lifecycleState}`,
+        "DSS_EVALUATION_NOT_ALLOWED_IN_STATE",
+      );
+    }
+    if (candidate.authorizedDssEvaluationId) {
+      throw storeError("authorized DSS evaluation is frozen; Phase 3 recalculation is prohibited", "DSS_EVALUATION_FROZEN");
+    }
+    if (candidate.currentDssEvaluationId && !candidate.currentDssEvaluationStale) {
+      const currentEvaluation = this.#findDssEvaluation(candidate.currentDssEvaluationId);
+      if (upper(currentEvaluation.status) === "VALID") {
+        throw storeError(
+          "current VALID DSS evaluation is still fresh; recalculation requires a new completed 2-minute bar",
+          "DSS_RECALCULATION_NOT_REQUIRED",
+        );
+      }
+    }
+    if (upper(evaluation.sourceId) !== upper(candidate.source)) {
+      throw storeError("DSS evaluation sourceId does not match candidate source", "DSS_CANDIDATE_SOURCE_MISMATCH");
+    }
+    if (candidateContentHash !== text(candidate.contentHash)) {
+      throw storeError("DSS evaluation candidateContentHash does not match candidate version", "DSS_CANDIDATE_HASH_MISMATCH");
+    }
+
+    const immutableEvaluation = deepFreeze(structuredClone({ ...evaluation, status }));
+    this.state.dssEvaluations.push(immutableEvaluation);
+    candidate.currentDssEvaluationId = dssEvaluationId;
+    candidate.currentDssEvaluationStale = false;
+    candidate.currentDssEvaluationStaleAt = null;
+    candidate.currentDssEvaluationStaleReason = null;
+    candidate.currentDssEvaluationStaleBarTimestamp = null;
+
+    const recordedAt = this.clock();
+    this.state.updatedAt = recordedAt;
+    this.save();
+
+    return {
+      dssEvaluationId,
+      status,
+      candidateId,
+      contractVersion,
+      currentDssEvaluationId: candidate.currentDssEvaluationId,
+      recordedAt,
+    };
+  }
+
+  markCurrentDssEvaluationStale({
+    candidateId,
+    contractVersion,
+    completedBarTimestamp,
+    observedAt = null,
+  } = {}) {
+    const candidate = this.#findCandidate(text(candidateId), Number(contractVersion));
+    const lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
+
+    if (candidate.authorizedDssEvaluationId) {
+      return { status: "FROZEN", reason: "AUTHORIZED_DSS_EVALUATION", dssEvaluationId: candidate.authorizedDssEvaluationId };
+    }
+    if (!DSS_PERMISSION_ACTIVE_STATES.has(lifecycleState)) {
+      return { status: "IGNORED", reason: "PERMISSION_NOT_ACTIVE", lifecycleState };
+    }
+    if (!candidate.currentDssEvaluationId) {
+      return { status: "IGNORED", reason: "NO_CURRENT_DSS_EVALUATION", lifecycleState };
+    }
+    if (candidate.currentDssEvaluationStale) {
+      return { status: "ALREADY_STALE", dssEvaluationId: candidate.currentDssEvaluationId };
+    }
+
+    const nextBarTimestamp = finiteTimestamp(completedBarTimestamp);
+    if (nextBarTimestamp === null) {
+      throw storeError("completedBarTimestamp must be an epoch-millisecond or ISO-compatible timestamp", "INVALID_COMPLETED_BAR_TIMESTAMP");
+    }
+
+    const evaluation = this.#findDssEvaluation(candidate.currentDssEvaluationId);
+    const currentBarTimestamp = finiteTimestamp(evaluation.latestCompletedBar?.timestamp);
+    if (currentBarTimestamp === null) {
+      return { status: "IGNORED", reason: "NO_COMPLETED_BAR_PROVENANCE", dssEvaluationId: evaluation.dssEvaluationId };
+    }
+    if (nextBarTimestamp <= currentBarTimestamp) {
+      return {
+        status: "IGNORED",
+        reason: "COMPLETED_BAR_NOT_NEWER",
+        dssEvaluationId: evaluation.dssEvaluationId,
+        currentBarTimestamp,
+        completedBarTimestamp: nextBarTimestamp,
+      };
+    }
+
+    const observedTimestamp = observedAt ? finiteTimestamp(observedAt) : null;
+    if (observedAt && observedTimestamp === null) {
+      throw storeError("observedAt must be an epoch-millisecond or ISO-compatible timestamp", "INVALID_STALE_OBSERVED_AT");
+    }
+    const staleAt = observedTimestamp === null ? this.clock() : new Date(observedTimestamp).toISOString();
+
+    candidate.currentDssEvaluationStale = true;
+    candidate.currentDssEvaluationStaleAt = staleAt;
+    candidate.currentDssEvaluationStaleReason = "NEW_COMPLETED_2M_BAR";
+    candidate.currentDssEvaluationStaleBarTimestamp = nextBarTimestamp;
+    this.state.updatedAt = staleAt;
+    this.save();
+
+    return {
+      status: "STALE",
+      reason: candidate.currentDssEvaluationStaleReason,
+      dssEvaluationId: evaluation.dssEvaluationId,
+      staleAt,
+      previousCompletedBarTimestamp: currentBarTimestamp,
+      completedBarTimestamp: nextBarTimestamp,
+    };
+  }
+
+  currentDssEvaluationForRiskHandoff(candidateId, contractVersion) {
+    const candidate = this.#findCandidate(text(candidateId), Number(contractVersion));
+    if (canonicalLifecycleState(candidate.lifecycleState) !== "PERMISSION_EVALUATING") {
+      throw storeError(
+        `Phase 4 DSS handoff is not allowed while candidate is ${candidate.lifecycleState}`,
+        "DSS_HANDOFF_NOT_ALLOWED_IN_STATE",
+      );
+    }
+    if (!candidate.currentDssEvaluationId) {
+      throw storeError("candidate has no current DSS evaluation", "NO_CURRENT_DSS_EVALUATION");
+    }
+    if (candidate.currentDssEvaluationStale) {
+      throw storeError("current DSS evaluation is stale and must be recalculated", "STALE_DSS_EVALUATION");
+    }
+
+    const evaluation = this.#findDssEvaluation(candidate.currentDssEvaluationId);
+    if (upper(evaluation.status) !== "VALID") {
+      throw storeError(`current DSS evaluation status is ${evaluation.status}`, "DSS_EVALUATION_NOT_VALID");
+    }
+    if (
+      text(evaluation.candidateId) !== text(candidate.candidateId)
+      || Number(evaluation.candidateContractVersion) !== Number(candidate.contractVersion)
+      || text(evaluation.candidateContentHash) !== text(candidate.contentHash)
+    ) {
+      throw storeError("current DSS evaluation identity does not match candidate version", "DSS_EVALUATION_IDENTITY_MISMATCH");
+    }
+
+    return deepFreeze(structuredClone({
+      dssEvaluationId: evaluation.dssEvaluationId,
+      evaluation,
+    }));
+  }
+
+  #findCandidate(candidateId, contractVersion) {
+    const candidate = this.state.candidates.find((item) => (
+      text(item?.candidateId) === candidateId
+      && Number(item?.contractVersion) === contractVersion
+    ));
+    if (!candidate) {
+      throw storeError(`candidate ${candidateId} v${contractVersion} was not found`, "CANDIDATE_NOT_FOUND");
+    }
+    return candidate;
+  }
+
+  #findDssEvaluation(dssEvaluationId) {
+    const evaluation = this.state.dssEvaluations.find((item) => text(item?.dssEvaluationId) === text(dssEvaluationId));
+    if (!evaluation) {
+      throw storeError(`DSS evaluation ${dssEvaluationId} was not found`, "DSS_EVALUATION_NOT_FOUND");
+    }
+    return evaluation;
   }
 
   #importCandidate(input, importedAt) {
@@ -224,7 +475,7 @@ export class PreTradeStore {
     }
 
     for (const existing of versions) {
-      if (existing.contractVersion < normalized.contractVersion && ACTIVE_PRETRADE_STATES.has(existing.lifecycleState)) {
+      if (existing.contractVersion < normalized.contractVersion && ACTIVE_PRETRADE_STATES.has(canonicalLifecycleState(existing.lifecycleState))) {
         existing.lifecycleState = "SUPERSEDED";
         existing.supersededAt = importedAt;
         existing.supersededByVersion = normalized.contractVersion;
@@ -237,6 +488,12 @@ export class PreTradeStore {
       lifecycleState: "WAITING",
       importedAt,
       evaluation: null,
+      currentDssEvaluationId: null,
+      authorizedDssEvaluationId: null,
+      currentDssEvaluationStale: false,
+      currentDssEvaluationStaleAt: null,
+      currentDssEvaluationStaleReason: null,
+      currentDssEvaluationStaleBarTimestamp: null,
       arm: null,
     });
 

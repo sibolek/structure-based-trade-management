@@ -3,6 +3,8 @@ import { MarketDataProvider, normalizeBars } from "./market-data-provider.mjs";
 const MARKET_DATA_BASE = "https://api.schwabapi.com/marketdata/v1";
 
 function finite(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && !value.trim()) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -34,6 +36,7 @@ export function normalizeSchwabQuote(payload, symbol, { receivedAtMs = Date.now(
   const root = payload && typeof payload === "object" ? payload : {};
   const entry = root[normalizedSymbol] || root[Object.keys(root).find((key) => key.toUpperCase() === normalizedSymbol)] || root;
   const quote = entry?.quote && typeof entry.quote === "object" ? entry.quote : entry;
+  const reference = entry?.reference && typeof entry.reference === "object" ? entry.reference : {};
 
   const bid = firstFinite(quote?.bidPrice, quote?.bid);
   const ask = firstFinite(quote?.askPrice, quote?.ask);
@@ -42,6 +45,13 @@ export function normalizeSchwabQuote(payload, symbol, { receivedAtMs = Date.now(
   const quoteTimeMs = firstFinite(quote?.quoteTime, quote?.quoteTimeInLong, entry?.quoteTime);
   const tradeTimeMs = firstFinite(quote?.tradeTime, quote?.tradeTimeInLong, entry?.tradeTime);
   const asOfMs = Math.max(...[quoteTimeMs, tradeTimeMs].filter(Number.isFinite));
+  const tick = firstFinite(quote?.tick, reference?.tick);
+  const tickAmount = firstFinite(quote?.tickAmount, reference?.tickAmount);
+  const futureMultiplier = firstFinite(
+    quote?.futureMultiplier,
+    reference?.futureMultiplier,
+    entry?.futureMultiplier,
+  );
 
   return {
     symbol: normalizedSymbol,
@@ -55,6 +65,15 @@ export function normalizeSchwabQuote(payload, symbol, { receivedAtMs = Date.now(
     asOf: Number.isFinite(asOfMs) ? new Date(asOfMs).toISOString() : null,
     receivedAt: new Date(receivedAtMs).toISOString(),
     assetMainType: entry?.assetMainType || entry?.assetType || null,
+    assetSubType: entry?.assetSubType || null,
+    quoteType: entry?.quoteType || null,
+    realtime: typeof entry?.realtime === "boolean" ? entry.realtime : null,
+    exchange: reference?.exchange || entry?.exchange || null,
+    exchangeName: reference?.exchangeName || entry?.exchangeName || null,
+    otcMarketTier: reference?.otcMarketTier || null,
+    tick,
+    tickAmount,
+    futureMultiplier,
   };
 }
 
