@@ -1,29 +1,31 @@
 # ExecutionOS V2.4 — Phase 4 Effective-Stop Risk Sizing Closeout
 
 **Date:** 2026-09-01  
-**Status:** IMPLEMENTATION COMPLETE / ACCEPTED / MERGE-READY  
+**Status:** IMPLEMENTATION COMPLETE / ACCEPTED / MERGED via PR #14  
 **Project:** `sibolek/structure-based-trade-management`  
 **Implementation branch:** `v24-risk-sizing-phase4`  
 **Branch base:** `ee5b84bf525f65e40304764a53d680e87286e062`  
+**Merge PR:** `#14 — Merge ExecutionOS V2.4 Phase 4 effective-stop risk sizing`  
+**Merge commit:** `0a976fb8bc68f64fd479d48322a011c9d419b2c2`  
 **Design authority:** `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md`  
 **Upstream stop authority:** Phase 3 DSS / effective-stop evaluation  
-**Downstream broker boundary:** remains read-only; no order placement or broker-write authority added
+**Downstream broker boundary:** read-only; no order-placement or broker-write authority added
 
 ---
 
 ## 1. Closeout decision
 
-ExecutionOS V2.4 **Phase 4 — Effective-Stop Risk Sizing** is accepted as implementation-complete and merge-ready as of 2026-09-01.
+ExecutionOS V2.4 **Phase 4 — Effective-Stop Risk Sizing** is implementation-complete, accepted, and merged to `main` as of 2026-09-01.
 
-Phase 4 now deterministically answers the question:
+Phase 4 deterministically answers:
 
-> Given the exact effective stop established by Phase 3, the current expected entry, the exact execution account's current net-liquidation equity, and verified instrument sizing metadata, what is the maximum valid position size whose planned price risk does not exceed 0.5% of account equity?
+> Given the exact effective stop established by Phase 3, the current expected entry, the exact execution account's current net-liquidation equity, and trusted instrument sizing metadata, what is the maximum valid position size whose planned price risk does not exceed 0.5% of account equity?
 
 The governing invariant is preserved end to end:
 
 > **Phase 3 determines the correct stop. Phase 4 determines whether and how large we can afford to trade against that stop. Phase 4 never changes the stop.**
 
-The implemented chain is:
+Implemented chain:
 
 ```text
 fresh VALID Phase 3 DSS
@@ -48,7 +50,7 @@ selected-quantity validation
         ↓
 exact ARM provenance freeze
         ↓
-ARMED
+internal ARMED state
 ```
 
 No broker order is placed by this chain.
@@ -57,68 +59,63 @@ No broker order is placed by this chain.
 
 ## 2. Accepted Phase 4 scope
 
-Phase 4 implementation includes:
+Phase 4 includes:
 
 - versioned trusted risk-sizing policy;
-- deterministic expected-entry resolution for `MARKETABLE_NOW` and `STOP_TRIGGER` entry semantics;
-- strict bid/ask quote validation and five-second quote freshness;
-- exact execution-account resolution and normalized Schwab net-liquidation account equity;
+- expected-entry resolution for `MARKETABLE_NOW` and `STOP_TRIGGER`;
+- strict bid/ask validation and five-second quote freshness;
+- exact execution-account resolution;
+- Schwab current `liquidationValue` as authoritative account equity;
 - 15-second account-risk snapshot freshness;
-- USD-only V2.4 account/instrument currency contract;
+- USD-only account/instrument currency contract for V2.4;
 - normalized equity and futures sizing metadata;
-- exact futures tick-risk conversion and protective risk-tick ceiling;
-- deterministic 0.5% risk-budget calculation with downward cent rounding;
-- deterministic quantity calculation with downward-only quantity rounding;
+- exact futures tick-risk conversion with protective tick ceiling;
+- exact 0.5% risk-budget calculation with downward cent rounding;
+- downward-only quantity rounding;
 - odd-lot equity support and no fractional-share assumption;
-- `NO_AFFORDABLE_SIZE` business outcome when minimum valid size cannot fit;
-- exact planned-risk invariant enforcement;
+- `NO_AFFORDABLE_SIZE` when minimum valid size cannot fit;
 - immutable `RiskEvaluation` construction and append-only persistence;
-- exact candidate / DSS / account / quote / instrument / calculation provenance;
-- deterministic input fingerprints while preserving unique evaluation identities;
-- Phase 4 status semantics: `VALID`, `NO_AFFORDABLE_SIZE`, `BLOCKED`, `ERROR`;
-- narrow permission handoff semantics;
-- `NO_AFFORDABLE_SIZE → PASS — STOP_RISK_CONFLICT` permission mapping;
-- separate ARM-time DSS freshness validation for `READY` / `CAUTION`;
+- exact candidate / DSS / quote / account / instrument / calculation provenance;
+- deterministic input fingerprints with unique evaluation identities;
+- statuses `VALID`, `NO_AFFORDABLE_SIZE`, `BLOCKED`, `ERROR`;
+- narrow permission-handoff semantics;
+- `NO_AFFORDABLE_SIZE → PASS — STOP_RISK_CONFLICT` mapping;
 - mandatory fresh Phase 4 re-evaluation on every ARM attempt;
 - selected-quantity validation against the exact fresh risk evaluation;
-- exact immutable ARM-risk provenance;
-- final ARM authorization freshness rechecks;
+- immutable ARM-risk provenance;
+- final quote/account freshness rechecks at authorization;
 - atomic freeze of exact DSS, risk-evaluation, and selected-quantity provenance;
-- rollback of the in-memory ARM transition if state persistence fails;
-- transition to `ARMED` without granting broker-order authority.
+- rollback of in-memory ARM mutation if persistence fails;
+- transition to internal `ARMED` without broker-order authority.
 
 ---
 
 ## 3. Frozen Phase 4 risk policy
 
-The accepted V1 policy is:
-
 | Item | Accepted rule |
 |---|---|
 | Risk fraction | `0.005` = 0.5% |
 | Risk basis | Planned price risk from `currentExpectedEntry` to Phase 3 `effectiveStop` |
-| Account equity | Exact execution account current net-liquidation / liquidation value |
+| Account equity | Exact execution account current net-liquidation / `liquidationValue` |
 | Risk-budget rounding | Down to the cent; never upward |
 | Quote maximum age | 5 seconds |
 | Account snapshot maximum age | 15 seconds |
 | Supported asset types | `EQUITY`, `FUTURE` |
-| Supported account/instrument currency | USD only in V2.4 |
-| Equity minimum quantity | 1 share |
-| Equity quantity increment | 1 share |
-| Futures minimum quantity | 1 contract unless trusted metadata specifies otherwise |
+| Supported currency | USD only in V2.4 |
+| Equity minimum / increment | 1 share / 1 share |
+| Futures minimum / increment | 1 contract / 1 unless trusted metadata specifies otherwise |
 | Quantity rounding | Down to valid increment only |
 | Stop adjustment to fit risk | Prohibited |
 | Arbitrary notional cap at account equity | None in Phase 4 |
-| Portfolio heat / margin / buying-power gate | Deferred / separate layer |
+| Buying-power / margin gate | Deferred / separate layer |
+| Portfolio heat | Deferred / separate layer |
 | Slippage buffer in planned risk | None in V2.4 |
 
-A position may have notional exposure greater than account equity if planned stop risk remains within 0.5%. Broker buying power and margin eligibility are separate concerns and do not change the Phase 4 stop-risk calculation.
+A position may have notional exposure above account equity when planned stop risk remains within 0.5%. Broker buying power and margin eligibility are separate concerns and must not change the Phase 4 stop-risk calculation.
 
 ---
 
-## 4. Expected-entry semantics
-
-Phase 4 uses a conservative current expected entry rather than last/mark fallback.
+## 4. Expected-entry and stop geometry
 
 ### `MARKETABLE_NOW`
 
@@ -136,16 +133,14 @@ SHORT → min(triggerPrice, bid)
 
 Accepted quote rules:
 
-- bid must be positive;
-- ask must be positive;
+- positive bid and ask required;
 - `bid <= ask`;
 - locked markets are valid;
 - crossed markets block;
-- required quote side must exist;
 - quote age must be at most five seconds;
-- no fallback to mark, last, prior quote, or candle close.
+- no fallback to mark, last, previous quote, or candle close.
 
-Directional stop geometry is mandatory:
+Directional geometry is mandatory:
 
 ```text
 LONG:  currentExpectedEntry > effectiveStop
@@ -156,7 +151,7 @@ Invalid geometry fails closed.
 
 ---
 
-## 5. Account-risk snapshot
+## 5. Account-risk and instrument metadata
 
 The Schwab account-risk provider uses the exact execution account and normalizes:
 
@@ -164,52 +159,13 @@ The Schwab account-risk provider uses the exact execution account and normalizes
 currentBalances.liquidationValue
 ```
 
-as Phase 4 `accountEquity`.
+It does not substitute cash, buying power, available funds, margin excess, initial balances, another account, or `currentBalances.equity` when liquidation value is absent.
 
-It does not substitute:
+Account snapshots preserve account identity, equity, currency, observation time, age, source, and source snapshot identity.
 
-- current cash;
-- buying power;
-- available funds;
-- margin excess;
-- initial balances;
-- another account;
-- `currentBalances.equity` when authoritative liquidation value is absent.
+For equities, Phase 4 uses whole-share USD sizing. Phase 3 remains responsible for effective-stop price-increment rounding.
 
-The account snapshot carries:
-
-```text
-accountId
-accountEquity
-currency
-observedAt
-ageMs
-source
-sourceSnapshotId
-```
-
-The maximum valid snapshot age is 15 seconds. Invalid, missing, stale, zero, negative, unsupported-currency, or unresolved-account data blocks sizing.
-
----
-
-## 6. Instrument sizing metadata
-
-### Equities
-
-Phase 4 equity sizing uses:
-
-```text
-assetType = EQUITY
-currency = USD
-minimumQuantity = 1
-quantityIncrement = 1
-```
-
-A Phase 3 price-increment resolver is not required for Phase 4 equity dollar-risk conversion. Phase 3 price-increment logic remains responsible for effective-stop price rounding.
-
-### Futures
-
-Phase 4 futures sizing metadata supports:
+For futures, sizing metadata supports:
 
 ```text
 tickSize
@@ -230,29 +186,25 @@ tickAmount       → tickValue
 futureMultiplier → pointValue
 ```
 
-For futures:
+Futures risk uses:
 
 ```text
 riskTicks = ceil(riskDistance / tickSize)
 riskPerContract = riskTicks × tickValue
 ```
 
-If `pointValue` exists, `tickSize × pointValue` must agree with `tickValue`; otherwise metadata is inconsistent and sizing blocks.
+If `pointValue` is present, it must be consistent with `tickSize × pointValue == tickValue`.
 
 ---
 
-## 7. Deterministic risk calculation
-
-The calculator uses exact decimal/rational arithmetic at hard boundaries rather than trusting binary floating-point rounding.
-
-### Risk budget
+## 6. Deterministic calculation and affordability
 
 ```text
 rawMaxDollarRisk = accountEquity × 0.005
 maxDollarRisk = floorToCent(rawMaxDollarRisk)
 ```
 
-### Equity risk
+Equity risk:
 
 ```text
 LONG riskDistance  = currentExpectedEntry - effectiveStop
@@ -260,14 +212,14 @@ SHORT riskDistance = effectiveStop - currentExpectedEntry
 riskPerShare = riskDistance
 ```
 
-### Futures risk
+Futures risk:
 
 ```text
 riskTicks = ceil(riskDistance / tickSize)
 riskPerContract = riskTicks × tickValue
 ```
 
-### Quantity
+Quantity:
 
 ```text
 rawQuantity = maxDollarRisk / riskPerUnit
@@ -276,32 +228,25 @@ finalQuantity = floor(rawQuantity / quantityIncrement) × quantityIncrement
 
 Phase 4 may only round quantity downward.
 
-If:
-
-```text
-finalQuantity < minimumQuantity
-```
-
-then the result is:
+If the minimum valid quantity does not fit:
 
 ```text
 NO_AFFORDABLE_SIZE
 MINIMUM_QUANTITY_EXCEEDS_RISK_BUDGET
 ```
 
-For a valid size:
+For a valid result:
 
 ```text
-plannedDollarRisk = finalQuantity × riskPerUnit
 plannedDollarRisk <= maxDollarRisk
 plannedRiskFraction <= 0.005
 ```
 
-Violation of those trusted invariants is an `ERROR`, not a normal trading outcome.
+Trusted invariant violations are `ERROR`, not ordinary trade outcomes.
 
 ---
 
-## 8. Phase 4 status and permission semantics
+## 7. Status and permission semantics
 
 Phase 4 statuses are exactly:
 
@@ -312,13 +257,13 @@ BLOCKED
 ERROR
 ```
 
-Precedence is:
+Precedence:
 
 ```text
 ERROR > BLOCKED > NO_AFFORDABLE_SIZE > VALID
 ```
 
-Downstream mapping is:
+Downstream mapping:
 
 | Phase 4 status | Permission consequence |
 |---|---|
@@ -327,23 +272,18 @@ Downstream mapping is:
 | `BLOCKED` | Permission cannot advance |
 | `ERROR` | Fail closed |
 
-Phase 4 does not itself emit `READY`, `CAUTION`, or `PASS` and never manufactures `CAUTION`.
+Phase 4 itself does not manufacture `READY`, `CAUTION`, or discretionary trade permission.
 
 ---
 
-## 9. Immutable RiskEvaluation and persistence
+## 8. Immutable RiskEvaluation and persistence
 
-Every attempted Phase 4 evaluation produces a unique immutable `riskEvaluationId` when a valid Phase 3 DSS handoff exists and Phase 4 execution reaches the evaluation boundary.
-
-The immutable record links:
+Every Phase 4 evaluation that reaches the risk-evaluation boundary receives a unique immutable `riskEvaluationId` linked to the exact candidate and Phase 3 DSS evaluation.
 
 ```text
-candidateId
-candidateVersion
-candidateHash
+candidate identity
       ↓
-dssEvaluationId
-effectiveStop
+dssEvaluationId + effectiveStop
       ↓
 expected-entry provenance
       ↓
@@ -356,28 +296,26 @@ calculation
 riskEvaluationId
 ```
 
-The repository is append-only.
+Accepted persistence behavior:
 
-Accepted behavior:
-
-- evaluation IDs may not be reused;
+- evaluation IDs are append-only and may not be reused;
 - identical inputs may produce separate evaluation IDs;
-- identical inputs produce the same deterministic input fingerprint;
-- `BLOCKED`, `ERROR`, and `NO_AFFORDABLE_SIZE` records are retained when an evaluation record can validly be constructed;
-- corrupted persisted evaluation contracts fail closed on load;
+- identical inputs may share the same deterministic fingerprint;
+- validly constructible `BLOCKED`, `ERROR`, and `NO_AFFORDABLE_SIZE` attempts are retained;
+- corrupted persisted contracts fail closed;
 - duplicate persisted IDs fail closed;
 - historical evaluations are never mutated into a newer truth.
 
 ---
 
-## 10. Permission-time orchestration
+## 9. Permission-time and ARM-time orchestration
 
-`RiskSizingPermissionService` orchestrates:
+Permission-time orchestration is:
 
 ```text
 fresh VALID DSS handoff
         ↓
-quote / ExpectedEntryResolver
+ExpectedEntryResolver
         ↓
 AccountRiskProvider
         ↓
@@ -385,103 +323,39 @@ InstrumentSizingMetadataProvider
         ↓
 RiskSizingCalculator
         ↓
-RiskEvaluation
-        ↓
-append-only persistence
+RiskEvaluation persistence
         ↓
 narrow Phase 4 permission result
 ```
 
-Independent live prerequisites are read together where appropriate so multiple observable blockers can be preserved without running sizing against incomplete inputs.
+A stale/invalid Phase 3 DSS fails before Phase 4 live reads and before Phase 4 risk persistence.
 
-A stale or invalid Phase 3 DSS fails before Phase 4 live reads and before Phase 4 risk-evaluation persistence.
+Every ARM attempt from `READY` or `CAUTION` requires a **new Phase 4 evaluation**. A recent permission-time risk evaluation is never reused merely because it is recent.
 
-Each permission evaluation that reaches Phase 4 creates a new immutable Phase 4 evaluation. Phase 4 does not persist on every quote tick while a candidate merely waits.
+Selected quantity must satisfy trusted minimum/increment metadata and:
+
+```text
+selectedQuantity <= maxAffordableQuantity
+```
+
+Smaller selected quantity is allowed without changing the risk evaluation or effective stop.
 
 ---
 
-## 11. ARM-time fresh risk sizing
+## 10. Final ARM authorization and provenance freeze
 
-Every ARM attempt requires a brand-new Phase 4 evaluation.
+At final internal authorization, the system rechecks:
 
-The ARM path accepts only:
-
-```text
-READY
-CAUTION
-```
-
-and first proves that the exact current Phase 3 DSS is:
-
-- present;
-- `VALID`;
-- non-stale;
-- candidate-identity consistent;
-- not already authorized/frozen.
-
-Then the system obtains fresh Phase 4 inputs and persists a new `riskEvaluationId`.
-
-There is no rule that a recent permission-time risk evaluation is "fresh enough" for ARM. ARM always re-evaluates.
-
-After `ARMED`, automatic Phase 4 recalculation is prohibited.
-
----
-
-## 12. Selected quantity and ARM provenance
-
-The Phase 4 calculated `finalQuantity` is a maximum risk-affordable quantity, not a mandatory trade size.
-
-The selected quantity may be smaller, provided it satisfies trusted minimum/increment metadata.
-
-```text
-selectedQuantity <= finalQuantity
-```
-
-Examples:
-
-```text
-maxAffordableQuantity = 90
-90 → valid
-50 → valid
-91 → QUANTITY_EXCEEDS_RISK_LIMIT
-```
-
-A smaller selected quantity does not alter:
-
-- the Phase 3 structural invalidation;
-- the Phase 3 effective stop;
-- the immutable Phase 4 risk evaluation.
-
-The exact ARM-risk provenance is:
-
-```text
-candidateVersion
-dssEvaluationId
-riskEvaluationId
-selectedQuantity
-```
-
----
-
-## 13. Final ARM authorization and freeze
-
-Authorization uses a two-layer validation boundary:
-
-1. Reload the exact immutable `riskEvaluationId` and reconstruct/validate the ARM-risk handoff.
-2. Recheck final candidate state and atomically freeze authorization provenance.
-
-At authorization, the system rechecks:
-
-- candidate source/identity;
+- candidate/source identity;
 - `READY` / `CAUTION` lifecycle;
-- current DSS identity;
+- exact current DSS identity;
 - DSS non-staleness;
-- risk-evaluation validity;
-- selected quantity versus exact maximum and increment;
-- quote age at authorization, maximum five seconds;
-- account snapshot age at authorization, maximum 15 seconds.
+- immutable risk-evaluation validity;
+- selected quantity versus exact maximum/increment;
+- quote age at authorization ≤ 5 seconds;
+- account snapshot age at authorization ≤ 15 seconds.
 
-A successful authorization freezes:
+Successful authorization freezes:
 
 ```text
 authorizedDssEvaluationId
@@ -496,17 +370,15 @@ arm: {
 lifecycleState = ARMED
 ```
 
-If persistence fails, the in-memory ARM mutation is rolled back rather than leaving a half-armed candidate.
+If state persistence fails, the in-memory transition rolls back.
 
-Authorization returns provenance only. It does not expose broker-order authority.
+`ARMED` here is an **internal V2.4 authorization/provenance state**. It is not proof of broker order submission, fill ownership, or transfer into the existing V2.3 Execution Board.
 
 ---
 
-## 14. Final deterministic acceptance gate
+## 11. Final deterministic acceptance gate
 
-The final Phase 4 closeout gate was executed in the user's local Phase 4 worktree on 2026-09-01.
-
-Results:
+Executed locally on 2026-09-01:
 
 ```text
 v24:risk-sizing-test  170/170 PASS
@@ -516,139 +388,58 @@ schwab:state-test      10/10 PASS
 production build      PASS
 ```
 
-The full repository test suite completed with zero failures.
+Zero failures were observed.
 
-The frozen V2.3 deterministic trade-state suite remained 10/10 green, covering:
-
-- flat → long entry;
-- long add;
-- long partial;
-- long → flat;
-- long → short reversal;
-- flat → short entry;
-- short add;
-- short partial cover;
-- short → flat;
-- short → long reversal.
-
-The focused Phase 4 suite includes coverage for:
-
-- expected-entry semantics and quote freshness;
-- account-equity semantics and account freshness;
-- equity and futures instrument metadata;
-- exact risk arithmetic and quantity boundaries;
-- immutable risk evaluation/persistence;
-- end-to-end permission sizing;
-- ARM DSS handoff;
-- mandatory ARM-time Phase 4 refresh;
-- selected quantity / provenance validation;
-- permission status mapping;
-- final atomic authorization/freeze;
-- stale quote/account at authorization;
-- changed DSS after preparation;
-- tampered provenance;
-- duplicate authorization;
-- persistence rollback;
-- no broker-order authority.
+The frozen V2.3 deterministic trade-state suite remained 10/10 green across long/short entries, adds, partials, flats, and reversals.
 
 ---
 
-## 15. Safety and authority boundary at closeout
+## 12. Safety boundary and deferred work
 
-Phase 4 has authority to:
+Phase 4 may:
 
 - calculate maximum planned-risk-affordable size from the Phase 3 effective stop;
-- produce immutable risk evaluations;
-- map sizing outcomes into a narrow permission consequence;
-- validate a selected quantity;
-- freeze exact risk/DSS/quantity provenance into `ARMED` state.
+- persist immutable risk evaluations;
+- produce the narrow risk consequence for downstream permission logic;
+- validate selected quantity;
+- freeze exact DSS/risk/quantity provenance into internal `ARMED`.
 
-Phase 4 does **not** have authority to:
+Phase 4 may **not**:
 
 - change structural invalidation;
 - change the Phase 3 effective stop;
-- place a broker order;
-- modify a broker order;
-- cancel an order;
-- replace a stop order;
+- place, modify, cancel, or replace broker orders;
 - flatten a position;
 - claim ownership of a broker fill;
-- change trusted V2.3 execution-management semantics.
+- silently change trusted V2.3 execution-management semantics.
 
-The Schwab market/account-data path used here remains read-only.
+Deferred work includes:
 
-`ARMED` is an internal authorization state, not proof that an order has been submitted or filled.
+1. broader context / decision-gate logic beyond Phase 4 risk consequences;
+2. explicit internal V2.4 `ARMED` → existing V2.3 Execution Board transfer/binding;
+3. broker-write / order-placement capability;
+4. buying-power / margin / broker-eligibility gate;
+5. portfolio heat / aggregate concurrent risk;
+6. non-USD conversion and additional asset types;
+7. fractional-share support if needed;
+8. slippage/gap/fee modeling beyond planned entry-to-effective-stop risk;
+9. operator/UI exposure of Phase 4 internals where later product work chooses to expose them;
+10. production live smoke testing of the complete internal chain if a safe harness is later desired.
 
 ---
 
-## 16. Phase 3 → Phase 4 → downstream authority chain
+## 13. Merge record
 
-The accepted authority chain is now:
+Phase 4 was merged through **PR #14** on 2026-09-01.
 
 ```text
-Candidate / structure authority
-        ↓
-Phase 3 DSS
-  structural invalidation
-  effectiveStop
-  dssEvaluationId
-        ↓
-Phase 4 risk sizing
-  currentExpectedEntry
-  account equity
-  instrument conversion
-  maxAffordableQuantity
-  riskEvaluationId
-        ↓
-Permission consequence
-        ↓
-READY / CAUTION only when broader permission logic allows
-        ↓
-ARM attempt
-        ↓
-fresh Phase 4 evaluation
-        ↓
-selected quantity validation
-        ↓
-exact provenance freeze
-        ↓
-ARMED
+PR:           #14
+Branch:       v24-risk-sizing-phase4
+Base at PR:   main @ ee5b84bf525f65e40304764a53d680e87286e062
+Merge commit: 0a976fb8bc68f64fd479d48322a011c9d419b2c2
 ```
 
-The existing V2.3 Execution Board and broker-fill ownership remain downstream and separate.
-
----
-
-## 17. Known follow-up / deferred work
-
-The following are intentionally outside this Phase 4 closeout and are not Phase 4 defects:
-
-1. **Broader context / decision-gate logic** that determines when otherwise valid candidates become `READY`, `CAUTION`, or `PASS` beyond the implemented risk-sizing consequence.
-2. **ARM-to-existing-V2.3 Execution Board transfer/integration** and any explicit execution-contract binding required after internal `ARMED` state.
-3. **Broker write / order placement** capability; no such authority is added here.
-4. **Buying-power / margin / broker-eligibility gate** separate from planned stop-risk sizing.
-5. **Portfolio heat / aggregate concurrent risk** beyond per-trade 0.5% planned risk.
-6. **Non-USD currency conversion**.
-7. **Additional asset types** beyond equities and futures.
-8. **Fractional-share support** if a future execution venue requires it.
-9. **Slippage/gap/fee loss modeling** beyond planned entry-to-effective-stop price risk.
-10. **Disarm/rearm lifecycle integration** beyond the accepted rule that a rearm requires a new permission/ARM risk evaluation.
-11. **Operator/UI exposure of Phase 4 sizing and ARM provenance**, where later product work chooses to display it.
-12. **Production live smoke acceptance of the complete Phase 4 internal chain**, if/when a safe read-only/synthetic harness is desired; deterministic implementation acceptance is complete without broker writes.
-
----
-
-## 18. Merge-readiness statement
-
-As of this closeout:
-
-- the Phase 4 branch is based on current `main` commit `ee5b84bf525f65e40304764a53d680e87286e062`;
-- the branch is ahead of `main` with no behind/divergence condition observed at final review;
-- the Phase 4 implementation is additive to the post-Phase-3 baseline;
-- the approved Phase 4 design baseline is committed in the branch;
-- all focused, upstream-regression, full-repository, frozen V2.3 state, and production-build gates pass;
-- the broker boundary remains read-only;
-- the implementation is ready for pull-request review and merge into `main`.
+The merge added the approved Phase 4 design baseline, Phase 4 runtime modules, focused tests, closeout record, and documentation-index update. The accepted safety boundary remains unchanged after merge.
 
 ---
 
