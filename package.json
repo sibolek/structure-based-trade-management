@@ -12,6 +12,7 @@
     "v24:market-data-probe": "node schwab-bridge/market-data-probe.mjs",
     "v24:dss-live-probe": "node schwab-bridge/dss-live-probe.mjs",
     "v24:dss-test": "node --test tests/pretrade-state.test.mjs tests/wilder-atr.test.mjs tests/effective-stop.test.mjs tests/dss-evaluator.test.mjs tests/dss-evaluation-lifecycle.test.mjs tests/dss-runtime.test.mjs tests/dss-input-assembler.test.mjs tests/dss-live-probe.test.mjs tests/reg-nms-equity-price-increment.test.mjs tests/dss-permission-service.test.mjs",
+    "v24:risk-sizing-test": "node --test tests/risk-sizing-calculator.test.mjs",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
