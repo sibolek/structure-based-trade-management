@@ -1,6 +1,6 @@
 # ExecutionOS Documentation Status
 
-**Updated:** 2026-08-31
+**Updated:** 2026-09-01
 
 This file distinguishes current authoritative project records from historical planning snapshots and dated approval artifacts.
 
@@ -8,74 +8,85 @@ This file distinguishes current authoritative project records from historical pl
 
 ### `USER-GUIDE.md`
 
-The **living operator guide** for ExecutionOS as it exists operationally. This remains the primary day-to-day reference for installation, Schwab authorization, session startup, candidate creation, risk sizing, ARMED/LIVE behavior, broker binding, VALID/THREATENED/INVALID state use, persistence, troubleshooting, security, command-line operation, and the complete enriched End-of-Day reporting workflow.
+The **living operator guide** for ExecutionOS as it exists on current `main`.
 
-Update the User Guide whenever normal operator procedure, broker integration, risk fields, lifecycle semantics, persistence, supported instruments, safety boundaries, EOD procedure, or CLI surface changes.
+It is the primary day-to-day reference for installation, Schwab authorization, startup, current V2.4/V2.3 architecture boundaries, risk and ARM semantics, broker binding, execution management, persistence, troubleshooting, security, CLI commands, and the enriched End-of-Day workflow.
 
-Phase 3 DSS closeout did not change the downstream V2.3 operator execution workflow, so no User Guide rewrite was required solely to record Phase 3 acceptance.
+Important current distinction: V2.4 Phase 4 internal risk sizing and `ARMED` provenance are merged, but the explicit V2.4 internal `ARMED` → existing V2.3 Execution Board transfer remains deferred. Normal broker order entry remains in thinkorswim/Schwab and the Schwab integration remains read-only.
 
 ### `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md`
 
 The **authoritative top-level V2.4 design baseline**.
 
-It records the approved pre-trade architecture, candidate-source boundary, lifecycle, Phase 3 DSS design, Phase 3→Phase 4 handoff, later context/decision-gate concepts, and ARM boundary.
+It records the approved pre-trade architecture, source boundary, lifecycle, Phase 3 DSS design, Phase 3→4 handoff, context/decision-gate direction, and ARM boundary.
 
-Its approval-time statements that Phase 3 implementation was not yet authorized are a dated approval snapshot. Do not rewrite that approved-design artifact merely to erase what was true when it was approved.
+Its approval-time implementation-status statements are historical snapshots and should not be rewritten.
 
-Later implementation status is recorded by a phase closeout/acceptance document.
+### `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md`
+
+The **authoritative Phase 4 design baseline**.
+
+It locks expected-entry semantics, exact-account risk snapshot semantics, equity/futures conversion, quantity rounding, immutable risk evaluation, freshness/recalculation rules, permission mapping, and ARM-time risk sizing.
+
+Its approval-time status remains historical; implementation status is recorded in the Phase 4 closeout.
 
 ### `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md`
 
 The **authoritative Phase 3 implementation/acceptance record**.
 
+It records the implemented DSS/effective-stop path, live Schwab proof, deterministic acceptance gates, no-sizing/no-broker-write boundary, and exact Phase 3→4 handoff.
+
+### `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md`
+
+The **authoritative Phase 4 implementation/acceptance/merge record**.
+
 It records:
 
-- implemented DSS scope;
-- frozen 2m Wilder ATR(14) / RTH-only / `ATR × 0.30` policy;
-- effective-stop and protective-rounding behavior;
-- immutable DSS evaluation and lifecycle semantics;
-- live Schwab input assembly and instrument-metadata handling;
-- Reg NMS price-increment fallback and the 2026-11-02 variable-MPI cutoff;
-- production permission-service integration;
-- live NVDA read-only DSS proof;
-- candidate import → persistence → PRE-TRADE Waiting Candidate Board smoke acceptance;
-- final deterministic Phase 3 acceptance gate;
-- explicit no-sizing / no-READY / no-ARM / no-broker-write boundary;
-- exact Phase 3→Phase 4 handoff.
-
-For the question “what did Phase 3 actually implement and validate?”, use this closeout record rather than the older implementation-status statement embedded in the approved design baseline.
+- the exact 0.5% effective-stop risk policy;
+- expected-entry semantics;
+- exact-account `liquidationValue` equity;
+- quote/account freshness;
+- equity and futures risk conversion;
+- downward-only quantity rounding;
+- immutable append-only `RiskEvaluation` provenance;
+- `NO_AFFORDABLE_SIZE → PASS — STOP_RISK_CONFLICT` mapping;
+- mandatory fresh Phase 4 evaluation on each ARM attempt;
+- selected-quantity enforcement;
+- exact DSS/risk/quantity provenance freeze;
+- final authorization freshness checks and rollback semantics;
+- final deterministic acceptance gate;
+- no broker-order authority;
+- PR #14 merge record.
 
 ### `docs/ExecutionOS_EOD_Report.md`
 
-The dedicated operational/technical reference for the read-only EOD reporter added after the frozen V2.3.0 release baseline.
+The dedicated operational/technical reference for read-only End-of-Day reporting.
 
-It defines Schwab broker-authoritative trade-cycle reconstruction, browser-History enrichment, ownership matching, planned-risk and realized-R interpretation, carry-in protection, metrics, HTML output, and validation expectations.
+For normal operator sequencing, defer to `USER-GUIDE.md`; for report reconstruction, matching, risk/R interpretation, carry-in handling, and limitations, use this document.
 
-For normal operator sequencing, defer to `USER-GUIDE.md`; for EOD-specific implementation/interpretation detail, use this document.
+### `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md`
 
-### ExecutionOS Management Governor Project Specification v1.2
+A dated architecture/project decision record for the validated V2.3-era system and future Management Governor direction.
 
-The architecture/project decision record dated 26 August 2026 after analytics preservation.
-
-Its embedded repository SHA, PR status, and pre-release sequencing are **historical snapshots of that date**. Do not rewrite v1.2 merely to make those dated fields agree with later merges, tagging, EOD reporting, or V2.4 work.
-
-A future project-wide architecture revision should be created as a new specification version rather than silently rewriting v1.2.
+Its embedded repository SHA/PR/status fields are historical as of 2026-08-26 and should not be rewritten to mimic later V2.4 merges.
 
 ### `research/30-day-management-study/methodology.md`
 
-Authoritative technical provenance for the preserved historical study, including what was recovered, inferred, validated, or left unresolved.
+Authoritative technical provenance for the preserved historical study.
 
-### Root `README.md`
+### `README.md`
 
-Current project/operational overview. Defer to the User Guide for operator procedure, to the V2.4 design baseline for V2.4 architecture, and to phase closeout records for phase acceptance status.
+Current project/repository overview. Defer to the User Guide for operation, design baselines for architecture, and closeout records for implementation acceptance.
 
 ### `docs/ExecutionOS_Documentation_Index.md`
 
-The cross-document inventory and authority map. Update it when major project records, phase status, release states, or pull-request milestones change.
+The cross-document inventory and authority map. Update it whenever phase status, major merge state, or authoritative documentation changes.
+
+---
 
 ## Current implementation / release state
 
-The frozen downstream execution release remains:
+### Frozen downstream execution release
 
 ```text
 v2.3.0
@@ -87,88 +98,97 @@ Tag target:
 baabb75f36050599f20e6c89e8db2f1f7d7769a1
 ```
 
-Phase 3 was merged to `main` on 2026-08-31 through **PR #12**.
+This remains the frozen broker-fill ownership and execution-management reference.
 
-Current post-Phase-3 merge commit:
-
-```text
-ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e
-```
-
-V2.4 status at that checkpoint:
+### V2.4 merge state
 
 - Phase 1 Candidate Ingestion — **COMPLETE / MERGED**;
 - Phase 2 MarketDataProvider — **COMPLETE / MERGED / LIVE-ACCEPTED**;
-- Phase 3 DSS / Micro-Volatility Buffer — **IMPLEMENTATION COMPLETE / ACCEPTED / MERGED via PR #12**;
-- Phase 4 Effective-Stop Risk Sizing — **NOT YET IMPLEMENTED**;
-- later READY/CAUTION/PASS and ARM work — **NOT YET IMPLEMENTED**.
+- Phase 3 DSS / Micro-Volatility Buffer — **IMPLEMENTATION COMPLETE / ACCEPTED / MERGED**;
+- Phase 4 Effective-Stop Risk Sizing — **IMPLEMENTATION COMPLETE / ACCEPTED / MERGED via PR #14**.
 
-A clean Phase 4 branch now exists:
-
-```text
-v24-phase4-risk-sizing
-```
-
-It was created from the exact post-Phase-3 mainline merge commit before any Phase 4 implementation work began.
-
-Final Phase 3 local acceptance gate:
+Phase 4 merge record:
 
 ```text
-v24:dss-test       91/91 PASS
-analytics:test     123/123 PASS
-schwab:state-test  10/10 PASS
-production build   PASS
+PR #14
+Merge commit: 0a976fb8bc68f64fd479d48322a011c9d419b2c2
 ```
 
-A live read-only NVDA DSS probe returned `VALID` and a correctly protected effective stop from real Schwab market data. A separate synthetic candidate was accepted through the actual candidate-import API and visibly rendered in the PRE-TRADE Waiting Candidate Board.
+Final Phase 4 acceptance gate:
 
-A WAITING candidate has **not** yet crossed into the existing V2.3 Execution Board; that remains intentionally gated behind later permission, READY, and ARM work.
+```text
+v24:risk-sizing-test  170/170 PASS
+v24:dss-test           91/91 PASS
+analytics:test        293/293 PASS
+schwab:state-test      10/10 PASS
+production build      PASS
+```
+
+### What is still intentionally not complete
+
+The following remain outside the merged Phase 4 scope:
+
+- broader context/decision-gate logic beyond the Phase 4 risk consequence;
+- explicit V2.4 internal `ARMED` → existing V2.3 Execution Board transfer/binding;
+- broker write/order placement, replacement, cancellation, stop replacement, or flattening;
+- buying-power/margin eligibility gating;
+- portfolio heat / aggregate concurrent-risk controls;
+- non-USD currency conversion and additional asset types;
+- automatic NinjaTrader futures binding.
+
+`ARMED` in the Phase 4 closeout is an internal authorization/provenance state. It is not proof that an order was sent or that a fill is owned by the V2.3 Execution Board.
 
 V3 has not started.
+
+---
 
 ## Historical / superseded records
 
 ### `V2-MILESTONE-1.md`
 
-**Historical design record.** It documents the original V2 Milestone 1 stateful execution prototype before the broker-aware V2.3 system existed. Retained for architecture history; not current operating documentation.
+Historical original V2 stateful-execution prototype record.
 
 ### `ExecutionOS_Architecture_Validation_and_Monday_Plan_2026-08-23.pdf`
 
-**Historical planning snapshot — superseded by later validated behavior and later design/acceptance records.**
-
-Its Monday live-test instructions and “still to test” sections are intentionally preserved because they record what was known at that time.
+Historical planning snapshot superseded as current guidance by later validated behavior and phase closeouts.
 
 ### Project Specification v1.0 / v1.1
 
-Preserved historical specifications. v1.1 remains useful as a post-V2.3-validation rebaseline; v1.2 supersedes it for the dated architecture/analytics record.
+Historical specifications; v1.2 supersedes them for its dated architecture record.
 
 ### Project Specification v1.2 repository-status fields
 
-The architecture/design content remains authoritative for the decisions it records, but its embedded branch SHA / open-PR / untagged-release status is a **dated snapshot**, not current repository state.
+Historical snapshot only. Architecture/design decisions remain important, but embedded repository status is not current.
 
-### V2.4 Design Baseline v0.4 approval-time implementation status
+### V2.4 approved-design implementation-status prose
 
-The V2.4 design baseline remains authoritative for design. Its statement that Phase 3 implementation was not yet authorized is retained as approval-time history and is superseded **only for implementation status** by the Phase 3 closeout record.
+Historical at approval time. Do not rewrite design baselines merely because Phase 3 and Phase 4 are now implemented and merged.
+
+---
 
 ## Pull requests as project records
 
-- **PR #1** — V2.3 execution system.
-- **PR #2** — analytics preservation.
-- **PR #3** — preservation of useful pre-V2 execution-discipline Markdown.
-- **PR #4** — history-only reconciliation.
-- **PR #5** — V2.3 release-documentation closeout.
-- **PR #6** — post-merge V2.3 documentation finalization.
-- **PR #7** — read-only ExecutionOS End-of-Day reporting; historical merge commit `bedd70979a3b18844386bcf8f927fd8a1f62307f`.
-- **PR #12** — V2.4 Phase 3 DSS / Micro-Volatility Buffer; merged to `main` at `ff437508f228b8a1eb0bb2e1c7bb9ea4ca0de97e`.
+- **PR #1** — V2.3 execution system; merged.
+- **PR #2** — analytics preservation; merged.
+- **PR #3** — useful pre-V2 execution-discipline documentation; merged.
+- **PR #4** — history-only reconciliation; merged.
+- **PR #5** — V2.3 release-documentation closeout; merged.
+- **PR #6** — post-merge V2.3 documentation finalization; merged.
+- **PR #7** — read-only EOD reporting; merged at `bedd70979a3b18844386bcf8f927fd8a1f62307f`.
+- **PR #12** — V2.4 Phase 3 DSS implementation; merged.
+- **PR #13** — Phase 3 post-merge documentation cleanup; merged.
+- **PR #14** — V2.4 Phase 4 Effective-Stop Risk Sizing; merged at `0a976fb8bc68f64fd479d48322a011c9d419b2c2`.
 
-Use current repository history and the Documentation Index for present branch/main status.
+Use current repository history and the Documentation Index for present status.
+
+---
 
 ## Documentation rule
 
-Do not rewrite historical or approved dated documents merely because later evidence changed project state. Preserve dated snapshots and add a new specification revision, closeout record, or status entry as appropriate.
+Do not rewrite historical or approved dated documents merely because later evidence changed project state.
 
 When a change affects day-to-day operation, update the User Guide as part of the same documentation closeout.
 
-When a change implements an approved architecture phase without changing the approval artifact itself, create a formal implementation/acceptance record and update this status file plus the Documentation Index.
+When an approved architecture phase is implemented, create/update a formal implementation/acceptance record and synchronize this status file plus the Documentation Index.
 
-When a change affects project-wide architecture beyond the scope of the existing dated specification, create a new specification revision rather than silently rewriting the old one.
+When project-wide architecture changes beyond the scope of an existing dated specification, create a new specification revision rather than silently rewriting the old one.
