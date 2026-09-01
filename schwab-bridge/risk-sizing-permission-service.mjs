@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { canonicalLifecycleState } from "./pretrade-state.mjs";
+import { currentDssEvaluationForArmHandoff } from "./arm-dss-handoff.mjs";
 import { resolveExpectedEntry } from "./expected-entry-resolver.mjs";
 import { assessAccountRiskSnapshot } from "./account-risk-provider.mjs";
 import { calculateRiskSizing } from "./risk-sizing-calculator.mjs";
@@ -73,6 +74,21 @@ function findPersistedCandidate(state, { sourceId, candidateId, contractVersion 
     );
   }
   return candidate;
+}
+
+function requestIdentity({ sourceId, candidateId, contractVersion } = {}) {
+  const identity = {
+    sourceId: upper(sourceId),
+    candidateId: text(candidateId),
+    contractVersion: Number(contractVersion),
+  };
+  if (!identity.sourceId || !identity.candidateId || !Number.isInteger(identity.contractVersion) || identity.contractVersion < 1) {
+    throw serviceError(
+      "risk sizing evaluation requires sourceId, candidateId, and integer contractVersion >= 1",
+      "INVALID_RISK_SIZING_PERMISSION_CANDIDATE_IDENTITY",
+    );
+  }
+  return identity;
 }
 
 function normalizedStatus(value) {
@@ -158,18 +174,7 @@ export class RiskSizingPermissionService {
     entryMode,
     triggerPrice = null,
   } = {}) {
-    const identity = {
-      sourceId: upper(sourceId),
-      candidateId: text(candidateId),
-      contractVersion: Number(contractVersion),
-    };
-    if (!identity.sourceId || !identity.candidateId || !Number.isInteger(identity.contractVersion) || identity.contractVersion < 1) {
-      throw serviceError(
-        "risk sizing permission evaluation requires sourceId, candidateId, and integer contractVersion >= 1",
-        "INVALID_RISK_SIZING_PERMISSION_CANDIDATE_IDENTITY",
-      );
-    }
-
+    const identity = requestIdentity({ sourceId, candidateId, contractVersion });
     const state = this.store.snapshot();
     const candidate = findPersistedCandidate(state, identity);
     const lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
@@ -180,13 +185,58 @@ export class RiskSizingPermissionService {
       );
     }
 
-    // The Phase 3 store is the authority for whether the exact current DSS
-    // evaluation is VALID and non-stale. A failed handoff stops Phase 4 before
-    // any live Phase 4 reads or persistence can occur.
     const dssHandoff = this.store.currentDssEvaluationForRiskHandoff(
       identity.candidateId,
       identity.contractVersion,
     );
+
+    return this.#evaluateWithHandoff({
+      candidate,
+      dssHandoff,
+      accountId,
+      entryMode,
+      triggerPrice,
+    });
+  }
+
+  async evaluateForArm({
+    sourceId,
+    candidateId,
+    contractVersion,
+    accountId,
+    entryMode,
+    triggerPrice = null,
+  } = {}) {
+    const identity = requestIdentity({ sourceId, candidateId, contractVersion });
+    const state = this.store.snapshot();
+    const candidate = findPersistedCandidate(state, identity);
+    const lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
+    if (!["READY", "CAUTION"].includes(lifecycleState)) {
+      throw serviceError(
+        `ARM-time risk sizing evaluation is not allowed while candidate is ${lifecycleState}`,
+        "RISK_SIZING_ARM_REFRESH_NOT_ALLOWED_IN_STATE",
+      );
+    }
+
+    // ARM never reuses a prior Phase 4 evaluation. First prove that the exact
+    // Phase 3 DSS identity is still VALID and non-stale in READY/CAUTION, then
+    // obtain fresh Phase 4 inputs and persist a brand-new riskEvaluationId.
+    const dssHandoff = currentDssEvaluationForArmHandoff(
+      this.store,
+      identity.candidateId,
+      identity.contractVersion,
+    );
+
+    return this.#evaluateWithHandoff({
+      candidate,
+      dssHandoff,
+      accountId,
+      entryMode,
+      triggerPrice,
+    });
+  }
+
+  async #evaluateWithHandoff({ candidate, dssHandoff, accountId, entryMode, triggerPrice }) {
     const effectiveStop = dssHandoff?.evaluation?.effectiveStop;
 
     const quotePromise = settledValue(
