@@ -1,104 +1,141 @@
 # ExecutionOS User Guide
 
-**Version:** 1.1<br>
-**Date:** 27 August 2026<br>
-**Status:** Living operator guide for current `main` — frozen V2.3.0 execution baseline plus post-release EOD reporting<br>
-**Repository:** `sibolek/structure-based-trade-management`<br>
-**Current product baseline:** `main`<br>
-**Frozen execution release tag:** `v2.3.0`<br>
-**Current documentation baseline:** `main`
+**Version:** 1.2  
+**Date:** 1 September 2026  
+**Status:** Living operator guide for current `main` — frozen V2.3 downstream execution plus merged V2.4 Phases 1–4 pre-trade infrastructure  
+**Repository:** `sibolek/structure-based-trade-management`  
+**Current product baseline:** `main`  
+**Frozen downstream execution release:** `v2.3.0`
 
-> **Operating principle:** Structure decides. P/L emotion does not.
+> **Operating principle:** Structure decides. P&L emotion does not.
 >
-> ExecutionOS exists to preserve pre-entry intent under live market pressure. It does not choose trades for you and it does not currently place, replace, or cancel broker orders.
+> ExecutionOS preserves pre-entry intent and constrains risk/management decisions. It does not currently place, replace, cancel, or flatten broker orders.
 
 ---
 
 ## Table of contents
 
-1. [Purpose of this guide](#1-purpose-of-this-guide)
-2. [What ExecutionOS is](#2-what-executionos-is)
-3. [What ExecutionOS is not](#3-what-executionos-is-not)
-4. [Current project status](#4-current-project-status)
-5. [The ExecutionOS workflow](#5-the-executionos-workflow)
-6. [System architecture](#6-system-architecture)
-7. [Prerequisites](#7-prerequisites)
-8. [Initial installation](#8-initial-installation)
-9. [Schwab configuration and authorization](#9-schwab-configuration-and-authorization)
-10. [Starting ExecutionOS for a trading session](#10-starting-executionos-for-a-trading-session)
-11. [Understanding the broker status panel](#11-understanding-the-broker-status-panel)
-12. [Creating a trade candidate](#12-creating-a-trade-candidate)
-13. [Risk sizing and permission](#13-risk-sizing-and-permission)
-14. [Arming a candidate](#14-arming-a-candidate)
-15. [Managing the Armed Candidate Board](#15-managing-the-armed-candidate-board)
-16. [How broker-fill binding works](#16-how-broker-fill-binding-works)
-17. [The Live Execution Board](#17-the-live-execution-board)
-18. [Execution state: VALID, THREATENED, INVALID](#18-execution-state-valid-threatened-invalid)
-19. [Broker lifecycle events: ENTRY, ADD, PARTIAL, FLAT, REVERSAL](#19-broker-lifecycle-events-entry-add-partial-flat-reversal)
-20. [Management discipline while a trade is live](#20-management-discipline-while-a-trade-is-live)
-21. [Editing an armed candidate safely](#21-editing-an-armed-candidate-safely)
-22. [Ending a trade and using History](#22-ending-a-trade-and-using-history)
-   - [22.1 Generating an accurate enriched EOD report](#221-generating-an-accurate-enriched-eod-report)
-23. [Persistence and local state](#23-persistence-and-local-state)
-24. [Using ExecutionOS without the Schwab link](#24-using-executionos-without-the-schwab-link)
-25. [Futures and NinjaTrader status](#25-futures-and-ninjatrader-status)
-26. [Historical analytics and research tools](#26-historical-analytics-and-research-tools)
-27. [Security and data handling](#27-security-and-data-handling)
-28. [Troubleshooting](#28-troubleshooting)
-29. [Current limitations and deferred work](#29-current-limitations-and-deferred-work)
-30. [Repository and branch discipline](#30-repository-and-branch-discipline)
-31. [Recommended daily operating procedure](#31-recommended-daily-operating-procedure)
-32. [Glossary](#32-glossary)
-33. [Appendix A - Complete command-line reference](#appendix-a---complete-command-line-reference)
-34. [Appendix B - Environment variables](#appendix-b---environment-variables)
-35. [Appendix C - Local files and data retention](#appendix-c---local-files-and-data-retention)
-36. [Appendix D - Current development sequence](#appendix-d---current-development-sequence)
+1. [Purpose](#1-purpose)
+2. [Current system status](#2-current-system-status)
+3. [What ExecutionOS is and is not](#3-what-executionos-is-and-is-not)
+4. [Architecture: V2.4 PRE-TRADE vs V2.3 EXECUTION](#4-architecture-v24-pre-trade-vs-v23-execution)
+5. [Risk model](#5-risk-model)
+6. [Installation and startup](#6-installation-and-startup)
+7. [Schwab authorization and account checks](#7-schwab-authorization-and-account-checks)
+8. [Creating and managing trade candidates](#8-creating-and-managing-trade-candidates)
+9. [Phase 3 DSS and Phase 4 risk sizing](#9-phase-3-dss-and-phase-4-risk-sizing)
+10. [Arming and broker execution](#10-arming-and-broker-execution)
+11. [Live trade management](#11-live-trade-management)
+12. [Persistence and local state](#12-persistence-and-local-state)
+13. [End-of-Day reporting](#13-end-of-day-reporting)
+14. [Futures / NinjaTrader status](#14-futures--ninjatrader-status)
+15. [Security](#15-security)
+16. [Troubleshooting](#16-troubleshooting)
+17. [Current limitations and deferred work](#17-current-limitations-and-deferred-work)
+18. [Repository discipline](#18-repository-discipline)
+19. [Recommended daily operating procedure](#19-recommended-daily-operating-procedure)
+20. [Command reference](#20-command-reference)
+21. [Documentation map](#21-documentation-map)
+22. [Glossary](#22-glossary)
 
 ---
 
-# 1. Purpose of this guide
+# 1. Purpose
 
-This is the practical, living user guide for operating ExecutionOS as it exists now. The Project Specification explains architecture and design decisions; the historical methodology documents the empirical research; this guide answers a different question:
+This is the practical, living guide for operating ExecutionOS as it exists on current `main`.
 
-> **How do I actually use ExecutionOS correctly today?**
+It answers:
 
-The guide is intended to remain current as ExecutionOS evolves. When a new version changes the normal operating workflow, broker integration, risk behavior, user interface, or command-line interface, this document should be updated as part of the same change.
+> **How do I use the system correctly today, and what parts of the newer V2.4 architecture are implemented versus still intentionally gated?**
 
-The authoritative hierarchy is:
-
-1. **This User Guide** - day-to-day operation and troubleshooting.
-2. **ExecutionOS Management Governor Project Specification** - architecture, design decisions, release gates, and future direction.
-3. **`research/30-day-management-study/methodology.md`** - historical analytics provenance and reproduction rules.
-4. **README.md** - concise repository overview and common commands.
-5. Older milestone and planning documents - historical snapshots only.
+Use this guide for normal operation. Use the approved design baselines for architecture decisions and the phase closeouts for implementation/acceptance evidence.
 
 ---
 
-# 2. What ExecutionOS is
+# 2. Current system status
 
-ExecutionOS is a **local, broker-aware execution operating system** designed to preserve a trader's pre-entry plan after capital is at risk.
+## 2.1 Frozen downstream execution baseline
 
-It separates three activities that are often mixed together during discretionary trading:
+The broker-aware execution layer remains frozen under:
 
-- **Reading the market** - your price-action analysis and setup selection.
-- **Defining permission** - what conditions authorize entry, what invalidates the trade, where the structural stop belongs, and how much risk is permitted.
-- **Managing execution** - holding, updating, or exiting based on structure rather than the emotional effect of open P/L.
+```text
+v2.3.0
+```
 
-The system's core workflow is:
+Tag target:
 
-**READ -> PLAN -> RISK -> ARM -> TRIGGER -> HOLD -> UPDATE -> EXIT -> REVIEW**
+```text
+baabb75f36050599f20e6c89e8db2f1f7d7769a1
+```
 
-ExecutionOS currently integrates with Schwab in a **read-only** mode. You continue to place equity orders in thinkorswim/Schwab. ExecutionOS observes broker executions, reconstructs position state, and binds a matching opening fill to an armed candidate.
+V2.3 remains the trusted downstream reference for:
 
-The intended behavioral result is simple:
+- armed-candidate ownership;
+- matching Schwab fill binding;
+- `ARMED → LIVE` transition in the existing Execution Board;
+- broker position reconstruction;
+- `ENTRY / ADD / PARTIAL / FLAT / REVERSAL` semantics;
+- `VALID / THREATENED / INVALID` live management;
+- History and execution review.
 
-> **Entry freezes the original plan. New structure can modify it. Emotion cannot.**
+## 2.2 V2.4 Phases 1–4 are now merged
+
+Current `main` contains:
+
+1. **Phase 1 — Candidate Ingestion**;
+2. **Phase 2 — MarketDataProvider**;
+3. **Phase 3 — DSS / Micro-Volatility Buffer**;
+4. **Phase 4 — Effective-Stop Risk Sizing**.
+
+Phase 4 was merged through PR #14 at:
+
+```text
+0a976fb8bc68f64fd479d48322a011c9d419b2c2
+```
+
+Final Phase 4 acceptance gate:
+
+```text
+v24:risk-sizing-test  170/170 PASS
+v24:dss-test           91/91 PASS
+analytics:test        293/293 PASS
+schwab:state-test      10/10 PASS
+production build      PASS
+```
+
+## 2.3 Critical boundary: internal V2.4 `ARMED` is not yet the V2.3 Execution Board
+
+Phase 4 implements an internal authorization/provenance freeze named `ARMED`.
+
+That internal state is **not yet** the explicit transfer/binding into the existing V2.3 Execution Board.
+
+Therefore, today:
+
+- V2.4 can calculate/validate risk and freeze exact DSS/risk/quantity provenance internally;
+- it does **not** place a broker order;
+- it does **not** claim a Schwab fill;
+- it does **not** silently create a V2.3 live trade;
+- the final V2.4 internal `ARMED` → V2.3 Execution Board handoff remains deferred.
+
+This distinction is essential when reading code, logs, or design documents.
+
+## 2.4 V3 status
+
+V3 Management Governor has **not started** and requires separate explicit authorization.
 
 ---
 
-# 3. What ExecutionOS is not
+# 3. What ExecutionOS is and is not
 
-ExecutionOS is deliberately narrow.
+ExecutionOS is a **local, broker-aware execution operating system** designed to preserve a trader's pre-entry plan and enforce deterministic risk/ownership boundaries.
+
+It separates:
+
+- **READ** — market analysis and setup selection;
+- **PLAN** — thesis, trigger, invalidation, target, management intent;
+- **PRE-TRADE PERMISSION** — fresh structural/risk checks;
+- **EXECUTION** — broker fill ownership and live state;
+- **REVIEW** — execution quality independent of P/L.
 
 It is **not** currently:
 
@@ -107,142 +144,129 @@ It is **not** currently:
 - a signal generator;
 - a fully automated trading system;
 - a broker replacement;
-- an order-entry panel;
+- a live order-entry panel;
 - an AI that decides whether a setup is good;
-- a universal minimum-hold timer;
-- a universal breakeven-stop engine;
-- a profit-and-loss optimization engine;
-- a live NinjaTrader futures integration.
+- an automatic NinjaTrader binding layer;
+- a broker-write Governor.
 
-ExecutionOS also does not currently send orders to Schwab. The local broker service is read-only. A UI button inside ExecutionOS cannot place, replace, cancel, or flatten a Schwab order.
-
-This matters operationally: **thinkorswim remains the execution venue for equities.** ExecutionOS is the decision and state layer beside it.
+Equity orders still belong in thinkorswim/Schwab. The Schwab integration remains read-only.
 
 ---
 
-# 4. Current project status
+# 4. Architecture: V2.4 PRE-TRADE vs V2.3 EXECUTION
 
-## 4.1 Current baseline
-
-The frozen execution release baseline is **V2.3.0**, tagged as `v2.3.0` at commit `baabb75f36050599f20e6c89e8db2f1f7d7769a1`. Current `main` contains that validated execution baseline plus the post-release read-only EOD reporting utility merged through PR #7 at `bedd70979a3b18844386bcf8f927fd8a1f62307f`. The EOD addition does not add broker-write authority or change the validated V2.3 trade-state engine.
-
-V2.3 supports:
-
-- multiple independently armed trade candidates;
-- one armed candidate per symbol;
-- automatic binding of matching Schwab opening fills;
-- simultaneous live trades;
-- broker-derived position average price and quantity;
-- peak-quantity tracking;
-- ENTRY / ADD / PARTIAL / FLAT / REVERSAL lifecycle reconstruction;
-- plan editing while the last saved candidate remains armed;
-- deterministic fill-during-edit behavior;
-- History and execution-decision records;
-- browser-local persistence;
-- a read-only Schwab broker-status panel.
-
-## 4.2 Release-validation status
-
-V2.3 completed its release-validation gate on 27 August 2026.
-
-Validated release gates include:
-
-- analytics regression: 14/14 passing;
-- deterministic broker trade-state regression: 10/10 passing;
-- production Vite build;
-- clean tracked working tree after install/build;
-- exact validation against the remote `v2-execution-system` head;
-- read-only `/health` and `/api/state` runtime smoke tests;
-- live ADD, PARTIAL, FLAT, and SHORT-path acceptance;
-- synthetic end-to-end REVERSAL acceptance in the React lifecycle.
-
-A true live cross-zero REVERSAL could not be forced through thinkorswim because the broker rejected the attempted cross-zero order. The exact same-poll cross-symbol execution case also remains deferred as a non-blocking edge case before any future broker-write or automated simultaneous-entry capability.
-
-V2.3 is release-validated, merged, and frozen under the annotated tag `v2.3.0`. V3 has not started and still requires separate explicit authorization.
-
-## 4.3 Analytics preservation status
-
-The empirical research that motivated the future Management Governor has been preserved. Three study areas were recovered to strong historical confidence; three 19-trade market-study outputs remain benchmark-preserved with unresolved exact membership.
-
-Do not attempt to reverse-engineer arbitrary trade combinations merely to force a historical benchmark match.
-
----
-
-# 5. The ExecutionOS workflow
-
-The workflow is not just navigation. Each stage has a specific job.
-
-| Stage | Purpose |
-| --- | --- |
-| READ | Analyze market structure outside the app. |
-| PLAN | State the trade thesis, entry trigger, invalidation, structural stop, target, and management plan. |
-| RISK | Verify that the structural stop is affordable at the intended size. |
-| ARM | Make the saved plan eligible to listen for a matching broker fill. |
-| TRIGGER | Wait for the planned entry condition to occur, then execute in the broker. |
-| HOLD | Do nothing when structure has not changed. |
-| UPDATE | Record legitimate new structure and change trade state when appropriate. |
-| EXIT | End the trade for a structural, planned, or explicitly discretionary reason. |
-| REVIEW | Evaluate execution quality independently from P/L. |
-
-The workflow deliberately separates **analysis** from **permission**. A correct read is not automatically a setup; a valid setup is not automatically a trade.
-
----
-
-# 6. System architecture
-
-At the current stage, the normal equity path is:
+The current architecture deliberately separates upstream pre-trade logic from frozen downstream execution ownership.
 
 ```text
-thinkorswim / Schwab
-        |
-        v
-Schwab Trader API
-        |
-        v
-local schwab-bridge/monitor.mjs
-        |
-        +--> broker state engine
-        |
-        +--> read-only local API
-              http://127.0.0.1:8787
-                    |
-                    v
-              React / Vite UI
-                    |
-                    v
-               ExecutionV23
+V2.4 PRE-TRADE
+
+Candidate
+   ↓
+Phase 3 DSS
+   structural invalidation
+   effectiveStop
+   dssEvaluationId
+   ↓
+Phase 4 risk sizing
+   currentExpectedEntry
+   exact account equity
+   instrument conversion
+   maxAffordableQuantity
+   riskEvaluationId
+   ↓
+permission consequence
+   ↓
+READY / CAUTION / PASS
+   ↓
+ARM attempt
+   ↓
+fresh Phase 4 evaluation
+   ↓
+selected-quantity validation
+   ↓
+internal V2.4 ARMED provenance freeze
+   ↓
+[future explicit transfer/binding]
+   ↓
+
+V2.3 EXECUTION
+
+Existing V2.3 Execution Board
+   ↓
+matching broker opening fill
+   ↓
+LIVE
+   ↓
+VALID / THREATENED / INVALID
+   ↓
+FLAT / History
 ```
 
-The local monitor exposes two read-only endpoints:
+The bracketed handoff remains future V2.4 work.
 
-- `GET /health`
-- `GET /api/state`
+## 4.1 Why this separation matters
 
-The React UI polls `/api/state` once per second by default.
+The upstream system may determine that a candidate is structurally/risk-valid without taking ownership of a broker position.
 
-The local API retains broker account summaries, current open positions, and the most recent execution events needed by the interface. Live P/L is intentionally not shown in the broker-status panel.
+The downstream V2.3 system may own a live broker position only through its established binding semantics.
 
----
+Do not treat an internal V2.4 `ARMED` record as proof of:
 
-# 7. Prerequisites
-
-Before using ExecutionOS, you need:
-
-- the project repository on the local machine;
-- Node.js/npm capable of running the current Vite project;
-- a Schwab Developer Portal application configured for the Trader API;
-- the registered callback URL `https://127.0.0.1:8182`;
-- thinkorswim/Schwab for actual equity order entry;
-- a browser for the React UI;
-- terminal access for the local monitor and development server.
-
-For futures, NinjaTrader is the execution platform, but automatic NinjaTrader binding is **not connected yet**.
+- order submission;
+- broker fill;
+- live position ownership;
+- V2.3 Execution Board binding.
 
 ---
 
-# 8. Initial installation
+# 5. Risk model
 
-From a terminal:
+The permanent project rule is:
+
+> **Maximum planned price risk per trade = 0.5% of the exact relevant trading-account equity.**
+
+The required hierarchy is:
+
+```text
+STRUCTURE
+   ↓
+INVALIDATION
+   ↓
+EFFECTIVE STOP
+   ↓
+RISK BUDGET
+   ↓
+POSITION SIZE
+```
+
+Never choose size first and tighten the stop until the dollars fit.
+
+## 5.1 Phase 3 owns the stop
+
+Phase 3 converts structural invalidation into a volatility-protected `effectiveStop`.
+
+The accepted policy uses:
+
+- 2-minute Wilder ATR(14);
+- RTH-only reconstruction;
+- `ATR × 0.30` volatility buffer;
+- directionally protective price-increment rounding.
+
+Phase 3 answers **where the protected thesis invalidation belongs**.
+
+## 5.2 Phase 4 owns affordability
+
+Phase 4 answers **how much size can be afforded against that exact stop**.
+
+It may reduce quantity or reject affordability. It may never alter structural invalidation or `effectiveStop`.
+
+> **Phase 3 determines the correct stop. Phase 4 determines whether and how large we can afford to trade against that stop. Phase 4 never changes the stop.**
+
+---
+
+# 6. Installation and startup
+
+## 6.1 Clone / install
 
 ```bash
 git clone https://github.com/sibolek/structure-based-trade-management.git
@@ -250,35 +274,61 @@ cd structure-based-trade-management
 npm install
 ```
 
-During the current preservation/closeout phase, make sure you are on the intended working branch before pulling changes. The exact branch will change after the preservation and V2.3 release work are merged, so check the current project checkpoint rather than assuming an old branch name indefinitely.
-
-To inspect the current branch:
+For normal use, work from current `main` unless a specific development session says otherwise.
 
 ```bash
-git branch --show-current
+git checkout main
+git pull --ff-only
 ```
 
-To update the branch you are already on:
+## 6.2 Normal equity session
+
+Use two terminals.
+
+### Terminal 1 — Schwab monitor
 
 ```bash
-git pull
+npm run schwab:monitor
 ```
 
-Do not casually rebase or overwrite `main`. The useful pre-V2 documentation has been preserved and `main` history has been reconciled into the V2.3 line without changing the validated V2.3 file tree.
+Wait until the monitor is ready.
+
+### Terminal 2 — UI
+
+```bash
+npm run dev
+```
+
+Open the Vite URL shown in the terminal, normally:
+
+```text
+http://localhost:5173
+```
+
+Confirm the broker status is online before relying on automatic Schwab execution observation.
+
+## 6.3 Optional local health checks
+
+```bash
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/api/state
+```
+
+The broker boundary remains read-only.
 
 ---
 
-# 9. Schwab configuration and authorization
+# 7. Schwab authorization and account checks
 
-## 9.1 Create the local environment file
+## 7.1 Environment
 
-Copy the template:
+Create the local environment file:
 
 ```bash
 cp .env.local.example .env.local
 ```
 
-Edit `.env.local` and provide:
+Provide locally:
 
 ```text
 SCHWAB_CLIENT_ID=...
@@ -286,711 +336,450 @@ SCHWAB_CLIENT_SECRET=...
 SCHWAB_CALLBACK_URL=https://127.0.0.1:8182
 ```
 
-Never commit `.env.local`.
+Never commit `.env.local` or tokens.
 
-Verify sensitive files are ignored:
+Verify ignores:
 
 ```bash
 git check-ignore .env.local .schwab-tokens.json
 ```
 
-## 9.2 First authorization
-
-Run:
+## 7.2 Authorize / reauthorize
 
 ```bash
 npm run schwab:auth
 ```
 
-The bridge opens Schwab's OAuth page. Complete authentication on Schwab's site and authorize the desired account(s).
+Complete authentication on Schwab's site. If the callback page does not load locally, copy the full redirected URL from the browser and paste it into the terminal when requested.
 
-Schwab redirects to the registered local HTTPS callback. The page may not load because the current proof-of-concept does not run a local HTTPS callback listener. If so:
-
-1. copy the complete redirected URL from the browser address bar;
-2. return to the terminal;
-3. paste that URL when prompted.
-
-ExecutionOS extracts the authorization code and stores the resulting tokens locally in `.schwab-tokens.json`.
-
-## 9.3 Confirm account access
-
-Run:
+## 7.3 Account check
 
 ```bash
 npm run schwab:account
 ```
 
-A healthy result should show:
+A healthy account check should resolve the intended account and show current account information without using live P/L as a management cue.
 
-- successful authentication;
-- authorized account count;
-- masked account identifier;
-- current account equity;
-- the 0.5% maximum planned risk budget;
+### Phase 4 account-equity rule
+
+For Phase 4 production risk sizing, the authoritative Schwab field is:
+
+```text
+currentBalances.liquidationValue
+```
+
+Phase 4 does not substitute:
+
+- cash;
 - buying power;
-- current positions.
+- available funds;
+- margin excess;
+- initial balances;
+- another account;
+- `currentBalances.equity` when liquidation value is absent.
 
-The tool deliberately avoids displaying open P/L as a management cue.
-
-## 9.4 Token lifecycle
-
-Access tokens are short-lived and are automatically refreshed when close to expiration. Refresh tokens have a longer but finite lifecycle. If authorization can no longer be refreshed, run:
-
-```bash
-npm run schwab:auth
-```
-
-again.
+The exact execution account is required.
 
 ---
 
-# 10. Starting ExecutionOS for a trading session
+# 8. Creating and managing trade candidates
 
-The normal live-equity session uses **two terminals**.
+A candidate is a **pre-entry contract**, not a broker position.
 
-## Terminal 1 - Schwab monitor
+The plan should state at minimum:
 
-From the repository root:
+- symbol;
+- direction;
+- setup;
+- primary timeframe;
+- thesis;
+- trigger;
+- structural invalidation;
+- target/framework;
+- management intent.
 
-```bash
-npm run schwab:monitor
-```
+## 8.1 Thesis
 
-The monitor:
+Use structurally testable language.
 
-1. authenticates;
-2. loads authorized accounts;
-3. bootstraps current positions;
-4. reads recent executions as a baseline;
-5. starts the read-only local API;
-6. begins polling for new fills;
-7. prints `MONITOR ARMED` when ready.
-
-Existing fills are intentionally ignored as new events after startup. This prevents old orders from suddenly binding to freshly armed candidates.
-
-The default poll interval is 1000 ms.
-
-Stop the monitor with:
+Good:
 
 ```text
-Ctrl+C
+Bull-channel pullback is holding prior breakout structure; continuation remains valid only while that structure remains intact.
 ```
 
-## Terminal 2 - React UI
-
-Run:
-
-```bash
-npm run dev
-```
-
-Open the local Vite URL shown in the terminal, typically something like:
+Weak:
 
 ```text
-http://localhost:5173
+Looks strong and should go higher.
 ```
 
-The browser should show the broker-status panel at the top and the V2.3 ExecutionOS interface below it.
+## 8.2 Trigger
 
-## 10.1 Optional health checks
+The trigger should be concrete enough to answer yes/no in real time, such as:
 
-If you want to verify the local broker service independently of React:
-
-```bash
-curl http://127.0.0.1:8787/health
-```
-
-and:
-
-```bash
-curl http://127.0.0.1:8787/api/state
-```
-
-The health endpoint should return an `ok` response and monitor status. `/api/state` returns the current read-only broker snapshot.
-
----
-
-# 11. Understanding the broker status panel
-
-The top panel shows **Schwab Live State**.
-
-## BROKER ONLINE
-
-When connected, the panel can show:
-
-- monitor status;
-- monitor polling interval;
-- last update time;
-- masked account identifier;
-- current equity;
-- the computed 0.5% max-risk budget;
-- count of open positions;
-- current broker positions;
-- recent execution events;
-- reconstructed lifecycle event and position transition;
-- observed fill-detection delay.
-
-Live P/L is intentionally hidden.
-
-## BROKER OFFLINE
-
-If the panel says BROKER OFFLINE, the React application is still usable for planning and review, but automatic Schwab fill binding is unavailable.
-
-The most common reason is simply that this process is not running:
-
-```bash
-npm run schwab:monitor
-```
-
-If the monitor is running but the UI remains offline, see the troubleshooting section.
-
----
-
-# 12. Creating a trade candidate
-
-A candidate is a **pre-entry contract**, not a position.
-
-The current PLAN editor requires all of the following before the candidate can move to risk sizing:
-
-| Field | Meaning |
-| --- | --- |
-| Symbol | Instrument ticker. |
-| Direction | LONG or SHORT. |
-| Setup | The named setup or structure being traded. |
-| Timeframe | Primary execution timeframe, usually 2m for the current workflow. |
-| Thesis | What exactly you believe price is doing. |
-| Trigger | What authorizes actual entry in the broker. |
-| Invalidation | What proves the thesis wrong. |
-| Structural Stop | Price beyond which the setup is invalid. |
-| Target | Planned objective or target framework. |
-| Management Plan | How the trade is intended to be managed after entry. |
-
-## 12.1 Thesis
-
-The thesis should describe the actual trade, not a narrative designed to justify action.
-
-A good thesis is structurally testable. For example:
-
-```text
-Bull-channel pullback is holding the 20 EMA and prior breakout area; continuation is valid only while the pullback structure remains intact.
-```
-
-A poor thesis is vague:
-
-```text
-NVDA looks strong and I think it can go higher.
-```
-
-## 12.2 Trigger
-
-The trigger is the event that authorizes entry in thinkorswim. Examples may include:
-
-- breakout and hold above a defined level;
-- H2 or second-entry long after a pullback;
+- breakout and hold;
+- H2 / second-entry long;
 - failed breakdown and reclaim;
-- breakout/retest confirmation;
-- signal-bar break from a defined structure.
+- breakout/retest;
+- signal-bar break from defined structure.
 
-The trigger should be concrete enough that you can answer **yes or no** in real time.
+## 8.3 Invalidation
 
-## 12.3 Invalidation
+Invalidation is what proves the thesis wrong. It is not synonymous with:
 
-Invalidation is the structural condition that proves the thesis wrong. It is not the same thing as:
-
-- being temporarily red;
+- temporary red P/L;
 - discomfort;
 - a normal pullback;
-- a single unfavorable tick;
-- the desire to protect open profit.
+- desire to protect open profit.
 
-## 12.4 Structural Stop
+## 8.4 Candidate identity
 
-The structural stop belongs beyond the price structure that invalidates the setup. The correct sequence is:
-
-**structure -> stop -> risk -> size**
-
-Never reverse this sequence by choosing size first and tightening the stop until the dollar risk fits.
-
-## 12.5 Target and management plan
-
-The target may be a single price, a target zone, or a defined structural management objective. The management plan should state what you are allowed to do after entry, including any preplanned scaling or exit logic.
+V2.4 candidate persistence/versioning is exact. Structural changes require a new candidate version rather than silent mutation of a previously evaluated candidate.
 
 ---
 
-# 13. Risk sizing and permission
+# 9. Phase 3 DSS and Phase 4 risk sizing
 
-After the plan is frozen, ExecutionOS moves to the RISK stage.
+This section describes the **merged internal pre-trade engine**. Not every internal field is necessarily exposed in the current operator UI.
 
-The risk editor uses:
+## 9.1 Phase 3 DSS
 
-- expected entry;
-- structural stop;
-- intended size;
-- account equity from the Schwab broker state when available.
+Phase 3 accepts an already-resolved structural invalidation and produces an immutable DSS evaluation containing an `effectiveStop`.
 
-The project risk rule is:
+Important behavior:
 
-> **Maximum planned loss per trade = 0.5% of the relevant account equity.**
+- no continuous DSS calculations while merely `WAITING`;
+- fresh `VALID` DSS may be reused during permission activity;
+- a newer completed 2-minute bar can stale the current DSS evaluation;
+- the next permission cycle refreshes it;
+- after authorization, the exact DSS identity is frozen;
+- Phase 3 never sizes the trade.
 
-For equities:
+## 9.2 Phase 4 expected entry
+
+Supported V2.4 modes:
+
+### `MARKETABLE_NOW`
 
 ```text
-risk per share = abs(expected entry - structural stop)
-planned risk   = risk per share * intended shares
-max risk       = account equity * 0.005
-max size       = floor(max risk / risk per share)
+LONG  = ask
+SHORT = bid
 ```
 
-If planned risk exceeds max risk:
+### `STOP_TRIGGER`
 
-- reduce size; or
-- pass the trade.
+```text
+LONG  = max(triggerPrice, ask)
+SHORT = min(triggerPrice, bid)
+```
 
-Do **not** tighten the structural stop merely to make the number fit.
+No fallback to last/mark/candle close is allowed.
 
-## 13.1 Duplicate-candidate protection
+Quote rules include:
 
-V2.3 permits only one armed candidate per symbol. A second candidate for the same symbol should not be armed concurrently.
+- positive bid and ask;
+- bid <= ask;
+- locked market allowed;
+- crossed market blocked;
+- maximum quote age 5 seconds.
 
-## 13.2 Existing-position protection
+## 9.3 Risk geometry
 
-A fresh candidate should not bind to a Schwab position that was already open before the candidate was armed. The system uses both the current broker position state and new post-arm execution events to reduce false ownership.
+```text
+LONG riskDistance  = currentExpectedEntry - effectiveStop
+SHORT riskDistance = effectiveStop - currentExpectedEntry
+```
 
----
+Directional geometry must be valid; the implementation does not use an absolute-value shortcut to legitimize crossed invalidation.
 
-# 14. Arming a candidate
+## 9.4 Risk budget
 
-**ARM** means:
+```text
+rawMaxDollarRisk = accountEquity × 0.005
+maxDollarRisk = floorToCent(rawMaxDollarRisk)
+```
 
-> This saved plan is complete, risk-valid, and now eligible to listen for a matching future broker opening fill.
+Budget rounding never rounds upward.
 
-It does **not** mean an order has been sent.
+## 9.5 Equity sizing
 
-After arming:
+For whole-share equities:
 
-- the candidate appears on the Armed Candidate Board;
-- its saved contract becomes authoritative;
-- `armedAt` becomes part of fill ownership;
-- you may begin a new candidate without removing existing armed ideas;
-- a matching Schwab fill can promote the candidate automatically to LIVE.
+```text
+riskPerShare = riskDistance
+rawQuantity = maxDollarRisk / riskPerShare
+finalQuantity = floor(rawQuantity)
+```
 
-A newly armed candidate should be considered a commitment to the saved plan, not a casual watchlist note.
+Odd lots are allowed. Fractional shares are not assumed.
 
----
+## 9.6 Futures sizing
 
-# 15. Managing the Armed Candidate Board
+Phase 4 futures metadata uses trusted:
 
-The board may contain several symbols simultaneously.
+```text
+tickSize
+tickValue
+pointValue?   // optional cross-check
+minimumQuantity
+quantityIncrement
+currency
+```
 
-Each armed candidate continues listening independently until one of the following occurs:
+Calculation:
 
-- a matching broker opening fill binds it;
-- you explicitly delete/discard it;
-- you edit and save a superseding version.
+```text
+riskTicks = ceil(riskDistance / tickSize)
+riskPerContract = riskTicks × tickValue
+```
 
-## 15.1 One per symbol
+The protective tick ceiling prevents underestimating risk when distance does not land exactly on a tick.
 
-There should be no two independently armed candidates for the same ticker. If your setup materially changes, edit the existing candidate rather than creating a duplicate.
+## 9.7 Affordability outcomes
 
-## 15.2 Multiple armed symbols
+Phase 4 statuses:
 
-It is normal for several unrelated symbols to remain armed while you wait for triggers. This is one of the important V2.3 differences from earlier single-trade workflow versions.
+```text
+VALID
+NO_AFFORDABLE_SIZE
+BLOCKED
+ERROR
+```
 
-## 15.3 Armed does not mean entered
+`NO_AFFORDABLE_SIZE` means the inputs are valid but the minimum permitted quantity cannot fit the 0.5% risk budget.
 
-Do not confuse:
+Downstream consequence:
 
-- **candidate state**: ARMED;
-- **broker state**: actual open position;
-- **execution state**: VALID / THREATENED / INVALID.
+```text
+PASS — STOP_RISK_CONFLICT
+```
 
-They describe different things.
+Do not solve this conflict by tightening the stop.
 
----
+## 9.8 Maximum affordable quantity is a ceiling
 
-# 16. How broker-fill binding works
+The calculated quantity is the **maximum risk-affordable quantity**, not a required size.
 
-For Schwab equities, V2.3 listens to new execution events from the local broker monitor.
+If:
 
-A candidate can bind when the new execution is consistent with:
+```text
+maxAffordableQuantity = 90
+```
 
-- the same symbol;
-- the candidate's direction;
-- an opening position effect;
-- an execution that occurs after the candidate was armed.
+then:
 
-For direction matching:
+```text
+90 = allowed
+50 = allowed
+91 = prohibited
+```
 
-- LONG expects an opening BUY;
-- SHORT expects an opening SELL_SHORT.
+The selected quantity must also satisfy the instrument minimum/increment.
 
-When the match occurs, the candidate leaves ARMED and becomes a live trade.
+## 9.9 Every ARM attempt gets fresh risk
 
-## 16.1 Why `armedAt` matters
+Every ARM attempt from `READY` / `CAUTION` creates a **new Phase 4 evaluation** from fresh inputs.
 
-The system must not accidentally bind an old fill or pre-existing position to a new plan. The arm timestamp is therefore part of the ownership logic.
+A previous risk evaluation is never considered “recent enough” simply because little time has passed.
 
-## 16.2 Why broker position state also matters
-
-A candidate is not supposed to claim a position that already existed before it was created. The broker snapshot is used to identify currently open positions and guard against false fresh-entry ownership.
-
-## 16.3 Fill detection is not instantaneous
-
-Observed delay includes more than internet latency. It may include:
-
-- thinkorswim/Schwab propagation time;
-- API availability;
-- the monitor polling phase;
-- HTTP request/response time;
-- local-vs-broker clock differences.
-
-Historical live testing showed the read-only polling path to be usable for awareness, but ExecutionOS should still be treated as an observer rather than a hard real-time order router.
-
----
-
-# 17. The Live Execution Board
-
-Once a candidate binds to a broker fill, the Live Execution Board becomes the center of the workflow.
-
-A live trade retains the original saved contract while also showing broker-derived reality such as:
-
-- actual entry price;
-- entry quantity;
-- current quantity;
-- peak quantity;
-- current average price;
-- structural stop;
-- planned risk context;
-- execution timeline;
-- current VALID / THREATENED / INVALID state.
-
-The key concept is that **the original plan remains visible after entry**. The system is designed to prevent the live P/L experience from silently rewriting what the trade was supposed to be.
-
-## 17.1 More than two live instruments
-
-V2.3 can represent multiple simultaneous live trades, but the operating framework warns when concurrency exceeds the intended limit. The practical rule remains:
-
-> Keep the number of live instruments small enough that each trade can still be managed structurally.
+At final authorization, quote freshness (≤5s) and account freshness (≤15s) are rechecked.
 
 ---
 
-# 18. Execution state: VALID, THREATENED, INVALID
+# 10. Arming and broker execution
 
-These labels describe structural state, not profitability.
+There are now two concepts named `ARMED` in the architecture. Keep them separate.
+
+## 10.1 Internal V2.4 `ARMED`
+
+Phase 4 final authorization freezes:
+
+```text
+authorizedDssEvaluationId
+authorizedRiskEvaluationId
+arm: {
+  authorizedAt,
+  candidateVersion,
+  dssEvaluationId,
+  riskEvaluationId,
+  selectedQuantity
+}
+lifecycleState = ARMED
+```
+
+This is a **pre-trade authorization/provenance freeze** only.
+
+It does not place an order and does not yet perform the explicit handoff into V2.3.
+
+## 10.2 Existing V2.3 armed candidate
+
+The existing V2.3 Execution Board uses armed candidates to listen for matching broker opening fills.
+
+That downstream workflow remains trusted/frozen and currently owns live broker binding.
+
+Until the explicit V2.4→V2.3 handoff is implemented, do not assume internal V2.4 authorization automatically becomes a V2.3 broker-listening candidate.
+
+## 10.3 Actual order entry
+
+Equity orders are placed in thinkorswim/Schwab by the trader.
+
+ExecutionOS does not currently:
+
+- send an order;
+- replace a stop;
+- cancel an order;
+- flatten a position.
+
+---
+
+# 11. Live trade management
+
+Once the existing V2.3 Execution Board owns a matching broker fill, the live execution framework remains:
+
+```text
+VALID
+THREATENED
+INVALID
+```
+
+These labels describe structure, not profitability.
 
 ## VALID
 
-Use VALID when the original thesis remains intact.
-
-A VALID trade may be:
-
-- green;
-- red;
-- chopping;
-- temporarily pulling back;
-- uncomfortable.
-
-If the structure that justified entry remains intact, the trade can remain VALID.
+The thesis remains intact. A VALID trade may be red, green, slow, or uncomfortable.
 
 ## THREATENED
 
-Use THREATENED when new adverse structure has appeared but the original setup has not yet crossed its invalidation boundary.
-
-Examples may include:
-
-- a meaningful failure to continue;
-- repeated inability to hold a breakout level;
-- a structurally important lower high or higher low against the trade;
-- a new opposing pattern that materially weakens the thesis.
-
-THREATENED is not a euphemism for "I am nervous." It requires chart evidence.
+New adverse structure materially weakens the thesis but has not yet met the declared invalidation condition.
 
 ## INVALID
 
-Use INVALID when the trade thesis has actually failed according to the frozen contract or legitimate later structural update.
+The thesis has failed according to the contract or a legitimate structural update.
 
-Examples:
+Core rule:
 
-- structural stop / invalidation is broken;
-- the defining breakout fails in a way that destroys the setup;
-- the pattern resolves opposite to the thesis;
-- a predeclared invalidation condition occurs.
+> **Red is not invalidation. Green is not an exit. Structure is invalidation.**
 
-**Red is not invalidation. Green is not an exit. Structure is invalidation.**
+## 11.1 Manual exit check
 
----
-
-# 19. Broker lifecycle events: ENTRY, ADD, PARTIAL, FLAT, REVERSAL
-
-The broker state engine translates fills into position lifecycle events.
-
-## ENTRY
-
-A position moves from flat to non-zero exposure in one direction.
-
-```text
-FLAT -> LONG
-```
-
-or:
-
-```text
-FLAT -> SHORT
-```
-
-ENTRY is the event that can bind an armed candidate.
-
-## ADD
-
-Exposure increases while direction remains the same.
-
-```text
-LONG 20 -> LONG 40
-```
-
-or:
-
-```text
-SHORT 20 -> SHORT 40
-```
-
-The state engine updates the blended average price and peak quantity. End-to-end ADD behavior has been accepted for V2.3.
-
-## PARTIAL
-
-Exposure decreases but remains open in the same direction.
-
-```text
-LONG 40 -> LONG 20
-```
-
-A partial exit should **not** mark the trade flat or archive it as completed. End-to-end PARTIAL behavior has been accepted for V2.3.
-
-## FLAT
-
-The position reaches zero.
-
-```text
-LONG 20 -> FLAT
-```
-
-or:
-
-```text
-SHORT 20 -> FLAT
-```
-
-FLAT is a terminal broker-state event for that position episode.
-
-## REVERSAL
-
-An execution crosses through zero and leaves exposure open in the opposite direction.
-
-```text
-LONG 20 -> SHORT 10
-```
-
-or the reverse.
-
-REVERSAL is supported by the state engine, but exact V2.3 episode ownership and UI behavior remain part of final release acceptance.
-
----
-
-# 20. Management discipline while a trade is live
-
-ExecutionOS is built around a specific behavioral problem: once a position is open, the urge to resolve uncertainty can become stronger than the original plan.
-
-The system therefore uses the following discipline.
-
-## 20.1 Ask what changed on the chart
-
-The primary management question is:
-
-> **What changed on the chart?**
-
-Do not substitute:
-
-- "I am up $20";
-- "I do not want this winner to turn red";
-- "I am down $15";
-- "I want to get back to green today";
-- "This trade feels slow."
-
-for a structural answer.
-
-## 20.2 Manual exit check
-
-Before a discretionary manual exit, ask:
+Before a discretionary exit, ask:
 
 > **If I could not see my P/L, would I still exit this chart right now?**
 
-and:
+Do not use open P/L as a substitute for chart evidence.
 
-> **Would I make this exact same exit if yesterday had been +$50 instead of -$50?**
+## 11.2 Scaling
 
-If the answer exposes P/L-driven decision contamination, the execution decision is not structurally justified.
-
-## 20.3 Early management
-
-For fast 2-minute trades, the immediate post-entry window is particularly vulnerable to emotional interference. Unless the original contract authorizes it, avoid moving the stop toward breakeven/profit or manually exiting solely because of P/L during the remainder of the entry bar and the next completed 2-minute bar.
-
-Early changes require one of:
-
-- structural invalidation;
-- a predefined target;
-- genuinely new adverse structure;
-- an explicitly preauthorized management rule.
-
-## 20.4 Scaling
-
-If an add was planned, the risk allocation should have been defined before entry. Before adding, explicitly know:
+Before an add, know:
 
 - current quantity;
 - add quantity;
 - new total quantity;
-- structural stop;
-- total risk after the add.
+- structural/effective stop context;
+- total planned risk.
 
-Do not improvise size changes merely because the trade is winning or losing.
-
----
-
-# 21. Editing an armed candidate safely
-
-V2.3 deliberately solves a subtle race condition: **what happens if you edit a plan while the old saved candidate is still capable of filling?**
-
-The rule is:
-
-> **The last saved candidate remains authoritative and keeps listening until the edit is saved.**
-
-When you choose Edit:
-
-- ExecutionOS creates a working copy;
-- the original saved candidate remains armed;
-- unsaved changes are not authoritative;
-- CANCEL discards the working copy;
-- SAVE creates the new saved candidate version after risk validation.
-
-## 21.1 Fill during edit
-
-If the broker fill arrives while you are editing:
-
-- the **last saved plan** owns the fill;
-- that saved plan moves LIVE;
-- the unsaved working-copy changes are discarded.
-
-This is intentional. A plan that was never saved must never retroactively become the trade contract after an execution has already occurred.
+Do not improvise size because the trade is winning or losing.
 
 ---
 
-# 22. Ending a trade and using History
+# 12. Persistence and local state
 
-When broker state becomes FLAT, the live position episode can move to History.
-
-History exists to answer:
-
-> **What did I decide at each opportunity to interfere?**
-
-The review should separate two scores:
-
-- **trade outcome** - money made or lost;
-- **execution quality** - whether the plan was followed and changes were structurally justified.
-
-A correctly executed losing trade can be a successful execution day. A profitable panic exit can still be a poor execution decision.
-
-Review the timeline for:
-
-- original frozen plan;
-- arm event;
-- broker entry detection;
-- state changes;
-- adds or partials;
-- stop/management changes where recorded;
-- exit reason;
-- any discretionary override behavior.
-
----
-
-## 22.1 Generating an accurate enriched EOD report
-
-The EOD reporter combines **two independent data sources**. An accurate enriched report requires both sources to be understood correctly.
-
-### Source 1 — Schwab execution history
-
-Schwab is broker-authoritative for fills and position changes. The reporter uses read-only Schwab history to reconstruct complete flat-to-flat trade cycles and calculate broker-derived metrics such as:
-
-- completed trade cycles;
-- long/short direction;
-- peak quantity;
-- entry and exit VWAP;
-- reconstructed gross realized P/L;
-- winners, losers, and win rate;
-- average winner and average loser;
-- gross profit factor;
-- average win/loss factor;
-- largest winner and loser.
-
-A broker-only report can be generated from Schwab history alone.
-
-### Source 2 — ExecutionOS Execution Board / History export
-
-The **enriched** report requires the completed Trade Contracts stored in ExecutionOS browser History.
-
-The ExecutionOS History export supplies information Schwab does not know, including:
-
-- setup and timeframe;
-- thesis;
-- trigger;
-- invalidation;
-- structural stop;
-- target;
-- management plan;
-- expected entry and intended size;
-- original planned dollar risk;
-- realized R multiple;
-- exit classification / reason;
-- VALID / THREATENED / INVALID decision history;
-- whether the broker cycle was owned by an ExecutionOS Trade Contract.
-
-> **Critical operating rule:** Download the ExecutionOS History export before generating the enriched EOD report.
-
-Without the ExecutionOS export, broker reconstruction remains valid for complete-context Schwab cycles, but ExecutionOS-owned trades may appear as **broker-only**, and setup, planned-risk, R-multiple, and process statistics cannot be considered complete.
-
-### Step 1 — confirm completed trades are in History
-
-Before exporting, confirm every trade that should be enriched has completed its ExecutionOS lifecycle and is visible in **History**.
-
-The export helper reads the browser-persisted store:
+The existing V2.3 browser Execution Board stores UI state in `localStorage` under:
 
 ```text
 execution-v23-store
 ```
 
-A trade that has not completed into History cannot be enriched from that export.
+Browser storage is not a durable database backup.
 
-### Step 2 — keep the Vite server running
+Clearing site data or changing browser profile/origin can remove local decision/history state.
 
-Do **not** stop Vite before exporting.
+V2.4 pre-trade/DSS/risk repositories use their own persisted contracts in the implementation. Do not manually edit persisted JSON/state to bypass identity, freshness, or append-only rules.
 
-Browser `localStorage` is origin-specific. The export helper must therefore be opened on the same browser origin and profile used for ExecutionOS.
+For long-term review, keep intended local exports/reports deliberately rather than relying only on browser storage.
 
-If ExecutionOS is running at:
+---
+
+# 13. End-of-Day reporting
+
+The EOD reporter combines **two independent data sources**.
+
+An accurate enriched report requires understanding both.
+
+## 13.1 Source 1 — Schwab execution history
+
+Schwab is broker-authoritative for fills and position changes.
+
+The reporter reconstructs complete flat-to-flat cycles and broker-derived metrics such as:
+
+- direction;
+- entry/exit VWAP;
+- peak quantity;
+- gross realized P/L for complete-context cycles;
+- winners/losers;
+- average winner/loser;
+- profit factors.
+
+## 13.2 Source 2 — ExecutionOS History export
+
+The enriched report needs the completed Trade Contracts stored in browser History.
+
+The export supplies information Schwab does not know, including:
+
+- setup/timeframe;
+- thesis/trigger/invalidation;
+- structural stop;
+- target/management plan;
+- expected entry/intended size;
+- planned risk;
+- realized R;
+- execution-state/process information;
+- ExecutionOS ownership.
+
+> **Critical operating rule:** Download the ExecutionOS History export before generating the enriched report.
+
+Without it, broker reconstruction can remain valid for complete-context Schwab cycles, but ExecutionOS-specific enrichment cannot be considered complete.
+
+## 13.3 Step-by-step enriched EOD procedure
+
+### Step 1 — confirm trades are in History
+
+Before export, confirm every trade that should be enriched has completed into **ExecutionOS History**.
+
+A trade not in History cannot be enriched from the browser export.
+
+### Step 2 — keep Vite running
+
+Do **not** stop the Vite server before exporting.
+
+Browser local storage is origin-specific.
+
+If the live UI is running at:
 
 ```text
 http://localhost:5173
 ```
 
-open:
+open the helper at:
 
 ```text
 http://localhost:5173/eod-export.html
 ```
 
-Do not casually switch between `localhost`, `127.0.0.1`, another port, or another browser profile. Those can have different local-storage namespaces and may produce an empty or incomplete export.
+Use the **same browser profile and origin** used during the trading session.
+
+Do not casually switch between:
+
+- `localhost` and `127.0.0.1`;
+- different ports;
+- different browser profiles.
+
+Those can have different local-storage namespaces.
 
 ### Step 3 — download ExecutionOS EOD History
 
-On the helper page, choose:
+Choose:
 
 ```text
 DOWNLOAD EXECUTIONOS EOD HISTORY
@@ -999,89 +788,74 @@ DOWNLOAD EXECUTIONOS EOD HISTORY
 The downloaded file is named like:
 
 ```text
-executionos-eod-history-2026-08-27.json
+executionos-eod-history-YYYY-MM-DD.json
 ```
 
-The helper reads only ExecutionOS browser History. It does not contact Schwab, place orders, or modify/delete History.
-
-The reporter can auto-detect the newest matching file in:
-
-```text
-~/Downloads
-```
-
-For deterministic reporting when more than one export exists, explicitly provide the intended file path.
+This export reads browser History only. It does not contact Schwab or modify History.
 
 ### Step 4 — generate the report
 
-For a specific date:
+Basic:
 
 ```bash
-npm run schwab:eod -- --date=2026-08-27
+npm run schwab:eod -- --date=YYYY-MM-DD
 ```
 
 Preferred explicit form when multiple exports may exist:
 
 ```bash
-npm run schwab:eod -- --date=2026-08-27 --executionos=~/Downloads/executionos-eod-history-2026-08-27.json
+npm run schwab:eod -- --date=YYYY-MM-DD --executionos=~/Downloads/executionos-eod-history-YYYY-MM-DD.json
 ```
 
-The reporter prints a terminal summary and writes a self-contained HTML report to:
+Default HTML output:
 
 ```text
 reports/eod/YYYY-MM-DD.html
 ```
 
-The `reports/eod/` directory is Git-ignored.
-
 ### Step 5 — verify enrichment actually occurred
 
-Do not treat the existence of an HTML file as proof that the report is fully enriched.
+Do not treat “HTML file created” as proof of a fully enriched report.
 
-Check the terminal output and reconciliation:
+Check:
 
-- confirm the intended ExecutionOS History export was loaded or auto-detected;
-- confirm the ExecutionOS-owned versus broker-only counts are plausible;
-- trades known to have been managed through ExecutionOS should not all appear broker-only;
-- owned trades should show setup/process fields;
-- owned trades should show planned risk and R when their original Trade Contracts support those calculations;
-- unmatched Schwab trades should remain explicitly broker-only.
+- the intended History export was loaded or auto-detected;
+- ExecutionOS-owned versus broker-only counts are plausible;
+- known ExecutionOS-owned trades are not all broker-only;
+- owned trades show setup/process fields;
+- owned trades show planned risk/R when their contracts support it;
+- unmatched Schwab cycles remain explicitly broker-only.
 
-Matching is deliberately conservative. It uses normalized symbol, direction, and entry timing within the allowed matching window, with one-to-one ownership. The reporter does not fabricate ownership merely to increase the match count.
+Matching is intentionally conservative. Do not force ownership merely to improve match count.
 
-If an expected ExecutionOS-owned trade appears broker-only, verify the date, downloaded export, completed History entry, browser origin/profile, symbol, direction, and timing before accepting the enriched statistics.
+### Step 6 — investigate unexpected broker-only rows
 
-### Step 6 — understand carry-in / incomplete-context warnings
+Verify:
+
+- report date;
+- completed History entry;
+- downloaded export;
+- browser origin/profile;
+- symbol;
+- direction;
+- entry timing;
+- that the intended export file, not a newer unrelated file, was loaded.
+
+### Step 7 — respect carry-in / incomplete-context warnings
 
 The reporter never invents a cost basis.
 
-If the first same-day execution for a symbol is `CLOSING`, the position may have been opened before the report date. That activity is treated as **context-incomplete** and excluded rather than assigning a fictional opening price.
+If the first same-day execution is a closing execution, the position may have existed before the report date. That activity is treated as context-incomplete rather than receiving a fictional entry.
 
-If a context warning appears, reconstructed gross realized P/L must **not** be described as definitive whole-account daily P/L.
+When a carry-in/context warning exists, do **not** describe reconstructed gross P/L as definitive whole-account daily P/L.
 
-This is especially important for swing positions carried into the session.
+### Step 8 — planned risk and R
 
-### Step 7 — understand planned risk and R
+For an ExecutionOS-owned historical trade, the EOD enrichment uses the applicable saved contract semantics. Broker-only trades do not receive fabricated planned risk or R.
 
-For an ExecutionOS-owned trade:
+The EOD reporter's current account/risk snapshot is not a historical frozen per-trade risk budget.
 
-```text
-planned risk = abs(expected entry - structural stop) * intended size
-```
-
-and:
-
-```text
-realized R = reconstructed realized gross P/L / original planned risk
-```
-
-Broker-only trades do not receive fabricated planned risk or R.
-
-The optional close-of-business risk snapshot comes from the current read-only monitor. It is **not** a historical frozen per-trade 0.5% risk budget.
-
-### Step 8 — distinguish the two profit-factor metrics
-
-The report shows two different measures:
+### Step 9 — profit-factor distinction
 
 ```text
 Gross Profit Factor = gross profit / gross loss
@@ -1091,17 +865,15 @@ Gross Profit Factor = gross profit / gross loss
 Average Win/Loss Factor = average winner / abs(average loser)
 ```
 
-They answer different questions and should not be conflated.
+Do not conflate them.
 
-### Step 9 — retain report artifacts appropriately
+### Step 10 — retain artifacts privately
 
-The downloaded ExecutionOS History JSON contains trading-plan and execution-review data. Treat it as private local working data.
+The History JSON and generated HTML report contain private trading-plan/review information.
 
-Generated HTML reports are also local artifacts. Neither the History export nor generated EOD reports should be committed to Git.
+Keep them local. Do not commit them to Git.
 
-If long-term retention matters, preserve the downloaded History JSON and HTML report deliberately because browser `localStorage` is not a durable database.
-
-For implementation details and validation evidence, see:
+For implementation/reporting details, see:
 
 ```text
 docs/ExecutionOS_EOD_Report.md
@@ -1109,1097 +881,372 @@ docs/ExecutionOS_EOD_Report.md
 
 ---
 
-# 23. Persistence and local state
+# 14. Futures / NinjaTrader status
 
-V2.3 stores its application state in browser `localStorage` under:
+Common futures such as MES/MNQ can be represented by the system, and Phase 4 contains futures sizing metadata/calculation support.
 
-```text
-execution-v23-store
-```
+However:
 
-A normal browser refresh should therefore preserve:
+- live NinjaTrader broker binding is **not connected**;
+- Schwab must not be treated as the futures execution source;
+- futures sizing support is not equivalent to broker integration;
+- a futures candidate will not automatically promote to LIVE from NinjaTrader today.
 
-- draft plan state;
-- armed candidates;
-- live trades;
-- history.
-
-## 23.1 Important limitation
-
-Browser local storage is not cloud storage and is not a durable database backup.
-
-Clearing browser site data, using a different browser profile, or manually clearing local storage can remove the saved ExecutionOS UI state.
-
-Broker truth still exists independently at Schwab, but the local ExecutionOS decision record may not.
-
-For EOD reporting, the downloaded `executionos-eod-history-YYYY-MM-DD.json` file provides a portable snapshot of completed History used for enrichment. Preserve that export and the generated HTML report locally when long-term review is important.
-
-## 23.2 Do not use browser storage as the only long-term archive
-
-As the project matures, durable local persistence/export should replace reliance on browser local storage for critical records.
+A future broker-agnostic adapter/observer design remains separate work.
 
 ---
 
-# 24. Using ExecutionOS without the Schwab link
-
-The React interface remains usable when the broker monitor is offline.
-
-You can still:
-
-- create plans;
-- perform risk planning if you provide/retain the necessary inputs;
-- manage candidate drafts;
-- review local history.
-
-You cannot rely on:
-
-- automatic broker-fill detection;
-- current Schwab positions;
-- broker-derived account equity;
-- automatic ARMED -> LIVE binding;
-- live broker lifecycle events.
-
-The interface should clearly show BROKER OFFLINE in this condition.
-
----
-
-# 25. Futures and NinjaTrader status
-
-The current interface recognizes common futures symbols such as:
-
-- MES
-- MNQ
-- MCL
-- ES
-- NQ
-- CL
-
-and labels their intended execution source as **NINJATRADER**.
-
-However, the UI currently warns:
-
-> NinjaTrader binding is not connected yet.
-
-Therefore:
-
-- futures plans can be represented conceptually;
-- automatic futures broker-fill binding is **not** available;
-- Schwab must not be treated as the futures source;
-- the future V3 path calls for a separate read-only NinjaTrader observer normalized through a broker-agnostic event model.
-
-Do not assume that a futures candidate will auto-promote to LIVE from NinjaTrader today.
-
----
-
-# 26. Historical analytics and research tools
-
-The repository contains a preservation-grade analytics layer used to reconstruct the historical evidence that motivated the future Management Governor.
-
-These tools are **not required to operate a normal trading session**. They are for research, validation, regression testing, and project development.
-
-## 26.1 Preserved study areas
-
-The analytics modules cover:
-
-- winner/loser duration;
-- stop-management behavior;
-- historical R multiples;
-- MFE/MAE;
-- capture efficiency;
-- fixed-duration counterfactuals;
-- broker-agnostic flat-to-flat episode reconstruction.
-
-## 26.2 Current evidence status
-
-| Analysis | Status |
-| --- | --- |
-| Duration | Recovered to preserved precision |
-| Historical stop-management timing | Recovered to preserved precision |
-| Historical R | High-confidence reconstruction with one documented threshold discrepancy |
-| 19-trade MFE | Benchmark/formula preserved; exact historical membership unresolved |
-| 19-trade capture efficiency | Benchmark/formula preserved; membership unresolved |
-| 19-trade fixed-duration study | Benchmark/formula preserved; membership unresolved |
-
-## 26.3 Anti-curve-fitting rule
-
-Do not search arbitrary trade combinations, symbol exclusions, custom offsets, or bar-timing rules after seeing historical target numbers merely to create a match.
-
-If a future replacement sample is created, define its membership rule **before** observing the market outcomes and label it a **new reproducible study**, not a recovery of the original historical sample.
-
-## 26.4 Local research files
-
-Raw, normalized, enriched, and cached market-data files are deliberately Git-ignored. They may contain broker-derived information and must remain local.
-
----
-
-# 27. Security and data handling
-
-## 27.1 Secrets
+# 15. Security
 
 Never commit or paste publicly:
 
 - Schwab Client Secret;
-- OAuth access token;
-- OAuth refresh token;
-- authorization code;
+- OAuth access/refresh tokens;
+- authorization codes;
 - unmasked account numbers;
-- raw broker exports containing sensitive identifiers.
+- private broker exports;
+- ExecutionOS private History exports.
 
-## 27.2 Local secret files
-
-The important local files are:
+Important local files:
 
 ```text
 .env.local
 .schwab-tokens.json
 ```
 
-Both are Git-ignored.
+Keep secrets out of browser-exposed `VITE_` variables.
 
-## 27.3 Browser boundary
-
-The Client Secret must never be exposed to React/browser code. The browser communicates only with the local read-only broker-state API.
-
-## 27.4 Read-only broker phase
-
-The current Schwab integration is deliberately read-only. This is a safety feature, not a missing convenience feature.
-
-No broker-write authority should be added until:
-
-1. state reconstruction is stable;
-2. Governor policy is tested in observation mode;
-3. override and emergency-flatten rules are defined;
-4. shadow/live comparison validates that the system would not interfere with legitimate exits.
+The read-only broker boundary is a deliberate safety control.
 
 ---
 
-# 28. Troubleshooting
+# 16. Troubleshooting
 
-## 28.1 BROKER OFFLINE in the UI
+## 16.1 Broker offline
 
-First verify that the monitor is running:
+Start/verify:
 
 ```bash
 npm run schwab:monitor
-```
-
-Then test:
-
-```bash
 curl http://127.0.0.1:8787/health
 ```
 
-If that fails, the monitor/local API is not listening on the expected port.
+If the API is on a custom port, ensure the UI uses the same `VITE_EXECUTIONOS_BROKER_URL`.
 
-If `/health` works but the UI remains offline, verify that the UI is pointing to the same broker URL. The default is:
+## 16.2 Schwab authentication fails
 
-```text
-http://127.0.0.1:8787
-```
-
-A custom UI URL may be set through `VITE_EXECUTIONOS_BROKER_URL`.
-
-## 28.2 Schwab authentication fails
-
-Check:
-
-- `.env.local` exists;
-- Client ID is correct;
-- Client Secret is correct;
-- callback is exactly `https://127.0.0.1:8182`;
-- token file exists if reusing authorization.
-
-If the refresh token has expired or is invalid:
+Verify `.env.local`, callback URL, and token state. Reauthorize with:
 
 ```bash
 npm run schwab:auth
 ```
 
-## 28.3 Port 8787 is already in use
+## 16.3 Candidate/fill did not bind in existing V2.3 Execution Board
 
-Set a different local API port in `.env.local`:
+Check:
 
-```text
-EXECUTIONOS_API_PORT=8788
-```
+- candidate was actually armed in the V2.3 broker-listening layer;
+- symbol matches;
+- direction/opening effect matches;
+- fill occurred after arm time;
+- monitor was already running;
+- there was not a pre-existing position that should prevent fresh ownership.
 
-Then point React at the same port:
+Do not assume an internal V2.4 `ARMED` record has already been transferred to V2.3; that handoff is not yet implemented.
 
-```text
-VITE_EXECUTIONOS_BROKER_URL=http://127.0.0.1:8788
-```
+## 16.4 Phase 4 says no affordable size
 
-Restart both monitor and Vite after changing environment variables.
+Do not tighten the stop.
 
-## 28.4 Fill happened but candidate did not bind
+Correct choices are:
 
-Check all of the following:
+- choose a smaller valid quantity if one exists; or
+- pass when minimum quantity cannot fit.
 
-- Was the candidate already ARMED before the fill?
-- Does symbol match exactly?
-- Does LONG correspond to opening BUY?
-- Does SHORT correspond to opening SELL_SHORT?
-- Was the broker execution classified as OPENING?
-- Was there already an existing position in that symbol?
-- Was the monitor running before the fill?
-- Is the UI connected to the local broker API?
+## 16.5 Phase 4 is blocked
 
-If the monitor started after the fill, that execution may have been intentionally absorbed into the startup baseline rather than emitted as a new post-arm event.
+Common categories include:
 
-## 28.5 Cannot arm a second candidate for the same symbol
+- stale/missing quote;
+- required quote side missing;
+- crossed market;
+- invalid entry/stop geometry;
+- unresolved/stale/invalid account snapshot;
+- unsupported currency/asset type;
+- invalid/inconsistent instrument metadata.
 
-This is expected behavior. Edit the existing candidate or remove it first. V2.3 permits one armed candidate per symbol.
+A `BLOCKED` result is not the same thing as `PASS — STOP_RISK_CONFLICT`.
 
-## 28.6 Futures symbol will not bind
-
-Expected. NinjaTrader automatic binding is not connected yet.
-
-## 28.7 UI state looks stale after code changes
-
-First try a normal browser reload. V2.3 includes local-store migration logic for recent state changes.
-
-If a development migration is genuinely incompatible, export or record any important local state before clearing browser site data. Clearing local storage can delete local ExecutionOS history.
-
-## 28.8 History or candidate vanished after browser cleanup
-
-Browser local storage is local state. Clearing site data can remove it. The broker account remains independent, but the local decision record may be lost.
-
-## 28.9 Historical study command cannot find source files
-
-Many research datasets are intentionally local and Git-ignored. Reconstruct or regenerate them using the documented research pipeline rather than inventing rows.
-
-## 28.10 EOD report unexpectedly shows broker-only trades
+## 16.6 EOD report shows broker-only trades unexpectedly
 
 Check, in order:
 
-1. Was the trade completed into ExecutionOS History?
-2. Did you download **EXECUTIONOS EOD HISTORY** after the trade completed?
-3. Was the helper opened on the same browser origin/profile as the ExecutionOS UI?
-4. Did the reporter load or auto-detect the intended export?
-5. Is a newer unrelated `executionos-eod-history-*.json` file present in `~/Downloads`?
-6. If uncertain, rerun with an explicit `--executionos=<path>` argument.
+1. trade completed into History;
+2. History export was downloaded after completion;
+3. export helper used same origin/profile;
+4. intended export was loaded;
+5. symbol/direction/timing match plausibly.
 
-Do not manually force ownership merely to improve the match count.
+## 16.7 EOD export empty/incomplete
 
-## 28.11 EOD History export is empty or incomplete
+Likely causes:
 
-Common causes include:
-
-- opening the helper on a different origin;
-- using another browser profile;
-- clearing browser site data;
-- exporting before completed trades reached History.
-
-Use the same origin/profile as the live ExecutionOS UI and export only after completed trades appear in History.
-
-## 28.12 EOD report has a carry-in/context warning
-
-A closing-first same-day execution can indicate exposure opened before the report date. The reporter excludes that incomplete context rather than inventing a cost basis.
-
-When this warning appears, do not treat reconstructed gross P/L as definitive whole-account daily P/L.
+- different browser origin;
+- different profile;
+- browser site data cleared;
+- export performed before completed trades reached History.
 
 ---
 
-# 29. Current limitations and deferred work
+# 17. Current limitations and deferred work
 
-The following are important **current-state facts**, not defects to work around with assumptions.
+Current intentionally incomplete areas include:
 
-## Not implemented / intentionally deferred
-
-- Schwab order placement, replacement, or cancellation;
+- explicit V2.4 internal `ARMED` → V2.3 Execution Board transfer/binding;
+- broader context/decision-gate logic beyond implemented Phase 4 risk consequences;
+- broker order placement/replacement/cancellation;
 - broker-write Governor enforcement;
+- buying-power/margin eligibility gate;
+- aggregate portfolio heat controls;
+- non-USD conversion/additional asset types;
 - automatic NinjaTrader futures binding;
-- true historical/live NBBO capture for market-order slippage;
-- cloud persistence;
-- multi-device synchronization;
-- full durable execution database;
-- AI in the split-second management path.
+- cloud persistence / multi-device synchronization;
+- durable production database for all decision history;
+- true contemporaneous NBBO capture for all historical slippage analysis;
+- AI in the latency-sensitive execution path.
 
-## V2.3 deferred edge cases
-
-The V2.3 release-validation gate is complete. The following are documented deferred items rather than V2.3 release blockers:
-
-- exact same-poll cross-symbol execution ownership remains deferred before any broker-write or automated simultaneous-entry capability;
-- true live cross-zero REVERSAL could not be broker-validated because thinkorswim rejected the attempted cross-zero order;
-- REVERSAL lifecycle behavior has nevertheless passed deterministic state tests and synthetic end-to-end React acceptance.
-
-These deferred cases remain documented V2.3 limitations. The V2.3.0 tag is complete; do not expand them into unrelated V3 architecture work before a separate V3 start is explicitly authorized.
+These are not reasons to bypass current safety boundaries with manual state edits or guessed fallbacks.
 
 ---
 
-# 30. Repository and branch discipline
+# 18. Repository discipline
 
-ExecutionOS V2.3.0 is frozen under the annotated tag `v2.3.0`. Current `main` contains that frozen execution baseline plus the subsequently merged read-only EOD reporting utility.
+Treat:
 
-The key rules are:
+- `v2.3.0` as the frozen downstream execution-release reference;
+- current `main` as the authoritative integrated baseline;
+- approved design documents as dated architecture records;
+- phase closeouts as implementation/acceptance records.
 
-- treat `v2.3.0` as the frozen execution-release reference;
-- treat current `main` as the authoritative operational/documentation baseline;
-- do not casually rebase, overwrite, or rewrite validated `main` history;
-- preserve the validated V2.3 broker-aware architecture and release-tested execution semantics;
-- keep historical analytics and preserved pre-V2 execution-discipline material intact;
-- do not alter or move the `v2.3.0` tag;
-- do not create the V3 branch or begin Management Governor implementation until separately authorized.
+Do not:
 
-Pull-request status:
+- rewrite validated history casually;
+- move/delete the `v2.3.0` tag;
+- modify approved historical baselines merely to erase approval-time status;
+- begin V3 without explicit authorization;
+- commit credentials, tokens, raw private broker data, or private EOD exports.
 
-- **PR #1** - V2 execution system, `v2-execution-system` -> `main`; merged on 27 August 2026;
-- **PR #2** - analytics preservation -> `v2-execution-system`; merged;
-- **PR #3** - pre-V2 execution-discipline documentation reconciliation; merged;
-- **PR #4** - history-only `main` reconciliation with no V2.3 tree changes; merged;
-- **PR #5** - V2.3 release-documentation closeout; merged;
-- **PR #6** - post-merge V2.3 documentation finalization; merged;
-- **PR #7** - read-only ExecutionOS end-of-day reporting; merged into `main` at `bedd70979a3b18844386bcf8f927fd8a1f62307f`.
+Important PR records include:
 
-The frozen release reference remains `v2.3.0`; normal current operation and documentation use `main`. V3 has not started.
+- PR #7 — read-only EOD reporting;
+- PR #12 — V2.4 Phase 3 DSS implementation;
+- PR #13 — Phase 3 post-merge documentation cleanup;
+- PR #14 — V2.4 Phase 4 Effective-Stop Risk Sizing.
 
 ---
 
-# 31. Recommended daily operating procedure
+# 19. Recommended daily operating procedure
 
-This is the concise operating sequence for a normal Schwab equity session.
+This reflects the **current usable operator path** and the fact that the V2.4→V2.3 final handoff is not yet a complete operator surface.
 
-## Before market / before first intended trade
+## Before market / before first trade
 
-1. Open the repository terminal.
-2. Confirm you are on the intended project branch.
-3. Start the Schwab monitor:
+1. Update current `main` if appropriate:
+
+   ```bash
+   git checkout main
+   git pull --ff-only
+   ```
+
+2. Start the Schwab monitor:
 
    ```bash
    npm run schwab:monitor
    ```
 
-4. Wait for `MONITOR ARMED`.
-5. In a second terminal, start the UI:
+3. Start the UI:
 
    ```bash
    npm run dev
    ```
 
-6. Open the Vite URL in the browser.
-7. Confirm **BROKER ONLINE**.
-8. Confirm account equity and 0.5% max-risk budget look reasonable.
-9. Confirm current broker positions match reality.
+4. Confirm broker online/account state is sensible.
+5. Confirm current broker positions match reality.
 
 ## For each potential trade
 
 1. Perform the READ outside ExecutionOS.
-2. Create the PLAN, including entry trigger, invalidation, structural stop, target, and management.
-3. Complete RISK sizing.
-4. ARM the candidate.
-5. Wait for the planned TRIGGER to occur and enter only in thinkorswim.
-6. Confirm the candidate binds to the new broker ENTRY.
-7. Manage the trade as VALID / THREATENED / INVALID.
-8. Ask **what changed on the chart?** before interfering.
-9. Let broker FLAT state close the episode and review the execution.
+2. Define thesis, trigger, invalidation, target, and management intent.
+3. Preserve the rule: structure → stop → risk → size.
+4. Use the currently exposed workflow for the candidate you intend to execute.
+5. Do not assume internal V2.4 authorization automatically arms the existing V2.3 Execution Board until the explicit handoff is implemented.
+6. Place the actual equity order only in thinkorswim/Schwab.
+7. Once the V2.3 Execution Board owns a matching fill, manage structure as `VALID / THREATENED / INVALID`.
+8. Ask **what changed on the chart?** before discretionary interference.
 
 ## After the session
 
-1. Review History for execution decisions, not just P/L.
-2. Confirm trades that should be included in the enriched EOD report have completed into **ExecutionOS History**.
-3. **Keep the Vite server running** until the ExecutionOS History export is downloaded.
-4. In the same browser profile/origin used for ExecutionOS, open:
+1. Confirm completed ExecutionOS trades are in History.
+2. **Keep Vite running.**
+3. Open the export helper on the same browser origin/profile:
 
    ```text
    http://localhost:5173/eod-export.html
    ```
 
-5. Choose **DOWNLOAD EXECUTIONOS EOD HISTORY**.
-6. Confirm the downloaded file is named like:
-
-   ```text
-   executionos-eod-history-YYYY-MM-DD.json
-   ```
-
-7. Generate the report:
+4. Download **EXECUTIONOS EOD HISTORY**.
+5. Generate the report:
 
    ```bash
    npm run schwab:eod -- --date=YYYY-MM-DD
    ```
 
-8. When multiple exports may exist, prefer an explicit file:
-
-   ```bash
-   npm run schwab:eod -- --date=YYYY-MM-DD --executionos=~/Downloads/executionos-eod-history-YYYY-MM-DD.json
-   ```
-
-9. Confirm the terminal reports that the intended ExecutionOS export was loaded or auto-detected.
-10. Confirm ExecutionOS-owned versus broker-only counts are plausible.
-11. Review planned risk and R only for genuinely ExecutionOS-owned trades.
-12. Review the generated HTML at `reports/eod/YYYY-MM-DD.html`.
-13. If a carry-in/context warning appears, do not describe reconstructed gross P/L as definitive whole-account daily P/L.
-14. Only after the History export is complete, stop the monitor and Vite server if desired.
-15. Preserve intended local report/export artifacts, and do not commit secrets, raw private broker data, or ExecutionOS EOD History exports.
+6. Prefer explicit `--executionos=<path>` when multiple exports may exist.
+7. Verify enrichment/ownership counts are plausible.
+8. Respect carry-in/context warnings.
+9. Review execution quality separately from P/L.
+10. Keep private exports/reports local.
 
 ---
 
-# 32. Glossary
+# 20. Command reference
 
-**Armed candidate**  
-A saved, risk-valid pre-entry contract that is listening for a matching future broker opening fill.
-
-**Broker binding**  
-The process by which a new broker opening execution is assigned to the correct armed candidate.
-
-**Entry VWAP / average price**  
-The blended average price of fills that opened/increased the position.
-
-**Execution state**  
-The structural classification VALID, THREATENED, or INVALID.
-
-**FLAT**  
-Broker position quantity equals zero.
-
-**Governor**  
-The planned V3 deterministic policy layer that will evaluate whether a management action is authorized, warning-worthy, override-required, or blocked.
-
-**Historical benchmark**  
-A preserved numerical result from prior research that may not have fully recoverable source membership.
-
-**Management eligibility**  
-A future V3 concept describing whether a specific management action is currently authorized, independent of whether the trade itself is VALID or THREATENED.
-
-**Peak quantity**  
-Maximum absolute position size reached during an episode.
-
-**Structural stop**  
-The price boundary derived from technical invalidation, not from a desired dollar loss.
-
-**Trade contract**  
-The frozen pre-entry plan: thesis, trigger, invalidation, structural stop, target, management rules, and risk context.
-
-**Trade episode**  
-A flat-to-flat broker lifecycle for one symbol/account/direction sequence, subject to reversal semantics.
-
----
-
-# Appendix A - Complete command-line reference
-
-This appendix lists the current repository command surface and the common direct shell commands required to operate or validate ExecutionOS.
-
-## A.1 Project setup and branch inspection
-
-### Clone the repository
-
-```bash
-git clone https://github.com/sibolek/structure-based-trade-management.git
-```
-
-### Enter the repository
-
-```bash
-cd structure-based-trade-management
-```
-
-### Install dependencies
+## Setup / UI
 
 ```bash
 npm install
-```
-
-### Show current branch
-
-```bash
-git branch --show-current
-```
-
-### Pull the current branch
-
-```bash
-git pull
-```
-
-### Check repository status
-
-```bash
-git status
-```
-
-### Inspect branches
-
-```bash
-git branch -a
-```
-
-Do not merge/rebase sensitive project branches unless that action is explicitly part of the current release plan.
-
----
-
-## A.2 Environment setup
-
-### Create `.env.local`
-
-```bash
-cp .env.local.example .env.local
-```
-
-### Confirm secret files are Git-ignored
-
-```bash
-git check-ignore .env.local .schwab-tokens.json
-```
-
----
-
-## A.3 React / Vite application commands
-
-### Development server
-
-```bash
 npm run dev
-```
-
-Starts the Vite development server.
-
-### Production build
-
-```bash
 npm run build
-```
-
-Builds the current React application for production. Use this as part of the V2.3 release gate.
-
-### Preview production build
-
-```bash
 npm run preview
 ```
 
-Serves the built output locally for preview.
-
----
-
-## A.4 Schwab authentication and account commands
-
-### Authorize / reauthorize Schwab
+## Schwab
 
 ```bash
 npm run schwab:auth
-```
-
-Runs the OAuth authorization-code flow and writes local tokens.
-
-### Read account status
-
-```bash
-npm run schwab:account
-```
-
-Shows authorized account summary, equity, 0.5% risk budget, buying power, and open positions.
-
-### Broker connection status
-
-```bash
 npm run schwab:status
-```
-
-Checks local Schwab authentication/token state.
-
-### Remove local tokens
-
-```bash
-npm run schwab:logout
-```
-
-Deletes the local token file. It does **not** revoke Schwab authorization remotely.
-
----
-
-## A.5 Live Schwab monitor
-
-### Start the monitor and local API
-
-```bash
+npm run schwab:account
 npm run schwab:monitor
-```
-
-Starts read-only order polling, state reconstruction, latency observation, and the local broker-state API.
-
-### Stop the monitor
-
-```text
-Ctrl+C
-```
-
-### Health endpoint
-
-```bash
-curl http://127.0.0.1:8787/health
-```
-
-### Broker-state endpoint
-
-```bash
-curl http://127.0.0.1:8787/api/state
-```
-
----
-
-## A.5.1 End-of-day reporting
-
-### Export enriched ExecutionOS History
-
-With the normal Vite UI still running on the same origin/profile used during the trading session, open:
-
-```text
-http://localhost:5173/eod-export.html
-```
-
-Choose **DOWNLOAD EXECUTIONOS EOD HISTORY**.
-
-### Generate an EOD report
-
-```bash
-npm run schwab:eod
-```
-
-### Generate a specific date
-
-```bash
-npm run schwab:eod -- --date=2026-08-27
-```
-
-### Explicitly provide the ExecutionOS History export
-
-```bash
-npm run schwab:eod -- --date=2026-08-27 --executionos=~/Downloads/executionos-eod-history-2026-08-27.json
-```
-
-### Restrict the report to one symbol
-
-```bash
-npm run schwab:eod -- --date=2026-08-27 --symbol=NVDA
-```
-
-### Write HTML to a custom path
-
-```bash
-npm run schwab:eod -- --date=2026-08-27 --out=~/Desktop/eod-2026-08-27.html
-```
-
-Default generated reports are written under:
-
-```text
-reports/eod/
-```
-
-and are Git-ignored.
-
-For an enriched report, confirm the reporter loaded an ExecutionOS History export. Without that export, Schwab cycle reconstruction still works for complete-context trades, but ExecutionOS plan/risk/R/process fields cannot be treated as complete.
-
----
-
-## A.6 Historical Schwab order verification
-
-### Default history command
-
-```bash
 npm run schwab:history
-```
-
-### Example: seven-day history
-
-```bash
-npm run schwab:history -- --days=7
-```
-
-### Example: thirty-day NVDA history
-
-```bash
-npm run schwab:history -- --days=30 --symbol=NVDA
-```
-
-### Export the 30-day sanitized history used by research reconstruction
-
-```bash
-npm run schwab:history-export
-```
-
-This writes to the local Git-ignored historical research path defined in `package.json`.
-
----
-
-## A.7 Historical state replay
-
-### Default replay
-
-```bash
 npm run schwab:replay
-```
-
-### Example
-
-```bash
-npm run schwab:replay -- --days=7 --symbol=MRVL
-```
-
-Replay assumes the symbol is flat at the beginning of the selected window. Choose a window whose first fill is a known opening execution when validating lifecycle logic.
-
----
-
-## A.8 Slippage and execution-fragment analytics
-
-### Default
-
-```bash
 npm run schwab:slippage
-```
-
-### Seven days
-
-```bash
-npm run schwab:slippage -- --days=7
-```
-
-### Thirty days for one symbol
-
-```bash
-npm run schwab:slippage -- --days=30 --symbol=AMD
-```
-
-### Fragmented executions only
-
-```bash
-npm run schwab:slippage -- --days=7 --fragmented-only
-```
-
-The current slippage analysis is reference-based and does not yet provide true market-order slippage versus contemporaneous NBBO.
-
----
-
-## A.9 Schwab bridge tests
-
-### State-engine tests
-
-```bash
 npm run schwab:state-test
-```
-
-Exercises ENTRY / ADD / PARTIAL / FLAT / REVERSAL state mechanics.
-
-### Token lifecycle test
-
-```bash
 npm run schwab:token-test
-```
-
-Runs the long credential-lifecycle test across an access-token refresh boundary.
-
-### Historical 1-minute market-data validation
-
-```bash
 npm run schwab:price-history-test
 ```
 
-Validates read-only Schwab `/marketdata/v1/pricehistory` access and minute-candle availability.
+## End-of-Day
 
----
+```bash
+npm run schwab:eod
+npm run schwab:eod -- --date=YYYY-MM-DD
+npm run schwab:eod -- --date=YYYY-MM-DD --executionos=~/Downloads/executionos-eod-history-YYYY-MM-DD.json
+npm run schwab:eod -- --date=YYYY-MM-DD --symbol=NVDA
+npm run schwab:eod -- --date=YYYY-MM-DD --out=~/Desktop/eod-YYYY-MM-DD.html
+```
 
-## A.10 Analytics tests and reports
+## V2.4 validation
 
-### All analytics / episode tests
+```bash
+npm run v24:dss-test
+npm run v24:risk-sizing-test
+```
+
+## Full tests / analytics
 
 ```bash
 npm run analytics:test
-```
-
-### Full analytics report
-
-```bash
 npm run analytics:report
-```
-
-### Duration only
-
-```bash
 npm run analytics:duration
-```
-
-### Stop-management report
-
-```bash
 npm run analytics:stops
-```
-
-### R-multiple report
-
-```bash
 npm run analytics:r
-```
-
-### MFE/MAE report
-
-```bash
 npm run analytics:mfe
-```
-
-### Capture-efficiency report
-
-```bash
 npm run analytics:capture
-```
-
-### Fixed-duration counterfactual report
-
-```bash
 npm run analytics:counterfactuals
 ```
 
----
+## Historical research / diagnostics
 
-## A.11 Historical study reconstruction commands
-
-### Run the 30-day study runner
+The repository retains research commands for reproducibility, including:
 
 ```bash
 npm run research:30day-management
-```
-
-### Normalize exported Schwab history into trade episodes
-
-```bash
 npm run research:normalize-30day
-```
-
-### Full export -> normalize -> analytics reconstruction pipeline
-
-```bash
 npm run research:reconstruct-30day
-```
-
-### Enrich the historical study with recovered stop history and historical R fields
-
-```bash
 npm run research:enrich-stops
-```
-
-### Run reports against the recovered enriched local dataset
-
-```bash
 npm run research:report-recovered
-```
-
----
-
-## A.12 Historical forensic diagnostics
-
-These commands were used to recover methodology and are retained for reproducibility and future debugging. They are not normal daily-trading commands.
-
-### Diagnose study-window boundary
-
-```bash
-npm run research:diagnose-window
-```
-
-### Diagnose the extra winner around the inferred study boundary
-
-```bash
-npm run research:diagnose-extra-winner
-```
-
-### Diagnose a one-trade benchmark delta
-
-```bash
-npm run research:diagnose-one-trade-delta
-```
-
-### Diagnose historical stop actions
-
-```bash
-npm run research:diagnose-stops
-```
-
-### Diagnose stop-to-trade linkage
-
-```bash
-npm run research:diagnose-stop-linkage
-```
-
-### Diagnose initial-risk population
-
-```bash
-npm run research:diagnose-r
-```
-
-### Diagnose R winner differences
-
-```bash
-npm run research:diagnose-r-winners
-```
-
-### Diagnose R provenance
-
-```bash
-npm run research:diagnose-r-provenance
-```
-
-### Diagnose stop lifecycle for historical R
-
-```bash
-npm run research:diagnose-r-lifecycle
-```
-
-### Compare historical R denominator bases
-
-```bash
-npm run research:diagnose-r-basis
-```
-
-### Audit whether historical market samples exist locally
-
-```bash
 npm run research:audit-market-data
-```
-
-### Diagnose the fast-winner eligibility/sample population
-
-```bash
 npm run research:diagnose-fast-winners
-```
-
-### Diagnose standard fast-winner stratification rules
-
-```bash
 npm run research:diagnose-fast-winner-strata
-```
-
-### Validate frozen candidate samples using Schwab minute data
-
-```bash
 npm run research:validate-fast-winners-schwab
-```
-
-### Diagnose standard minute-bar timestamp alignment conventions
-
-```bash
 npm run research:diagnose-minute-alignment
 ```
 
-The last four commands are preservation forensics. Their purpose is to document what could and could not be recovered, **not** to optimize a sample until it matches a target.
+Use the research methodology document for provenance/anti-curve-fitting rules.
 
 ---
 
-## A.13 Useful direct Node entry points
+# 21. Documentation map
 
-The npm scripts above are preferred. For debugging, each script ultimately runs a Node entry point defined in `package.json`, including:
+Use the following sources by purpose:
 
-```text
-schwab-bridge/index.mjs
-schwab-bridge/monitor.mjs
-schwab-bridge/history.mjs
-schwab-bridge/eod-report.mjs
-schwab-bridge/replay.mjs
-schwab-bridge/slippage.mjs
-schwab-bridge/state-test.mjs
-schwab-bridge/token-test.mjs
-schwab-bridge/price-history-test.mjs
-research/30-day-management-study/run-study.mjs
-research/30-day-management-study/normalize-schwab-history.mjs
-```
-
-Use the npm aliases unless you are deliberately debugging the script implementation.
+| Need | Source |
+|---|---|
+| Operate ExecutionOS today | `USER-GUIDE.md` |
+| Current documentation authority/status | `docs/ExecutionOS_Documentation_Index.md` |
+| Current vs historical map | `DOCUMENTATION-STATUS.md` |
+| Overall V2.4 architecture | `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` |
+| Phase 3 implementation | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` |
+| Phase 4 design | `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md` |
+| Phase 4 implementation / merge | `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md` |
+| EOD semantics | `docs/ExecutionOS_EOD_Report.md` |
+| Longer-term Governor direction | `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` |
+| Historical analytics provenance | `research/30-day-management-study/methodology.md` |
 
 ---
 
-# Appendix B - Environment variables
+# 22. Glossary
 
-The project currently recognizes the following important local configuration values.
+**Structural invalidation**  
+The chart condition/price structure that proves the thesis wrong.
 
-| Variable | Purpose | Typical/default value |
-| --- | --- | --- |
-| `SCHWAB_CLIENT_ID` | Schwab Developer Portal client ID. | Required |
-| `SCHWAB_CLIENT_SECRET` | Schwab Developer Portal secret. | Required; local only |
-| `SCHWAB_CALLBACK_URL` | Registered OAuth callback. | `https://127.0.0.1:8182` |
-| `SCHWAB_POLL_MS` | Live order-poll interval. | `1000`; constrained to 500-10000 ms |
-| `EXECUTIONOS_API_PORT` | Local read-only broker API port. | `8787` |
-| `VITE_EXECUTIONOS_BROKER_URL` | React URL for local broker API. | `http://127.0.0.1:8787` |
+**Effective stop**  
+The Phase 3 volatility-protected stop derived from structural invalidation. Phase 4 may not change it.
 
-Never prefix the Schwab Client Secret with `VITE_`. Any `VITE_` environment variable may be exposed to browser code.
+**DSS evaluation**  
+An immutable Phase 3 evaluation identified by `dssEvaluationId`.
 
----
+**Risk evaluation**  
+An immutable Phase 4 evaluation identified by `riskEvaluationId`, containing expected-entry, account, instrument, calculation, status, and provenance.
 
-# Appendix C - Local files and data retention
+**Maximum affordable quantity**  
+The largest valid quantity whose planned entry→effective-stop risk fits the 0.5% budget. It is a ceiling, not a required quantity.
 
-The following files are intentionally local/Git-ignored in the current project:
+**Internal V2.4 `ARMED`**  
+A pre-trade authorization/provenance freeze containing exact candidate/DSS/risk/quantity identity. It does not place an order and is not yet the explicit V2.3 Execution Board handoff.
 
-```text
-.env
-.env.local
-.schwab-tokens.json
-research/30-day-management-study/raw-schwab-history.json
-research/30-day-management-study/normalized-trades.json
-research/30-day-management-study/historical-study-trades.json
-research/30-day-management-study/schwab-minute-cache.json
-```
+**V2.3 armed candidate**  
+The existing downstream broker-listening candidate used by the frozen Execution Board to bind a matching future Schwab opening fill.
 
-These categories include:
+**Broker binding**  
+The downstream process assigning a new opening fill to the correct V2.3 armed candidate.
 
-- credentials and tokens;
-- broker-derived raw history;
-- normalized historical trade episodes;
-- enriched research datasets;
-- cached Schwab minute bars.
+**Execution state**  
+The live structural classification `VALID`, `THREATENED`, or `INVALID`.
 
-Do not force-add these files to Git.
+**Trade contract**  
+The saved pre-entry intent: thesis, trigger, invalidation, target/management, and risk context.
 
-The React application separately stores current UI state in browser `localStorage` under:
+**Trade episode**  
+A broker position lifecycle from flat to flat, subject to reversal semantics.
 
-```text
-execution-v23-store
-```
-
-The EOD export helper downloads a local file named like:
-
-```text
-executionos-eod-history-YYYY-MM-DD.json
-```
-
-Generated EOD HTML reports are stored by default under:
-
-```text
-reports/eod/
-```
-
-Both the downloaded ExecutionOS History export and generated EOD reports are local reporting/review artifacts and should not be committed to Git.
-
----
-
-# Appendix D - Current development sequence
-
-At the time of this guide's publication, the project sequence is:
-
-1. **Analytics preservation - complete; PR #2 merged.**
-2. **Pre-V2 documentation preservation - complete; PR #3 merged.**
-3. **`main` history reconciliation - complete; PR #4 merged with no V2.3 tree changes.**
-4. **V2.3 final acceptance and full release gate - complete.**
-5. **V2.3 release-documentation closeout - complete; PR #5 merged.**
-6. **V2.3 merge into `main` - complete; PR #1 merged.**
-7. **Post-merge V2.3 documentation finalization - complete; PR #6 merged.**
-8. **Frozen annotated release tag `v2.3.0` - created and verified.**
-9. **Read-only EOD reporting - complete; PR #7 merged and validated.**
-10. **Current documentation closeout - in progress.**
-11. Begin V3 Management Governor only after separate explicit authorization.
-12. Add the broker-agnostic event/adapter boundary, then a read-only NinjaTrader observer.
-13. Implement Governor Observe/Govern mode before any broker-write enforcement.
-
-The sequence is intentionally conservative. ExecutionOS is becoming a system that can influence live management decisions; correctness and auditability are more important than feature velocity.
+**Governor**  
+The planned future V3 deterministic management-policy layer. V3 has not started.
 
 ---
 
 ## Living-document maintenance rule
 
-Update this guide whenever any of the following changes:
+Update this guide whenever normal startup, broker-data source, candidate/risk semantics, pre-trade/ARM boundaries, broker ownership, persistence, supported instruments, safety boundaries, EOD procedure, or CLI surface changes.
 
-- normal startup commands;
-- authentication flow;
-- broker-data source;
-- plan/risk fields;
-- candidate ownership rules;
-- live state semantics;
-- persistence behavior;
-- supported instruments;
-- safety boundaries;
-- command-line scripts;
-- current branch/release workflow.
-
-For historical research-method changes, also update `research/30-day-management-study/methodology.md`. For architecture decisions, update the Project Specification. Do not silently let this guide drift away from the actual application.
+Do not let this guide silently drift away from the actual application.
