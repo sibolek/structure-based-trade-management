@@ -3,8 +3,8 @@
 
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
-**Approved addenda:** Decisions 10–20 in addenda v0.1–v1.0  
-**Overall status:** **IN PROGRESS — DECISIONS 10–20 ACCEPTED; NEXT: SYNTHETIC DASHBOARD E2E WITH V2.4 RUNTIME ROUTER EXPLICITLY ENABLED; LIVE ROUTER FEATURE GATE REMAINS DEFAULT OFF**
+**Approved addenda:** Decisions 10–21 in addenda v0.1–v1.1  
+**Overall status:** **IN PROGRESS — DECISIONS 10–20 ACCEPTED; SYNTHETIC ROUTING E2E PASSED THROUGH LISTENING/DELIVERED/NO-WRITE PROOF; DECISION 21 FULL TRADE SPECIFICATION INSPECTOR IMPLEMENTED, AWAITING OPERATOR UI ACCEPTANCE**
 
 ---
 
@@ -30,6 +30,8 @@ Broker order placement, modification, cancellation, stop replacement, automatic 
 | Decision 18 exact-account LIVE lifecycle | **ACCEPTED** |
 | Decision 19 canonical store authority + React migration | **ACCEPTED** |
 | Decision 20 top-level runtime router + ownership transfer | **ACCEPTED** |
+| Synthetic dashboard routing E2E | **PASS THROUGH LISTENING / DELIVERED / BROKER NO-WRITE PROOF** |
+| Decision 21 full trade specification inspector | **IMPLEMENTED — AWAITING OPERATOR UI ACCEPTANCE** |
 
 Decision 20 final acceptance evidence supplied by the operator:
 
@@ -48,7 +50,7 @@ production build          PASS
 
 ---
 
-## 3. Frozen Decisions 10–20
+## 3. Frozen Decisions 10–21
 
 - **Decision 10:** V2.4 authorization-bearing fields are immutable.
 - **Decision 11:** universal pre-fill discard/disarm preserves audit and never mutates broker orders.
@@ -61,10 +63,15 @@ production build          PASS
 - **Decision 18:** after first fill, V2.4 LIVE lifecycle remains exact-account, lossless-journal, authoritative-time, order-provenance driven; coverage discontinuity requires reconciliation.
 - **Decision 19:** the Execution Board has one durable store authority; React is a projection and every mutation starts from latest durable state.
 - **Decision 20:** one serialized top-level V2.4 router owns activation → retirement → first-fill → LIVE lifecycle orchestration; exact first fill atomically creates lifecycle + visible V2.4 LIVE projection; immutable installation becomes provenance-only after lifecycle creation; ownership releases only after EXIT reaches History.
+- **Decision 21:** clicking a compact V2.4 authorization card opens a sleek, read-only full-trade-specification inspector over the immutable handoff envelope; trading information is primary, technical/API provenance is collapsible, and DISCARD remains an independent action.
 
 Decision 20 authority:
 
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v1.0_APPROVED.md`
+
+Decision 21 authority:
+
+- `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v1.1_APPROVED.md`
 
 ---
 
@@ -120,47 +127,88 @@ Behavior:
 - V2.4 lifecycle quantity/average comes from Decision-18 durable lifecycle, never symbol-only current-position inference;
 - `LIVE_RECONCILIATION_REQUIRED` remains visibly owned and cannot fall back into legacy execution logic.
 
-### Post-acceptance safety gate
+### Safety gate
 
-The router is mounted in `App`, but live execution of the loop still defaults **OFF** while the synthetic dashboard E2E is performed:
+The router is mounted in `App`, but live execution of the loop defaults **OFF** unless deliberately enabled:
 
 ```text
 VITE_EXECUTIONOS_V24_ROUTER_ENABLED=false   # default when unset
 ```
 
-Therefore pulling/building this checkpoint cannot begin new handoff claims or LIVE routing unless the operator explicitly enables the flag. The next synthetic E2E will enable the flag deliberately while remaining broker-read-only and without requiring a real fill.
+The synthetic E2E explicitly enabled the flag only for the Vite process while all broker services remained read-only.
 
 ---
 
-## 5. Focused Decision 20 tests
+## 5. Synthetic dashboard routing E2E — PASS THROUGH BROKER NO-WRITE PROOF
 
-Command:
+The operator performed the synthetic E2E using the real durable handoff and delivery repositories, the real pretrade transport API, the top-level runtime router, and live read-only Schwab state.
+
+Synthetic authorization:
 
 ```text
-npm run v24:runtime-router-test
+symbol: V24E2E
+quantity: 1
+handoff: synthetic-e2e-handoff-1788387381002
 ```
 
-The focused suite covers:
+Observed proof:
 
-- lifecycle-aware symbol reservation;
-- provenance-only installation after first fill;
-- EXIT ownership through classification/History;
-- atomic lifecycle + LIVE projection commit;
-- idempotent promotion retry;
-- stable proposed Decision-17 boundary across proof polls;
-- serial activation ordering;
-- local LISTENING processing after delivery disappears from discovery;
-- retirement-before-fill priority;
-- LIVE lifecycle advancement independent of discovery;
-- legacy React projection hiding/preserving V2.4 LIVE and History records;
-- top-level router/UI mounting and exclusive Web Lock;
-- effective-stop/frozen-risk UI authority;
-- DISCARD-only V2.4 pre-fill UI;
-- fresh same-symbol installation allowed after prior V2.4 EXIT reaches History but blocked while prior lifecycle remains LIVE.
+1. Schwab monitor authenticated and entered `ARMED` with `readOnly = true`.
+2. Broker execution coverage was `CONTIGUOUS`.
+3. Synthetic handoff was persisted server-side and delivery registered as `PENDING`.
+4. Pretrade discovery exposed the handoff with `brokerWriteAuthority = false`.
+5. Vite was started explicitly with `VITE_EXECUTIONOS_V24_ROUTER_ENABLED=true`.
+6. Execution workspace rendered `V24E2E` as **V2.4 · LISTENING**.
+7. Durable delivery advanced to **DELIVERED** with frozen `executionListeningAt`.
+8. Final broker-state verification showed:
+
+```text
+V24E2E positions:  0
+V24E2E executions: 0
+broker status:      ARMED
+readOnly:           true
+```
+
+The synthetic authorization has intentionally not yet been retired because it is being reused to visually accept Decision 21.
 
 ---
 
-## 6. Decision 20 acceptance — COMPLETE
+## 6. Decision 21 implementation — AWAITING OPERATOR UI ACCEPTANCE
+
+Approved design:
+
+- `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v1.1_APPROVED.md`
+
+Added:
+
+- `src/components/V24TradeSpecificationModal.jsx`
+- `tests/execution-v24-trade-specification-ui.test.mjs`
+
+Updated:
+
+- `src/components/V24AuthorizedTradesBoard.jsx`
+
+Implemented behavior:
+
+- authorization cards remain compact and now advertise `View full trade specification`;
+- card click or keyboard Enter/Space opens the inspector;
+- DISCARD stops event propagation and remains a separate Decision-16 action;
+- modal renders setup, thesis, complete trigger object, expected entry, effective stop, structural invalidation, authorized quantity, frozen max risk, targets, management plan, account display, and authorization timeline;
+- technical/API provenance is available in a collapsed section;
+- modal closes with X, Escape, or backdrop click;
+- inspector is explicitly read-only and adds no mutation or broker-write path.
+
+Focused source-level UI test:
+
+```text
+node --test tests/execution-v24-trade-specification-ui.test.mjs
+```
+
+Acceptance requires the focused test, production build, and operator visual confirmation using the still-active `V24E2E` authorization.
+
+---
+
+## 7. Decision 20 acceptance — COMPLETE
 
 Final acceptance suite:
 
@@ -179,11 +227,9 @@ npm run build
 
 All required checks passed. **Decision 20 is ACCEPTED.**
 
-The next step is a **synthetic dashboard end-to-end test with the V2.4 runtime router explicitly enabled**, still broker-read-only and without requiring a real broker fill. Synthetic handoff creation must occur server-side through the real durable repositories; there is intentionally no browser/API route that creates handoffs. Only after that smoke test passes should the router default be considered for normal enablement or a real-fill test.
-
 ---
 
-## 7. Still not implemented
+## 8. Still not implemented
 
 - fast V2.4 Revise → Re-arm;
 - explicit operator reconciliation workflow for ambiguous LIVE ownership;

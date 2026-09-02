@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Radio, Trash2 } from "lucide-react";
+import { AlertTriangle, Eye, Radio, Trash2 } from "lucide-react";
 import {
   readExecutionBoardStore,
   subscribeExecutionBoardStore,
@@ -7,6 +7,7 @@ import {
 import { isV24InstallationReservationActive } from "../execution/execution-v24-active-ownership.js";
 import { evaluateV24InitialFillOwnership } from "../execution/execution-v24-initial-fill-matcher.js";
 import { requestV24Retirement } from "../execution/execution-v24-retirement.js";
+import V24TradeSpecificationModal from "./V24TradeSpecificationModal.jsx";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -64,6 +65,7 @@ export default function V24AuthorizedTradesBoard({ broker, v24Router } = {}) {
     try { return readExecutionBoardStore(); } catch { return null; }
   });
   const [error, setError] = useState("");
+  const [selectedHandoffId, setSelectedHandoffId] = useState(null);
 
   useEffect(() => subscribeExecutionBoardStore({
     listener: (snapshot) => {
@@ -79,6 +81,11 @@ export default function V24AuthorizedTradesBoard({ broker, v24Router } = {}) {
   const installations = (Array.isArray(store.v24Installations) ? store.v24Installations : [])
     .filter((installation) => isV24InstallationReservationActive(store, installation));
   const routerProblem = v24Router?.error || "";
+  const selectedInstallation = installations.find((installation) => installation.handoffId === selectedHandoffId) || null;
+  const selectedRetirement = selectedInstallation ? retirementFor(store, selectedInstallation.handoffId) : null;
+  const selectedStatus = selectedInstallation
+    ? authorizationStatus({ installation: selectedInstallation, retirement: selectedRetirement, brokerState: broker?.state })
+    : null;
 
   if (!installations.length && !routerProblem && !error) return null;
 
@@ -97,13 +104,15 @@ export default function V24AuthorizedTradesBoard({ broker, v24Router } = {}) {
     }
   };
 
+  const openSpecification = (installation) => setSelectedHandoffId(installation.handoffId);
+
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="section-label">V2.4 Authorized Trades</p>
           <h2 className="text-lg font-semibold">{installations.length} pre-fill authorization{installations.length === 1 ? "" : "s"}</h2>
-          <p className="mt-1 text-xs text-zinc-500">Immutable V2.4 authorization. DISCARD uses the durable retirement cutoff; EDIT requires a future Revise → Re-arm workflow.</p>
+          <p className="mt-1 text-xs text-zinc-500">Immutable V2.4 authorization. Click a card to inspect the complete frozen trade specification. DISCARD uses the durable retirement cutoff; EDIT requires a future Revise → Re-arm workflow.</p>
         </div>
         <Radio className="text-sky-300" size={20} />
       </div>
@@ -122,7 +131,20 @@ export default function V24AuthorizedTradesBoard({ broker, v24Router } = {}) {
           const status = authorizationStatus({ installation, retirement, brokerState: broker?.state });
           const discardDisabled = Boolean(retirement);
           return (
-            <article key={installation.handoffId} className="overflow-hidden rounded border border-sky-400/20 bg-ink-850 shadow-terminal">
+            <article
+              key={installation.handoffId}
+              role="button"
+              tabIndex={0}
+              aria-label={`View full trade specification for ${v24.symbol || "V2.4 authorization"}`}
+              onClick={() => openSpecification(installation)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openSpecification(installation);
+                }
+              }}
+              className="group cursor-pointer overflow-hidden rounded border border-sky-400/20 bg-ink-850 shadow-terminal transition hover:border-sky-300/40 hover:bg-ink-800/80 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
+            >
               <header className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
                 <div>
                   <p className="section-label">V2.4 · {installation.status}</p>
@@ -146,11 +168,15 @@ export default function V24AuthorizedTradesBoard({ broker, v24Router } = {}) {
               {status.reason && <div className={`m-3 rounded border p-3 text-sm ${toneClass(status.tone)}`}>{status.reason}</div>}
 
               <footer className="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3">
-                <p className="text-xs text-zinc-500">ExecutionOS listener only. Broker orders are never canceled or modified here.</p>
+                <p className="flex items-center gap-1.5 text-xs text-zinc-500 transition group-hover:text-sky-200"><Eye size={13} /> View full trade specification</p>
                 <button
                   type="button"
                   disabled={discardDisabled}
-                  onClick={() => discard(installation)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    discard(installation);
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
                   className="flex items-center gap-1 rounded border border-red-400/20 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-35"
                 >
                   <Trash2 size={13} /> DISCARD
@@ -160,6 +186,12 @@ export default function V24AuthorizedTradesBoard({ broker, v24Router } = {}) {
           );
         })}
       </div>
+
+      <V24TradeSpecificationModal
+        installation={selectedInstallation}
+        status={selectedStatus}
+        onClose={() => setSelectedHandoffId(null)}
+      />
     </section>
   );
 }
