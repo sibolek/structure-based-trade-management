@@ -3,6 +3,7 @@ import {
   readExecutionBoardStore,
   transactExecutionBoardStore,
 } from "./execution-board-store-repository.js";
+import { executionOwnedSymbolsForHandoffAdmission } from "./execution-v24-active-ownership.js";
 import {
   bindV24ExecutionListeningAt,
   buildV24ExecutionCompatibilityEnvelope,
@@ -112,9 +113,9 @@ export function persistPreparedV24LocalInstallation({
         return store;
       }
 
-      const sameSymbol = store.v24Installations.find((item) => upper(item?.symbol) === upper(installation.symbol));
-      if (sameSymbol) {
-        throw installError("another V2.4 installation already owns this symbol locally", "EXECUTION_SYMBOL_OWNERSHIP_CONFLICT");
+      const ownedSymbols = executionOwnedSymbolsForHandoffAdmission(store);
+      if (ownedSymbols.includes(upper(installation.symbol))) {
+        throw installError("another Execution Board record already owns this symbol locally", "EXECUTION_SYMBOL_OWNERSHIP_CONFLICT");
       }
 
       return {
@@ -189,29 +190,7 @@ export function readV24LocalInstallation({
 }
 
 export function executionOwnedSymbolsFromV23Store(store, { excludeHandoffId = null } = {}) {
-  const clean = store && typeof store === "object" ? store : {};
-  const symbols = new Set();
-
-  for (const candidate of Array.isArray(clean.candidates) ? clean.candidates : []) {
-    const symbol = upper(candidate?.originalPlan?.symbol ?? candidate?.v24?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-  for (const trade of Array.isArray(clean.liveTrades) ? clean.liveTrades : []) {
-    const symbol = upper(trade?.originalPlan?.symbol ?? trade?.v24?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-  if (clean.draft?.mode === "EDIT") {
-    const symbol = upper(clean.draft?.originalPlan?.symbol ?? clean.draft?.plan?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-  for (const installation of Array.isArray(clean.v24Installations) ? clean.v24Installations : []) {
-    if (excludeHandoffId && text(installation?.handoffId) === text(excludeHandoffId)) continue;
-    if (!["PREPARED", "LISTENING"].includes(upper(installation?.status))) continue;
-    const symbol = upper(installation?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-
-  return Object.freeze([...symbols].sort());
+  return executionOwnedSymbolsForHandoffAdmission(store, { excludeHandoffId });
 }
 
 function displayTrigger(trigger) {
