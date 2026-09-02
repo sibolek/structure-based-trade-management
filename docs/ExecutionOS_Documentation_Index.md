@@ -10,10 +10,11 @@
 
 1. Current code and validated runtime behavior define what the system actually does.
 2. `USER-GUIDE.md` is the living operator guide.
-3. Approved design baselines define locked architecture for their scope:
+3. Approved design baselines/addenda define locked architecture for their scope:
    - `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md`;
    - `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md`;
-   - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`.
+   - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`;
+   - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.1_APPROVED.md`.
 4. Closeout/status records define what was actually implemented and accepted:
    - `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md`;
    - `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md`;
@@ -29,7 +30,8 @@
 | `USER-GUIDE.md` | Current operator workflow | **Authoritative operator guide** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` | Consolidated V2.4 architecture | **Authoritative V2.4 design** |
 | `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md` | Phase 4 risk design | **Authoritative Phase 4 design** |
-| `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md` | Handoff architecture | **Authoritative handoff design** |
+| `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md` | Original handoff architecture | **Authoritative handoff design baseline** |
+| `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.1_APPROVED.md` | Decisions 10–11: V2.4 authorization immutability/fast revise-rearm and universal pre-fill discard | **Authoritative approved handoff addendum** |
 | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` | Phase 3 accepted implementation | **Authoritative Phase 3 implementation** |
 | `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md` | Phase 4 accepted implementation | **Authoritative Phase 4 implementation** |
 | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Implementation_Status_2026-09-02.md` | Active handoff implementation checkpoint | **Current handoff status** |
@@ -71,7 +73,7 @@ Governing invariant:
 
 > **V2.4 authorizes; the handoff transfers; V2.3 owns execution.**
 
-Current accepted checkpoint:
+Current accepted implementation checkpoint:
 
 | Increment | Status |
 |---|---|
@@ -79,6 +81,13 @@ Current accepted checkpoint:
 | 2 — Claim / delivery state machine | **ACCEPTED** |
 | 3 — Exact broker account identity + execution coverage | **ACCEPTED / LIVE-PROVEN** |
 | 4 — Server-side handoff transport API | **ACCEPTED / ISOLATED RUNTIME-PROVEN** |
+
+Approved post-baseline design:
+
+| Decision | Status |
+|---|---|
+| 10 — V2.4-origin authorization immutability + automated fast revise/re-arm | **APPROVED / FROZEN** |
+| 11 — Universal pre-fill discard/disarm for V2.4-origin and manual armed/listening trades | **APPROVED / FROZEN** |
 
 Latest deterministic gate:
 
@@ -145,38 +154,77 @@ POST /api/handoffs/:handoffId/ack
 POST /api/handoffs/:handoffId/block
 ```
 
-Accepted runtime proof used temporary `/tmp` persistence and port `8798`, confirmed:
-
-- isolated health/configuration;
-- PENDING discovery;
-- successful exclusive claim by receiver A;
-- `executionListeningAt` remained null after claim;
-- receiver B could not steal the claim;
-- `brokerWriteAuthority: false`.
+Accepted runtime proof used temporary `/tmp` persistence and port `8798`, confirming isolated health/configuration, PENDING discovery, successful exclusive claim, `executionListeningAt: null` after claim, competing-receiver rejection, and `brokerWriteAuthority: false`.
 
 ---
 
-## 6. Current boundary: handoff is still not an operator workflow
+## 6. Approved downstream behavioral rules
+
+### Decision 10 — authorization immutability
+
+For V2.4-origin installed candidates/trades, authorization-bearing fields are immutable. Programmatic mutation must fail closed with:
+
+```text
+V24_AUTHORIZATION_IMMUTABLE
+```
+
+Manual/legacy V2.3 Edit behavior remains unchanged.
+
+A desired pre-fill change uses an automated workflow:
+
+```text
+REVISE
+  ↓
+retire old authorization
+  ↓
+fresh required validation / Phase 4 evaluation
+  ↓
+new authorization
+  ↓
+new handoff
+  ↓
+RE-ARM
+```
+
+The implementation may reuse valid completed-bar/DSS state where existing Phase 3 rules permit and must not wait for a new 2-minute bar merely because the user revised a trade. Fresh Phase 4 inputs remain mandatory.
+
+Engineering target: **median revise/re-arm latency < 1 second under normal Schwab conditions**, without weakening freshness, provenance, or risk controls.
+
+### Decision 11 — universal pre-fill discard/disarm
+
+Any pre-fill `ARMED` / `LISTENING` trade may be discarded, regardless of origin.
+
+Discard must immediately end future fill eligibility, release symbol ownership, remove the trade from the active/armed board, preserve durable audit history, and prevent a V2.4 handoff from resurrecting the retired ownership contract.
+
+After the first valid owned fill the trade is LIVE and may not be discarded; normal management/exit semantics apply.
+
+Because the broker boundary remains read-only, discard does not cancel broker orders. Required UI warning:
+
+> **ExecutionOS listener discarded. Broker orders, if any, are unchanged.**
+
+---
+
+## 7. Current boundary: handoff is still not an operator workflow
 
 The branch does **not** yet:
 
 - install a V2.4 handoff into V2.3;
 - establish `executionListeningAt` through a real V2.3 durable installation;
 - bind broker fills through the V2.4-origin path;
+- implement the approved revise/re-arm or universal discard synchronization;
 - modify/place/cancel/replace broker orders.
 
 Therefore V2.4 internal `ARMED`, PENDING, and CLAIMED states do not themselves create downstream broker ownership.
 
 ---
 
-## 7. Required design decision before V2.3 installation
+## 8. Next implementation work
 
-The existing legacy V2.3 Edit workflow can alter plan/risk fields while the saved candidate continues listening. That behavior is incompatible with immutable V2.4 authorization-bearing provenance.
+With Decisions 10 and 11 frozen, remaining implementation includes:
 
-Before implementing browser/V2.3 installation, explicitly freeze the rule for **V2.4-origin authorization immutability**.
-
-After that decision, remaining implementation includes:
-
+- code-level V2.4 authorization immutability guard and V2.4-specific Edit behavior;
+- fast revise/re-arm and latency instrumentation;
+- universal discard/retirement persistence and anti-resurrection synchronization;
 - stable browser `executionBoardReceiverId`;
 - pre-install broker conflict/coverage gate;
 - same-symbol V2.3 ownership gate;
@@ -185,13 +233,14 @@ After that decision, remaining implementation includes:
 - V2.4-origin provenance/effective-stop mapping;
 - exact-account fill matching from `executionListeningAt`;
 - partial fill/quantity variance and wrong-account handling;
-- cancel/retire/disarm synchronization;
 - delivered-but-local-missing reconciliation;
 - end-to-end dashboard validation and final closeout.
 
+Immediate next focus: **pre-install broker conflict/admission gate plus local ownership constraints**.
+
 ---
 
-## 8. Quick reference
+## 9. Quick reference
 
 | Question | Answer |
 |---|---|
@@ -201,13 +250,15 @@ After that decision, remaining implementation includes:
 | Is exact account identity available? | **Yes, accepted in Increment 3.** |
 | Can execution coverage bridge a monitor error? | **No.** |
 | Is the handoff transport API accepted? | **Yes, Increment 4.** |
+| Can a V2.4 authorization be edited in place after installation? | **No. Use Revise → Re-arm.** |
+| Can any pre-fill armed/listening trade be discarded? | **Yes, regardless of origin.** |
+| Does discard cancel a Schwab/TOS order? | **No. Broker boundary remains read-only.** |
 | Is V2.4 → V2.3 end-to-end ownership complete? | **No.** |
 | Are broker writes authorized? | **No.** |
-| What must be decided before V2.3 installation? | **V2.4-origin authorization immutability versus legacy Edit.** |
 
 ---
 
-## 9. Pull requests as project records
+## 10. Pull requests as project records
 
 - PR #1 — V2.3 execution system; merged.
 - PR #7 — read-only EOD reporting; merged.
@@ -218,4 +269,4 @@ After that decision, remaining implementation includes:
 
 ---
 
-**Maintenance principle:** update this index when accepted implementation status or authority changes; do not rewrite dated approval artifacts to simulate later implementation state.
+**Maintenance principle:** update this index when accepted implementation status or approved authority changes; do not rewrite dated approval artifacts to simulate later implementation state.
