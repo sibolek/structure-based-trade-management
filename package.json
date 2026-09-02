@@ -17,6 +17,7 @@
     "v24:handoff-api-test": "node --test tests/execution-board-handoff-api.test.mjs",
     "v24:broker-provenance-test": "node --test tests/broker-execution-provenance.test.mjs tests/broker-execution-activity.test.mjs",
     "v24:handoff-admission-test": "node --test tests/execution-board-handoff-admission.test.mjs",
+    "v24:v23-compat-test": "node --test tests/execution-v23-compat.test.mjs",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
