@@ -63,6 +63,8 @@ function normalizeExecution(execution, sequence) {
     sequence,
     accountId,
     account: text(execution?.account) || null,
+    orderId: text(execution?.orderId) || null,
+    executionKey: text(execution?.executionKey ?? execution?.key) || null,
     symbol,
     instruction,
     positionEffect,
