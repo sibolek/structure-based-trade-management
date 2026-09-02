@@ -3,7 +3,7 @@
 
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
-**Overall status:** **IN PROGRESS — INCREMENTS 1 AND 2 IMPLEMENTED / ACCEPTED; END-TO-END V2.4 → V2.3 TRANSFER NOT YET COMPLETE**
+**Overall status:** **IN PROGRESS — INCREMENTS 1–3 IMPLEMENTED / ACCEPTED; END-TO-END V2.4 → V2.3 TRANSFER NOT YET COMPLETE**
 
 ---
 
@@ -120,32 +120,96 @@ v24:handoff-test  31/31 PASS
 
 ---
 
-## 4. What is NOT yet implemented
+## 4. Increment 3 — Broker account identity + execution-coverage provenance
+
+**Status:** **IMPLEMENTED / ACCEPTED — INCLUDING LIVE READ-ONLY SCHWAB PROOF**
+
+Implemented runtime:
+
+- `schwab-bridge/broker-execution-provenance.mjs`
+- upgraded `schwab-bridge/live-state-api.mjs`
+- upgraded `schwab-bridge/monitor.mjs`
+
+Implemented tests:
+
+- `tests/broker-execution-provenance.test.mjs`
+
+Accepted behavior includes:
+
+- stable opaque Schwab `accountId` is exposed separately from masked human display account;
+- the same exact opaque account identity is carried on public account, position, and execution records;
+- masked account display is never used as the machine identity key;
+- monitor publishes explicit execution-coverage provenance;
+- coverage begins `ESTABLISHING`, becomes `CONTIGUOUS` only after successful execution baseline completion, and advances only on successful Schwab order-API polls;
+- monitor poll failure marks coverage `GAP` without advancing `currentThrough`;
+- the first successful poll after a gap begins a new provable continuous interval by moving `coverageStartedAt` forward to the recovery point;
+- the system never claims coverage across a failed interval;
+- invalid/missing account identity and invalid coverage provenance fail closed;
+- broker integration remains read-only.
+
+Coverage contract:
+
+```text
+executionCoverage {
+  schemaVersion,
+  status: ESTABLISHING | CONTIGUOUS | GAP,
+  source: SCHWAB_ORDER_API_POLL,
+  coverageStartedAt,
+  baselineCompletedAt,
+  currentThrough,
+  lastGapAt,
+  lastGapReason
+}
+```
+
+Deterministic acceptance after Increment 3:
+
+```text
+v24:broker-provenance-test  13/13 PASS
+v24:handoff-test            31/31 PASS
+schwab:state-test            10/10 PASS
+production build            PASS
+```
+
+Live read-only Schwab smoke proof on 2026-09-02 confirmed:
+
+- API state version `2`;
+- monitor status `ARMED` and `readOnly: true`;
+- exact opaque account identity present on account and open positions;
+- masked account display remains separate;
+- `executionCoverage.status = CONTIGUOUS`;
+- `coverageStartedAt = baselineCompletedAt` at baseline completion;
+- `currentThrough` advanced on successful one-second polling;
+- `lastGapAt = null` / `lastGapReason = null` during the proof.
+
+No trade, order placement, order modification, cancellation, stop replacement, or flattening was used to obtain this acceptance evidence.
+
+---
+
+## 5. What is NOT yet implemented
 
 The following approved handoff design elements remain pending:
 
-1. broker monitor stable opaque account identity on public account / position / execution state;
-2. broker execution-coverage provenance sufficient to prove a clean interval from `authorizedAt` to installation;
-3. handoff service/API endpoints for pending discovery, atomic claim, block, and ACK;
-4. browser-side stable `executionBoardReceiverId`;
-5. pre-install broker conflict gate;
-6. existing V2.3 same-symbol ownership gate at handoff installation;
-7. exact-account installation gate;
-8. idempotent V2.3 local installation/read-back verification;
-9. V2.4-origin candidate provenance mapping into V2.3;
-10. `effectiveStop` execution-risk authority with legacy `structuralStop` compatibility;
-11. exact-account fill matching using `executionListeningAt` rather than V2.4 `authorizedAt`;
-12. partial/fragmented entry accumulation and authorized-quantity variance handling;
-13. wrong-account same-symbol execution conflict handling;
-14. delivered-but-local-state-missing reconciliation detection;
-15. end-to-end synthetic dashboard acceptance;
-16. final regression, documentation closeout, PR, and merge.
+1. handoff service/API endpoints for pending discovery, atomic claim, block, and ACK;
+2. browser-side stable `executionBoardReceiverId`;
+3. pre-install broker conflict gate using the accepted account/coverage provenance;
+4. existing V2.3 same-symbol ownership gate at handoff installation;
+5. exact-account installation gate;
+6. idempotent V2.3 local installation/read-back verification;
+7. V2.4-origin candidate provenance mapping into V2.3;
+8. `effectiveStop` execution-risk authority with legacy `structuralStop` compatibility;
+9. exact-account fill matching using `executionListeningAt` rather than V2.4 `authorizedAt`;
+10. partial/fragmented entry accumulation and authorized-quantity variance handling;
+11. wrong-account same-symbol execution conflict handling;
+12. delivered-but-local-state-missing reconciliation detection;
+13. end-to-end synthetic dashboard acceptance;
+14. final regression, documentation closeout, PR, and merge.
 
 Therefore an internally V2.4 `ARMED` candidate is **still not automatically installed into or owned by the V2.3 Execution Board** at this checkpoint.
 
 ---
 
-## 5. Current safety invariants already enforced by code
+## 6. Current safety invariants already enforced by code
 
 At this checkpoint the new handoff layer already enforces:
 
@@ -161,28 +225,35 @@ At this checkpoint the new handoff layer already enforces:
 
 > **Selected quantity and exact Phase 4 account provenance cannot be rewritten by the handoff.**
 
-> **Persistence uncertainty fails closed.**
+> **Stable opaque account identity is distinct from masked display identity.**
+
+> **Execution coverage never bridges a monitor polling gap.**
+
+> **Persistence or provenance uncertainty fails closed.**
 
 The still-unimplemented downstream gates must preserve these invariants.
 
 ---
 
-## 6. Next implementation increment
+## 7. Next implementation increment
 
-**Increment 3 — Broker account identity + execution-coverage provenance**
+**Increment 4 — Server-side handoff endpoints**
 
 Objective:
 
-- expose a stable opaque account identity consistently on broker accounts, positions, and executions;
-- expose sufficient monitor coverage provenance to determine whether same-symbol broker activity can be proven absent across the handoff interval;
-- keep the broker integration read-only;
-- do not yet install handoffs into V2.3.
+- expose pending/claimed handoffs to the local Execution Board through the V2.4 service;
+- provide atomic claim using the durable delivery repository;
+- provide terminal block reporting;
+- provide idempotent ACK/delivery with exact `executionListeningAt` provenance;
+- preserve loopback/local-origin restrictions;
+- keep the broker boundary read-only;
+- do not yet install handoffs into V2.3 or change fill matching.
 
-Increment 3 requires focused acceptance before the workstream proceeds to handoff API/browser delivery.
+Increment 4 requires focused API acceptance before browser delivery logic is added.
 
 ---
 
-## 7. Documentation rule at this checkpoint
+## 8. Documentation rule at this checkpoint
 
 This file is the branch-local implementation-status record while the handoff integration is in progress.
 
