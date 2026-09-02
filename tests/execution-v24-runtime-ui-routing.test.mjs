@@ -118,7 +118,7 @@ test("V2.4 live card uses effective-stop authority and frozen ARM-time max risk"
 test("V2.4 pre-fill board exposes DISCARD but no authorization EDIT action", () => {
   const board = source("src/components/V24AuthorizedTradesBoard.jsx");
   assert.match(board, /requestV24Retirement/);
-  assert.match(board, /> DISCARD</);
+  assert.match(board, /<Trash2[^>]*\/>\s*DISCARD/);
   assert.doesNotMatch(board, />EDIT</);
   assert.match(board, /Broker orders, if any, are unchanged/);
 });
