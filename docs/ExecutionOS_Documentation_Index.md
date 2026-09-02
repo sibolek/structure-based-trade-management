@@ -1,7 +1,7 @@
 # ExecutionOS Documentation Index
 
 **Status:** Current documentation inventory  
-**Date:** 2026-09-01  
+**Date:** 2026-09-02  
 **Repository:** `sibolek/structure-based-trade-management`  
 **Purpose:** Definitive map of current authority, implementation acceptance, release references, research provenance, and historical records.
 
@@ -15,10 +15,12 @@ When documents disagree, use this precedence:
 2. **`USER-GUIDE.md`** is the living operator reference for current normal use.
 3. **Approved design baselines** define locked architecture/design decisions for their scope:
    - `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` — consolidated V2.4 architecture;
-   - `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md` — Phase 4 risk sizing.
-4. **Phase closeout / acceptance records** establish what was actually implemented and validated:
+   - `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md` — Phase 4 risk sizing;
+   - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md` — explicit V2.4 internal `ARMED` → V2.3 Execution Board handoff integration.
+4. **Closeout / implementation-status records** establish what was actually implemented and validated:
    - `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md`;
-   - `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md`.
+   - `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md`;
+   - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Implementation_Status_2026-09-02.md` — active branch implementation checkpoint.
 5. **`docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md`** remains an authoritative dated architecture record; repository-status fields inside it are historical snapshots.
 6. **`docs/ExecutionOS_EOD_Report.md`** is authoritative for EOD reconstruction, enrichment, matching, risk/R interpretation, and limitations.
 7. **`research/30-day-management-study/methodology.md`** is authoritative for historical analytics provenance.
@@ -37,8 +39,10 @@ Historical approved documents are not rewritten merely because implementation la
 | `USER-GUIDE.md` | Living operator guide: setup, startup, current architecture boundary, risk/ARM semantics, broker execution, persistence, troubleshooting, EOD workflow | **Current authoritative operator guide** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` | Consolidated V2.4 pre-trade architecture and lifecycle design | **Authoritative V2.4 design baseline** |
 | `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md` | Locked Phase 4 expected-entry/account/instrument/quantity/persistence/freshness/ARM-time design | **Authoritative Phase 4 design baseline** |
+| `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md` | Locked handoff architecture: immutable transport, claim/ACK, ownership boundary, exact account, effective stop, quantity, fail-closed semantics | **Authoritative handoff integration design baseline** |
 | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` | Implemented Phase 3 DSS scope, live proof, acceptance gates, safety boundary | **Authoritative Phase 3 implementation record** |
 | `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md` | Implemented Phase 4 risk sizing, immutable provenance, ARM-time refresh/freeze, acceptance gates, merge record | **Authoritative Phase 4 implementation record** |
+| `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Implementation_Status_2026-09-02.md` | Current accepted handoff branch increments, tests, remaining gates, next increment | **Current handoff implementation-status record** |
 | `docs/ExecutionOS_EOD_Report.md` | EOD technical/operational semantics | **Current authoritative EOD reference** |
 | `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` | Dated V2.3-era architecture / Management Governor direction | **Authoritative dated architecture record** |
 | `research/30-day-management-study/methodology.md` | Historical analytics provenance and anti-curve-fitting boundary | **Current authoritative research provenance** |
@@ -65,7 +69,7 @@ baabb75f36050599f20e6c89e8db2f1f7d7769a1
 
 V2.3 remains the frozen broker-fill ownership/execution-management reference. V2.4 is an upstream pre-trade extension and must not silently change those semantics.
 
-### Phase 4 merge
+### Merged V2.4 baseline on `main`
 
 V2.4 Phase 4 was merged through **PR #14** on 2026-09-01.
 
@@ -89,11 +93,45 @@ That merge brought `main` through:
 
 Documentation-only commits after `0a976fb...` may advance `main` without changing the Phase 4 runtime acceptance baseline.
 
+### Active Execution Board handoff integration
+
+Branch:
+
+```text
+v24-execution-board-handoff
+```
+
+Approved design authority:
+
+```text
+docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md
+```
+
+Current accepted checkpoint:
+
+```text
+Increment 1 — Immutable handoff contract + persistence      ACCEPTED
+Increment 2 — Claim / delivery state machine                ACCEPTED
+v24:handoff-test                                             31/31 PASS
+```
+
+Increment 1 regression gate:
+
+```text
+v24:risk-sizing-test  170/170 PASS
+v24:dss-test           91/91 PASS
+analytics:test        307/307 PASS
+schwab:state-test      10/10 PASS
+production build      PASS
+```
+
+The handoff integration is **not yet end-to-end operational**. No V2.4 candidate is yet installed into the V2.3 Execution Board by the new handoff path, and no new broker-fill ownership behavior has been enabled.
+
 V3 has not started.
 
 ---
 
-## 4. V2.4 phase status
+## 4. V2.4 phase / boundary status
 
 | Phase / boundary | Current status | Primary record |
 |---|---|---|
@@ -101,14 +139,14 @@ V3 has not started.
 | Phase 2 — MarketDataProvider | **COMPLETE / MERGED / LIVE-ACCEPTED** | V2.4 baseline + code |
 | Phase 3 — DSS / Micro-Volatility Buffer | **IMPLEMENTATION COMPLETE / ACCEPTED / MERGED** | Phase 3 closeout |
 | Phase 4 — Effective-Stop Risk Sizing | **IMPLEMENTATION COMPLETE / ACCEPTED / MERGED via PR #14** | Phase 4 design + closeout |
+| Execution Board handoff integration | **IN PROGRESS — INCREMENTS 1–2 ACCEPTED ON BRANCH** | Handoff design baseline + implementation-status record |
 | Broader context / decision gate beyond risk consequence | **DEFERRED / LATER V2.4 WORK** | V2.4 baseline + Phase 4 deferred work |
-| Internal V2.4 `ARMED` → existing V2.3 Execution Board handoff | **DEFERRED / NOT YET IMPLEMENTED** | Phase 4 closeout authority boundary |
 | Broker-write / order-placement capability | **NOT AUTHORIZED / NOT IMPLEMENTED** | Safety boundaries |
 | V3 Management Governor | **NOT STARTED** | Project Specification v1.2 direction only |
 
 Important distinction:
 
-> Phase 4 now creates an internal `ARMED` authorization/provenance state, but that is **not yet** the explicit transfer/binding into the existing V2.3 Execution Board and does not submit an order.
+> Phase 4 creates an internal `ARMED` authorization/provenance state. Increment 1 can now create an immutable handoff from that authorization and Increment 2 can durably claim/deliver/block that handoff state, but the browser/V2.3 installation and broker-fill ownership boundary are still not implemented.
 
 ---
 
@@ -194,7 +232,67 @@ production build      PASS
 
 ---
 
-## 7. PRE-TRADE versus existing V2.3 Execution Board
+## 7. Execution Board handoff integration checkpoint
+
+Approved governing invariant:
+
+> **V2.4 authorizes; the handoff transfers; V2.3 owns execution.**
+
+### Increment 1 accepted
+
+Implemented:
+
+- immutable `ExecutionBoardHandoff`;
+- exact candidate / DSS / risk / quantity provenance;
+- separate structural invalidation and Phase 3 effective stop;
+- exact Phase 4 execution account;
+- one handoff per ARM risk authorization;
+- durable append-only-style handoff persistence and corruption detection.
+
+### Increment 2 accepted
+
+Implemented durable delivery states:
+
+```text
+PENDING → CLAIMED → DELIVERED
+                  ↘ BLOCKED
+```
+
+with:
+
+- one permanent receiver claim;
+- no claim stealing;
+- idempotent same-receiver claim retry;
+- no broker-fill ownership at claim time;
+- exact receiver delivery acknowledgment;
+- immutable `executionListeningAt` once delivered;
+- idempotent identical ACK retry;
+- terminal `DELIVERED` / `BLOCKED`;
+- restart durability and persistence rollback.
+
+### Next increment
+
+```text
+Increment 3 — Broker account identity + execution-coverage provenance
+```
+
+Still pending after Increment 2:
+
+- public broker state exact opaque account identity;
+- execution-coverage proof;
+- pre-install broker conflict gate;
+- handoff endpoints;
+- stable browser receiver identity;
+- V2.3 local installation/read-back verification;
+- exact-account fill matching from `executionListeningAt`;
+- quantity and wrong-account variance handling;
+- end-to-end dashboard validation.
+
+Therefore the handoff is **not yet available as an operator workflow** and `USER-GUIDE.md` remains intentionally unchanged at this checkpoint.
+
+---
+
+## 8. PRE-TRADE versus existing V2.3 Execution Board
 
 The product intentionally separates upstream pre-trade decision support from frozen downstream execution ownership.
 
@@ -217,20 +315,20 @@ selected quantity validation
    ↓
 internal V2.4 ARMED provenance freeze
    ↓
-[future explicit handoff]
+immutable handoff + durable claim/delivery state   [implemented through Increment 2]
+   ↓
+V2.3 installation / executionListeningAt           [not yet implemented]
    ↓
 existing V2.3 Execution Board
    ↓
 broker-fill ownership / LIVE management
 ```
 
-The bracketed handoff remains future V2.4 work.
-
-A V2.4 internal `ARMED` record does not itself place an order, bind a fill, or make the V2.3 Execution Board own a position.
+A V2.4 internal `ARMED` record, a PENDING handoff, or a CLAIMED handoff does not itself place an order or make the V2.3 Execution Board own a position.
 
 ---
 
-## 8. EOD documentation boundary
+## 9. EOD documentation boundary
 
 For an enriched EOD report:
 
@@ -254,7 +352,7 @@ For full operator sequencing use `USER-GUIDE.md`; for report semantics use `docs
 
 ---
 
-## 9. Pull requests as project records
+## 10. Pull requests as project records
 
 Important merge records:
 
@@ -268,12 +366,13 @@ Important merge records:
 - **PR #12** — V2.4 Phase 3 DSS implementation; merged.
 - **PR #13** — Phase 3 post-merge documentation cleanup; merged.
 - **PR #14** — V2.4 Phase 4 Effective-Stop Risk Sizing; merged at `0a976fb8bc68f64fd479d48322a011c9d419b2c2`.
+- Execution Board handoff integration — **active branch work; PR not yet opened**.
 
 Use current repository history rather than old PR descriptions to identify the latest documentation-only head.
 
 ---
 
-## 10. Historical / superseded records
+## 11. Historical / superseded records
 
 Preserve, but do not use as current status:
 
@@ -288,41 +387,45 @@ Approved design history should not be rewritten merely to make it look as though
 
 ---
 
-## 11. Quick reference
+## 12. Quick reference
 
 | Question | First source |
 |---|---|
 | How do I operate ExecutionOS now? | `USER-GUIDE.md` |
 | Overall V2.4 architecture? | `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` |
 | Phase 4 design? | `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md` |
+| Handoff integration design? | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md` |
+| Current handoff implementation status? | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Implementation_Status_2026-09-02.md` |
 | What did Phase 3 implement? | Phase 3 closeout |
 | What did Phase 4 implement? | Phase 4 closeout |
 | Is Phase 4 merged? | **Yes — PR #14, merge commit `0a976fb8bc68f64fd479d48322a011c9d419b2c2`** |
 | Can Phase 4 tighten the stop to fit risk? | **No. Reduce quantity or return no affordable size.** |
-| Does Phase 4 cap notional at equity? | **No. It caps planned entry→effective-stop price risk to 0.5%; buying power/margin is separate.** |
 | Does every ARM attempt get a fresh risk evaluation? | **Yes.** |
 | Does internal V2.4 `ARMED` place an order? | **No.** |
-| Is V2.4 `ARMED` → V2.3 Execution Board handoff complete? | **No; deferred.** |
+| Is the full V2.4 → V2.3 handoff complete? | **No. Increments 1–2 are accepted; downstream broker/V2.3 integration remains pending.** |
+| Does CLAIMED mean broker-fill ownership has begun? | **No. Ownership begins only at future successful V2.3 installation / `executionListeningAt`.** |
 | Accurate enriched EOD procedure? | `USER-GUIDE.md` + `docs/ExecutionOS_EOD_Report.md` |
 | Is V3 started? | **No.** |
 
 ---
 
-## 12. Current project snapshot
+## 13. Current project snapshot
 
-As of 2026-09-01:
+As of 2026-09-02:
 
 - V2.3 execution behavior remains frozen under tag `v2.3.0`.
 - EOD reporting remains read-only and operational.
 - V2.4 Phases 1–4 are merged to `main`.
 - Phase 4 merge record is PR #14 / `0a976fb8bc68f64fd479d48322a011c9d419b2c2`.
-- Final Phase 4 gate is 170/170 focused, 91/91 Phase 3 regression, 293/293 full tests, 10/10 V2.3 state, build PASS.
 - Phase 4 preserves structural invalidation/effective stop and may only size downward or reject affordability.
 - Every ARM attempt requires a new risk evaluation and exact provenance freeze.
-- Internal V2.4 `ARMED` has no broker-write authority.
-- Explicit V2.4 `ARMED` → V2.3 Execution Board integration remains future work.
+- Execution Board handoff work is active on `v24-execution-board-handoff`.
+- Handoff Increment 1 and Increment 2 are implemented and accepted; focused gate is 31/31 PASS.
+- End-to-end V2.4 candidate installation into V2.3 is not yet implemented.
+- Internal V2.4 `ARMED`, PENDING, and CLAIMED states have no broker-write authority.
+- Increment 3 is broker account identity + execution-coverage provenance.
 - V3 has not started.
 
 ---
 
-**Maintenance principle:** If a future contributor cannot answer what is authoritative, what is historical, what is merged, what authority exists, and what remains intentionally gated from this file and the linked records, update the documentation before adding more architecture.
+**Maintenance principle:** If a future contributor cannot answer what is authoritative, what is historical, what is merged, what is branch-only, what authority exists, and what remains intentionally gated from this file and the linked records, update the documentation before adding more architecture.
