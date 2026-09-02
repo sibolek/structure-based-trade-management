@@ -1,6 +1,10 @@
 import { validateBrokerExecutionOwnershipJournal } from "../../schwab-bridge/broker-execution-ownership-journal.mjs";
 import { applyExecution, createSymbolState } from "../../schwab-bridge/trade-state.mjs";
-import { EXECUTION_V23_STORE_KEY } from "./execution-v24-local-installation.js";
+import {
+  EXECUTION_BOARD_STORE_KEY,
+  readExecutionBoardStore,
+  transactExecutionBoardStore,
+} from "./execution-board-store-repository.js";
 
 export const V24_LIVE_LIFECYCLE_SCHEMA_VERSION = 1;
 export const V24_LIVE_LIFECYCLE_STATUSES = Object.freeze(["LIVE", "EXIT", "LIVE_RECONCILIATION_REQUIRED"]);
@@ -322,22 +326,6 @@ export function advanceV24LiveLifecycle({ lifecycle, installation, brokerState }
   return immutable(next);
 }
 
-function requireStorage(storage) {
-  if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw lifecycleError("durable local execution storage is unavailable", "LOCAL_EXECUTION_PERSISTENCE_FAILED");
-  return storage;
-}
-function parseStore(storage, storeKey) {
-  const durable = requireStorage(storage);
-  try {
-    const raw = durable.getItem(storeKey);
-    if (!raw) return { candidates: [], liveTrades: [], history: [], v24Installations: [], v24Retirements: [], v24Lifecycles: [] };
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("store root must be an object");
-    return { ...parsed, v24Lifecycles: Array.isArray(parsed.v24Lifecycles) ? parsed.v24Lifecycles : [] };
-  } catch (error) {
-    throw lifecycleError(`local execution store could not be read: ${error.message}`, "LOCAL_EXECUTION_PERSISTENCE_FAILED");
-  }
-}
 function validateLifecycle(lifecycle) {
   if (!lifecycle || Number(lifecycle.schemaVersion) !== V24_LIVE_LIFECYCLE_SCHEMA_VERSION || !V24_LIVE_LIFECYCLE_STATUSES.includes(upper(lifecycle.status))) {
     throw lifecycleError("invalid V2.4 LIVE lifecycle", "INVALID_V24_LIVE_LIFECYCLE");
@@ -347,28 +335,37 @@ function validateLifecycle(lifecycle) {
   }
   return lifecycle;
 }
-export function persistV24LiveLifecycle({ storage = globalThis?.localStorage, storeKey = EXECUTION_V23_STORE_KEY, lifecycle } = {}) {
+
+export function persistV24LiveLifecycle({
+  storage = globalThis?.localStorage,
+  storeKey = EXECUTION_BOARD_STORE_KEY,
+  lifecycle,
+} = {}) {
   validateLifecycle(lifecycle);
-  const durable = requireStorage(storage);
-  const store = parseStore(durable, storeKey);
-  const prior = durable.getItem(storeKey);
-  const nextStore = {
-    ...store,
-    v24Lifecycles: [...store.v24Lifecycles.filter((item) => text(item?.handoffId) !== text(lifecycle.handoffId)), structuredClone(lifecycle)],
-  };
-  const serialized = JSON.stringify(nextStore);
-  try {
-    durable.setItem(storeKey, serialized);
-    if (durable.getItem(storeKey) !== serialized) throw new Error("exact store readback mismatch");
-    const readBack = parseStore(durable, storeKey).v24Lifecycles.find((item) => text(item?.handoffId) === text(lifecycle.handoffId));
-    if (!readBack || JSON.stringify(readBack) !== JSON.stringify(lifecycle)) throw new Error("lifecycle readback mismatch");
-    return immutable(readBack);
-  } catch (error) {
-    try { if (prior !== null) durable.setItem(storeKey, prior); } catch { /* best effort */ }
-    throw lifecycleError(`local V2.4 LIVE lifecycle could not be persisted exactly: ${error.message}`, "LOCAL_EXECUTION_PERSISTENCE_FAILED");
+  const committed = transactExecutionBoardStore({
+    storage,
+    storeKey,
+    mutate: (store) => ({
+      ...store,
+      v24Lifecycles: [
+        ...store.v24Lifecycles.filter((item) => text(item?.handoffId) !== text(lifecycle.handoffId)),
+        structuredClone(lifecycle),
+      ],
+    }),
+  });
+  const readBack = committed.v24Lifecycles.find((item) => text(item?.handoffId) === text(lifecycle.handoffId));
+  if (!readBack || JSON.stringify(readBack) !== JSON.stringify(lifecycle)) {
+    throw lifecycleError("persisted V2.4 LIVE lifecycle differs on canonical readback", "LOCAL_EXECUTION_PERSISTENCE_FAILED");
   }
+  return immutable(readBack);
 }
-export function readV24LiveLifecycle({ storage = globalThis?.localStorage, storeKey = EXECUTION_V23_STORE_KEY, handoffId } = {}) {
-  const found = parseStore(storage, storeKey).v24Lifecycles.find((item) => text(item?.handoffId) === text(handoffId));
+
+export function readV24LiveLifecycle({
+  storage = globalThis?.localStorage,
+  storeKey = EXECUTION_BOARD_STORE_KEY,
+  handoffId,
+} = {}) {
+  const found = readExecutionBoardStore({ storage, storeKey }).v24Lifecycles
+    .find((item) => text(item?.handoffId) === text(handoffId));
   return found ? immutable(found) : null;
 }
