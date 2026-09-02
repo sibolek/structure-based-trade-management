@@ -53,11 +53,11 @@ function Metric({ label, value, tone = "" }) {
   );
 }
 
-function Narrative({ label, children }) {
+function Narrative({ label, children, emphasis = false }) {
   return (
-    <section className="rounded-lg border border-white/10 bg-black/20 p-4">
+    <section className={`rounded-lg border p-4 ${emphasis ? "border-sky-400/25 bg-sky-950/10" : "border-white/10 bg-black/20"}`}>
       <p className="section-label">{label}</p>
-      <div className="mt-2 text-sm leading-6 text-zinc-200">{children}</div>
+      <div className={`mt-2 leading-6 text-zinc-200 ${emphasis ? "text-base font-semibold" : "text-sm"}`}>{children}</div>
     </section>
   );
 }
@@ -111,8 +111,7 @@ export default function V24TradeSpecificationModal({ installation, status, onClo
               <span className={long ? "font-bold text-emerald-300" : "font-bold text-red-300"}>{v24.direction || "—"}</span>
               <span className="rounded border border-emerald-400/25 bg-emerald-950/20 px-2 py-1 text-[10px] font-bold text-emerald-200">{status?.label || installation.status}</span>
             </div>
-            <p className="mt-2 text-sm font-medium text-zinc-200">{v24.setup || "—"}</p>
-            <p className="mt-1 text-xs text-zinc-500">{v24.timeframe || "—"} · acct {accountDisplay(v24.authorizedExecutionAccountId)}</p>
+            <p className="mt-2 text-xs text-zinc-500">{v24.timeframe || "—"} · acct {accountDisplay(v24.authorizedExecutionAccountId)}</p>
           </div>
           <button
             type="button"
@@ -125,6 +124,8 @@ export default function V24TradeSpecificationModal({ installation, status, onClo
         </header>
 
         <div className="space-y-5 p-5 sm:p-6">
+          <Narrative label="Trade Setup" emphasis>{v24.setup || "—"}</Narrative>
+
           <div className="grid gap-4 lg:grid-cols-2">
             <Narrative label="Trade Thesis">{v24.thesis || "—"}</Narrative>
             <Narrative label="Entry Trigger">
