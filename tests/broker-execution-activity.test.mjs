@@ -26,10 +26,23 @@ function establishedActivity() {
 function execution({
   accountId = "opaque-A",
   symbol = "NVDA",
+  instruction = "BUY",
+  positionEffect = "OPENING",
+  quantity = 1,
+  price = 100,
   executionTime = "2026-09-02T14:00:03.000Z",
   detectedAt = "2026-09-02T14:00:03.250Z",
 } = {}) {
-  return { accountId, symbol, executionTime, detectedAt };
+  return {
+    accountId,
+    symbol,
+    instruction,
+    positionEffect,
+    quantity,
+    price,
+    executionTime,
+    detectedAt,
+  };
 }
 
 test("execution activity begins unestablished and immutable", () => {
