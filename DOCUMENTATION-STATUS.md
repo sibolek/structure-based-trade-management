@@ -10,7 +10,7 @@ This file distinguishes current authoritative project records from historical pl
 
 The **living operator guide** for ExecutionOS as it exists on current `main`.
 
-Important current distinction: V2.4 Phases 1–4 are merged to `main`. The explicit internal V2.4 `ARMED` → existing V2.3 Execution Board integration is under implementation on branch `v24-execution-board-handoff`. Increments 1–4 are implemented and accepted, but V2.3 installation and broker-fill ownership through the new path are not yet enabled. Normal broker order entry remains in thinkorswim/Schwab and the Schwab integration remains read-only.
+Important current distinction: V2.4 Phases 1–4 are merged to `main`. The explicit internal V2.4 `ARMED` → existing V2.3 Execution Board integration is under implementation on branch `v24-execution-board-handoff`. Increments 1–4 are implemented and accepted; Decisions 10–11 are now approved/frozen; V2.3 installation and broker-fill ownership through the new path are not yet enabled. Normal broker order entry remains in thinkorswim/Schwab and the Schwab integration remains read-only.
 
 ### `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md`
 
@@ -18,7 +18,14 @@ Authoritative top-level V2.4 design baseline.
 
 ### `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`
 
-Authoritative handoff-integration design baseline. It locks immutable handoff authority, receiver claim semantics, broker conflict/account boundaries, `executionListeningAt`, effective-stop/quantity provenance, idempotent delivery, and the no-broker-write constraint.
+Authoritative original handoff-integration design baseline. It locks immutable handoff authority, receiver claim semantics, broker conflict/account boundaries, `executionListeningAt`, effective-stop/quantity provenance, idempotent delivery, and the no-broker-write constraint.
+
+### `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.1_APPROVED.md`
+
+Authoritative approved post-baseline handoff addendum. It freezes:
+
+- **Decision 10 — V2.4-origin authorization immutability**, including `V24_AUTHORIZATION_IMMUTABLE`, automated fast `REVISE → RE-ARM`, reuse of valid completed-bar/DSS state where allowed, mandatory fresh Phase 4 inputs, and an engineering target of median revise/re-arm latency under one second in normal Schwab conditions;
+- **Decision 11 — Universal pre-fill discard/disarm**, applying to both V2.4-origin and manual V2.3 armed/listening trades, with immediate fill-ineligibility/symbol-release/audit preservation, no post-first-fill discard, anti-resurrection synchronization for V2.4 handoffs, and no broker-order cancellation under the read-only boundary.
 
 ### `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Implementation_Status_2026-09-02.md`
 
@@ -29,7 +36,9 @@ Current accepted checkpoint:
 - Increment 1 immutable handoff + persistence — **ACCEPTED**;
 - Increment 2 claim/delivery state machine — **ACCEPTED**;
 - Increment 3 exact broker account identity + execution coverage — **ACCEPTED / LIVE-PROVEN**;
-- Increment 4 server-side handoff transport API — **ACCEPTED / ISOLATED RUNTIME-PROVEN**.
+- Increment 4 server-side handoff transport API — **ACCEPTED / ISOLATED RUNTIME-PROVEN**;
+- Decision 10 V2.4 authorization immutability + fast revise/re-arm — **APPROVED / FROZEN**;
+- Decision 11 universal pre-fill discard/disarm — **APPROVED / FROZEN**.
 
 Latest deterministic evidence:
 
@@ -120,17 +129,24 @@ Increment 3 — Broker identity + execution coverage          ACCEPTED / LIVE-PR
 Increment 4 — Server-side handoff transport API             ACCEPTED / RUNTIME-PROVEN
 ```
 
-Increment 4 isolated runtime proof used a temporary `/tmp` state directory and port `8798`. It confirmed PENDING discovery, exclusive CLAIMED ownership, `executionListeningAt: null` after claim, competing-receiver rejection, and `brokerWriteAuthority: false` without touching normal V2.4 state.
+Approved post-baseline rules:
+
+```text
+Decision 10 — V2.4 authorization immutability + fast revise/re-arm   APPROVED / FROZEN
+Decision 11 — Universal pre-fill discard/disarm                       APPROVED / FROZEN
+```
 
 The branch is **not yet end-to-end operational**. No V2.4 handoff is yet installed into V2.3 by the new path and no new broker-fill ownership behavior is enabled.
 
-### Required design freeze before V2.3 installation
+### Next implementation focus
 
-The existing V2.3 Edit workflow can modify plan/risk fields while the saved candidate continues listening. That conflicts with immutable V2.4 authorization provenance. The V2.4-origin edit/immutability rule must be explicitly frozen before browser/V2.3 installation work proceeds.
+The next work can proceed into downstream admission/installation support, beginning with the pre-install broker conflict/coverage gate and local ownership constraints, while implementing the approved immutability, revise/re-arm, and universal discard semantics.
 
 ### What remains incomplete
 
-- V2.4-origin authorization immutability in the V2.3 edit path;
+- code-level V2.4 authorization immutability and V2.4-specific Edit behavior;
+- fast revise/re-arm implementation and latency instrumentation;
+- universal discard/retirement persistence and anti-resurrection synchronization;
 - stable browser receiver identity;
 - pre-install broker conflict/coverage gate;
 - same-symbol V2.3 ownership gate;
@@ -139,7 +155,6 @@ The existing V2.3 Edit workflow can modify plan/risk fields while the saved cand
 - V2.4-origin provenance mapping and effective-stop execution authority;
 - exact-account fill matching from `executionListeningAt`;
 - partial/fragmented quantity variance and wrong-account handling;
-- cancel/retire/disarm synchronization;
 - delivered-but-local-missing reconciliation;
 - end-to-end dashboard acceptance;
 - broker writes/order placement/modification/cancellation/flattening — **NOT AUTHORIZED / NOT IMPLEMENTED**.
@@ -171,4 +186,4 @@ Do not rewrite historical or approved dated documents merely because later evide
 
 When a change affects day-to-day operation, update the User Guide as part of the same documentation closeout.
 
-For incremental architecture work, maintain the implementation-status record and synchronize this file plus the Documentation Index at accepted checkpoints.
+For incremental architecture work, maintain the implementation-status record and synchronize this file plus the Documentation Index at accepted/approved checkpoints.
