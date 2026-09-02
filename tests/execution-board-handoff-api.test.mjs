@@ -72,18 +72,15 @@ function makeHandoff({ handoffId = "handoff-1", candidateId = "candidate-1", ris
   });
 }
 
+function plusMs(timestamp, milliseconds) {
+  return new Date(Date.parse(timestamp) + milliseconds).toISOString();
+}
+
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "executionos-handoff-api-"));
   let tick = 0;
-  const times = [
-    "2026-09-02T16:00:02.000Z",
-    "2026-09-02T16:00:03.000Z",
-    "2026-09-02T16:00:04.000Z",
-    "2026-09-02T16:00:05.000Z",
-    "2026-09-02T16:00:06.000Z",
-    "2026-09-02T16:00:07.000Z",
-  ];
-  const clock = () => times[Math.min(tick++, times.length - 1)];
+  const base = Date.parse("2026-09-02T16:00:02.000Z");
+  const clock = () => new Date(base + (tick++ * 1000)).toISOString();
 
   const handoffRepository = new ExecutionBoardHandoffRepository({
     filePath: path.join(dir, "handoffs.json"),
@@ -195,16 +192,16 @@ test("HTTP ACK freezes executionListeningAt and identical retry is idempotent", 
   const { handoffRepository, deliveryRepository } = fixture();
   const server = await startServer(createExecutionBoardHandoffApiHandler({ handoffRepository, deliveryRepository }));
   try {
-    await fetch(`${server.baseUrl}/api/handoffs/handoff-1/claim`, {
+    const claim = await jsonResponse(await fetch(`${server.baseUrl}/api/handoffs/handoff-1/claim`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ receiverId: "receiver-A" }),
-    });
-
+    }));
     const body = {
       receiverId: "receiver-A",
-      executionListeningAt: "2026-09-02T16:00:20.000Z",
+      executionListeningAt: plusMs(claim.payload.delivery.claimedAt, 1000),
     };
+
     const first = await jsonResponse(await fetch(`${server.baseUrl}/api/handoffs/handoff-1/ack`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -225,7 +222,7 @@ test("HTTP ACK freezes executionListeningAt and identical retry is idempotent", 
     const conflict = await jsonResponse(await fetch(`${server.baseUrl}/api/handoffs/handoff-1/ack`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...body, executionListeningAt: "2026-09-02T16:00:21.000Z" }),
+      body: JSON.stringify({ ...body, executionListeningAt: plusMs(body.executionListeningAt, 1000) }),
     }));
     assert.equal(conflict.response.status, 409);
     assert.equal(conflict.payload.code, "HANDOFF_ACK_CONTENT_CONFLICT");
@@ -252,15 +249,16 @@ test("HTTP block records terminal reason and delivered handoff cannot be blocked
     assert.equal(blocked.payload.delivery.status, "BLOCKED");
     assert.equal(blocked.payload.delivery.blockReason, "BROKER_EXECUTION_COVERAGE_GAP");
 
-    await fetch(`${server.baseUrl}/api/handoffs/handoff-2/claim`, {
+    const claim2 = await jsonResponse(await fetch(`${server.baseUrl}/api/handoffs/handoff-2/claim`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ receiverId: "receiver-A" }),
-    });
+    }));
+    const listeningAt = plusMs(claim2.payload.delivery.claimedAt, 1000);
     await fetch(`${server.baseUrl}/api/handoffs/handoff-2/ack`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ receiverId: "receiver-A", executionListeningAt: "2026-09-02T16:01:00.000Z" }),
+      body: JSON.stringify({ receiverId: "receiver-A", executionListeningAt: listeningAt }),
     });
     const terminal = await jsonResponse(await fetch(`${server.baseUrl}/api/handoffs/handoff-2/block`, {
       method: "POST",
