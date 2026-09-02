@@ -4,7 +4,7 @@
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
 **Approved addenda:** Decisions 10–21 in addenda v0.1–v1.1  
-**Overall status:** **IN PROGRESS — DECISIONS 10–21 ACCEPTED; SYNTHETIC ROUTING E2E PASSED THROUGH LISTENING/DELIVERED/NO-WRITE PROOF; NEXT: RETIRE SYNTHETIC V24E2E AUTHORIZATION AND CLOSE THE DASHBOARD E2E**
+**Overall status:** **IN PROGRESS — DECISIONS 10–21 ACCEPTED; SYNTHETIC DASHBOARD E2E COMPLETE THROUGH LISTENING / DELIVERED / BROKER NO-WRITE / DECISION-16 RETIREMENT; NEXT: CONSIDER NORMAL ROUTER ENABLEMENT OR A SEPARATELY APPROVED REAL-FILL VALIDATION**
 
 ---
 
@@ -30,7 +30,7 @@ Broker order placement, modification, cancellation, stop replacement, automatic 
 | Decision 18 exact-account LIVE lifecycle | **ACCEPTED** |
 | Decision 19 canonical store authority + React migration | **ACCEPTED** |
 | Decision 20 top-level runtime router + ownership transfer | **ACCEPTED** |
-| Synthetic dashboard routing E2E | **PASS THROUGH LISTENING / DELIVERED / BROKER NO-WRITE PROOF** |
+| Synthetic dashboard routing E2E | **COMPLETE — PASS THROUGH LISTENING / DELIVERED / BROKER NO-WRITE / RETIREMENT** |
 | Decision 21 full trade specification inspector | **ACCEPTED** |
 
 Decision 20 final acceptance evidence supplied by the operator:
@@ -147,7 +147,7 @@ The synthetic E2E explicitly enabled the flag only for the Vite process while al
 
 ---
 
-## 5. Synthetic dashboard routing E2E — PASS THROUGH BROKER NO-WRITE PROOF
+## 5. Synthetic dashboard routing E2E — COMPLETE
 
 The operator performed the synthetic E2E using the real durable handoff and delivery repositories, the real pretrade transport API, the top-level runtime router, and live read-only Schwab state.
 
@@ -168,7 +168,12 @@ Observed proof:
 5. Vite was started explicitly with `VITE_EXECUTIONOS_V24_ROUTER_ENABLED=true`.
 6. Execution workspace rendered `V24E2E` as **V2.4 · LISTENING**.
 7. Durable delivery advanced to **DELIVERED** with frozen `executionListeningAt`.
-8. Final broker-state verification showed:
+8. Broker-state verification showed no V24E2E position or execution while the Schwab boundary remained `ARMED` and read-only.
+9. Operator DISCARD created the Decision-16 retirement request and displayed **DISCARD PENDING**.
+10. Broker execution coverage and the lossless ownership journal advanced contiguously beyond the retirement cutoff with zero V24E2E execution entries.
+11. After a browser refresh following several development-session hot reloads, the runtime router resumed and the V24E2E authorization disappeared, proving the retirement resolved and released the local reservation.
+
+Final broker no-write proof before retirement:
 
 ```text
 V24E2E positions:  0
@@ -177,7 +182,9 @@ broker status:      ARMED
 readOnly:           true
 ```
 
-The synthetic authorization remains active only long enough to perform the final Decision-16 retirement/cleanup step.
+Development-session note: the retirement remained visually `DISCARD PENDING` until a browser refresh after multiple Git pulls/Vite hot reloads. Broker proof itself was already complete and healthy. This is recorded as a dev-session/HMR observation, not as evidence of a production retirement-logic failure.
+
+**Synthetic dashboard E2E result: PASS / COMPLETE.**
 
 ---
 
