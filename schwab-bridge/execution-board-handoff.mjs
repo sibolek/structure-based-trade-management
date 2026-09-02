@@ -142,8 +142,8 @@ export function buildExecutionBoardHandoff({ handoffId, createdAt = Date.now(), 
 
   if (!authorizedAt) throw handoffError("ARM authorizedAt is invalid", "EXECUTION_BOARD_HANDOFF_AUTHORIZED_AT_INVALID");
   if (!normalizedCreatedAt) throw handoffError("handoff createdAt is invalid", "EXECUTION_BOARD_HANDOFF_CREATED_AT_INVALID");
-  if (structuralInvalidation === null || effectiveStop === null || currentExpectedEntry === null || authorizedMaxDollarRisk === null) {
-    throw handoffError("risk evaluation stop/entry/budget provenance is incomplete", "EXECUTION_BOARD_HANDOFF_RISK_PROVENANCE_INCOMPLETE");
+  if (structuralInvalidation === null || effectiveStop === null || currentExpectedEntry === null) {
+    throw handoffError("risk evaluation stop/entry provenance is incomplete", "EXECUTION_BOARD_HANDOFF_RISK_PROVENANCE_INCOMPLETE");
   }
   if (!authorizedExecutionAccountId) throw handoffError("authorized execution account is missing", "EXECUTION_BOARD_HANDOFF_ACCOUNT_REQUIRED");
 
