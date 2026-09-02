@@ -1,14 +1,40 @@
 import http from "node:http";
 import { isAllowedLocalOrigin } from "./local-origin.mjs";
 import { PreTradeStore, DEFAULT_PRETRADE_STATE_FILE } from "./pretrade-state.mjs";
+import {
+  ExecutionBoardHandoffRepository,
+  DEFAULT_EXECUTION_BOARD_HANDOFF_FILE,
+} from "./execution-board-handoff-repository.mjs";
+import {
+  ExecutionBoardHandoffDeliveryRepository,
+  DEFAULT_EXECUTION_BOARD_HANDOFF_DELIVERY_FILE,
+} from "./execution-board-handoff-delivery-repository.mjs";
+import { createExecutionBoardHandoffApiHandler } from "./execution-board-handoff-api.mjs";
 
 const HOST = process.env.EXECUTIONOS_V24_HOST || "127.0.0.1";
 const PORT = Number(process.env.EXECUTIONOS_V24_PORT || 8788);
 const STATE_FILE = process.env.EXECUTIONOS_V24_STATE_FILE || DEFAULT_PRETRADE_STATE_FILE;
+const HANDOFF_FILE = process.env.EXECUTIONOS_V24_HANDOFF_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_FILE;
+const HANDOFF_DELIVERY_FILE = process.env.EXECUTIONOS_V24_HANDOFF_DELIVERY_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_DELIVERY_FILE;
 const MAX_BODY_BYTES = 1024 * 1024;
 
 const store = new PreTradeStore({ filePath: STATE_FILE });
 store.load();
+
+const handoffRepository = new ExecutionBoardHandoffRepository({ filePath: HANDOFF_FILE });
+handoffRepository.load();
+
+const handoffDeliveryRepository = new ExecutionBoardHandoffDeliveryRepository({
+  handoffRepository,
+  filePath: HANDOFF_DELIVERY_FILE,
+});
+handoffDeliveryRepository.load();
+
+const handleHandoffApi = createExecutionBoardHandoffApiHandler({
+  handoffRepository,
+  deliveryRepository: handoffDeliveryRepository,
+  maxBodyBytes: MAX_BODY_BYTES,
+});
 
 function json(res, statusCode, payload, origin = null) {
   const body = JSON.stringify(payload);
@@ -79,9 +105,15 @@ const server = http.createServer(async (req, res) => {
       service: "executionos-v24-pretrade",
       readOnlyBrokerBoundary: true,
       stateFile: STATE_FILE,
+      handoffFile: HANDOFF_FILE,
+      handoffDeliveryFile: HANDOFF_DELIVERY_FILE,
+      handoffTransportApi: true,
+      brokerWriteAuthority: false,
     }, origin);
     return;
   }
+
+  if (await handleHandoffApi(req, res)) return;
 
   if (req.method === "GET" && req.url === "/api/candidates") {
     json(res, 200, store.snapshot(), origin);
@@ -111,5 +143,8 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] Pre-trade API listening on http://${HOST}:${PORT}`);
   console.log(`[ExecutionOS V2.4] State file: ${STATE_FILE}`);
-  console.log("[ExecutionOS V2.4] Broker boundary remains read-only; this service does not arm or place orders.");
+  console.log(`[ExecutionOS V2.4] Handoff file: ${HANDOFF_FILE}`);
+  console.log(`[ExecutionOS V2.4] Handoff delivery file: ${HANDOFF_DELIVERY_FILE}`);
+  console.log("[ExecutionOS V2.4] Handoff transport API enabled; browser handoff creation is not exposed.");
+  console.log("[ExecutionOS V2.4] Broker boundary remains read-only; this service does not place, replace, cancel, or flatten orders.");
 });
