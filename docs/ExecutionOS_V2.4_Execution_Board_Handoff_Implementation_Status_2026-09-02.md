@@ -3,8 +3,8 @@
 
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
-**Approved addenda:** Decisions 10–14 in addenda v0.1–v0.4  
-**Overall status:** **IN PROGRESS — HANDOFF CONTRACT/DELIVERY, BROKER PROVENANCE, PURE ADMISSION GATE, V2.3 COMPATIBILITY/PROVENANCE, STABLE RECEIVER IDENTITY, AND DORMANT LOCAL INSTALLATION FOUNDATION ACCEPTED; LIVE V2.4 FILL OWNERSHIP NOT YET ENABLED**
+**Approved addenda:** Decisions 10–15 in addenda v0.1–v0.5  
+**Overall status:** **IN PROGRESS — HANDOFF CONTRACT/DELIVERY, BROKER PROVENANCE, PURE ADMISSION GATE, V2.3 COMPATIBILITY/PROVENANCE, STABLE RECEIVER IDENTITY, DORMANT LOCAL INSTALLATION FOUNDATION, AND LOSSLESS EXACT-ACCOUNT INITIAL-FILL OWNERSHIP ACCEPTED; LIVE V2.4 INSTALL/ACK PATH NOT YET ENABLED**
 
 ---
 
@@ -27,8 +27,9 @@ Broker order placement, modification, cancellation, stop replacement, or automat
 | Sequence item 6 — execution-activity provenance + pure pre-install admission gate | **ACCEPTED / LIVE-PROVEN** |
 | Sequence item 5 — V2.3 compatibility helpers / provenance model | **ACCEPTED** |
 | Sequence item 7 foundation — stable receiver identity + dormant PREPARED/LISTENING local persistence | **ACCEPTED** |
+| Sequence item 8 first slice — lossless ownership journal + exact-account initial-fill matcher | **ACCEPTED / LIVE-PROVEN** |
 
-The sequence-item-7 foundation is deliberately dormant: it is not yet wired into the live React candidate array or legacy fill matcher.
+The sequence-item-7 foundation remains deliberately dormant: it is not yet wired into the live React candidate array or legacy fill matcher.
 
 ---
 
@@ -37,8 +38,9 @@ The sequence-item-7 foundation is deliberately dormant: it is not yet wired into
 - **Decision 10 — V2.4 authorization immutability:** V2.4 authorization-bearing fields may not be edited in place. Mutation fails with `V24_AUTHORIZATION_IMMUTABLE`. Desired changes use fast Revise → retire → fresh authorization → Re-arm. Manual/legacy V2.3 Edit remains unchanged.
 - **Decision 11 — Universal pre-fill discard/disarm:** every pre-fill `ARMED` / `LISTENING` trade may be discarded regardless of origin; discard ends fill eligibility, releases symbol ownership, preserves audit history, and does not cancel broker orders.
 - **Decision 12 — Symbol-global broker cleanliness:** exact Phase 4 account determines which account may own the trade, while current-position and intervening-execution cleanliness is checked across all observable connected accounts.
-- **Decision 13 — Authoritative execution timing:** Schwab `executionTime` governs admission and future fill ownership; `detectedAt` is audit-only. Safety uses a lossless account+symbol execution-activity watermark, not the bounded recent-execution UI list.
+- **Decision 13 — Authoritative execution timing:** Schwab `executionTime` governs admission and fill ownership; `detectedAt` is audit-only. Safety uses a lossless account+symbol execution-activity watermark, not the bounded recent-execution UI list.
 - **Decision 14 — Stable Execution Board receiver identity:** each browser/profile owns one stable opaque receiver ID persisted independently of trade state. Losing that storage creates a new receiver; sticky claims are never silently migrated or stolen.
+- **Decision 15 — Lossless execution-event evidence for broker-fill ownership:** the bounded recent-execution UI list is never ownership authority. A lossless current-coverage execution journal is the ownership source, and a coverage gap after `executionListeningAt` suspends automatic ownership without silent recovery.
 
 ---
 
@@ -107,19 +109,87 @@ Accepted behavior:
 - LISTENING installation can construct a V2.3-shaped candidate without losing Phase 3 `effectiveStop` authority;
 - the V2.4 record is intentionally **not inserted into the live V2.3 candidate array yet**, preventing the legacy symbol-only / `detectedAt` matcher from claiming it.
 
-User acceptance: all focused installation/receiver tests and requested regressions reported green on 2026-09-02.
+Focused acceptance:
 
-This is **not full sequence-item-7 completion** yet. Final broker revalidation, activation into the live V2.3 store, and transport ACK remain to be wired after safe exact-account ownership matching exists.
+```text
+v24:v23-install-test         16/16 PASS
+v24:v23-compat-test          13/13 PASS
+v24:handoff-admission-test  16/16 PASS
+schwab:state-test            10/10 PASS
+production build            PASS
+```
+
+This is **not full sequence-item-7 completion** yet. Final broker revalidation, activation into live V2.3 ownership, and transport ACK remain to be wired.
 
 ---
 
-## 7. Newly identified fill-ownership completeness issue
+## 7. Accepted Decision 15 / sequence-item-8 initial-fill ownership slice
 
-The public `executions` array remains intentionally bounded for UI use. That means it cannot safely serve as the only durable source for first-fill ownership after a browser reload or temporary receiver outage: an eligible execution could be evicted before the receiver processes it.
+Runtime:
 
-A new design decision is therefore required before sequence item 8 is activated: preserve exact broker execution events needed for V2.4 ownership independently of the bounded UI list, with the same fail-closed coverage discipline used by admission provenance.
+- `schwab-bridge/broker-execution-ownership-journal.mjs`
+- upgraded `schwab-bridge/live-state-api.mjs`
+- `src/execution/execution-v24-initial-fill-matcher.js`
 
-No live matcher has been enabled pending that decision.
+Accepted data-role separation:
+
+```text
+executions[25]
+    = bounded dashboard / human display only
+
+executionActivity
+    = account+symbol latest-execution watermark for admission cleanliness
+
+executionOwnershipJournal
+    = lossless execution-event evidence for V2.4 fill ownership
+```
+
+Accepted initial-fill contract:
+
+```text
+exact authorized account
++ exact symbol
++ correct opening direction
++ positionEffect = OPENING
++ executionTime >= executionListeningAt
++ uninterrupted proven coverage from executionListeningAt
+```
+
+Additional accepted behavior:
+
+- LONG requires `BUY`; SHORT requires `SELL_SHORT`;
+- `executionTime` is authoritative; `detectedAt` is audit-only;
+- a qualifying partial first fill establishes ownership immediately;
+- an oversized first fill is still owned and reports `AUTHORIZED_QUANTITY_EXCEEDED`;
+- wrong-account same-symbol execution before the eligible first fill suspends automatic ownership;
+- unexpected same-symbol authorized-account activity before the eligible first fill also suspends;
+- a wrong-account execution after an already eligible first fill does not retroactively erase the established first-fill ownership;
+- same-time ambiguous wrong-account/correct-account activity fails closed;
+- bounded `executions[]` is ignored by ownership matching;
+- journal evidence beyond proven `currentThrough` is not yet eligible for ownership;
+- a coverage GAP erases current-interval ownership evidence, recovery begins a new journal interval, and an old LISTENING authorization is not silently reactivated.
+
+Focused acceptance:
+
+```text
+v24:fill-ownership-test      24/24 PASS
+v24:broker-provenance-test  24/24 PASS
+v24:v23-install-test         16/16 PASS
+v24:v23-compat-test          13/13 PASS
+v24:handoff-admission-test  16/16 PASS
+schwab:state-test            10/10 PASS
+production build            PASS
+```
+
+Live Schwab proof confirmed exact timestamp alignment among:
+
+```text
+executionCoverage
+executionActivity
+executionOwnershipJournal
+```
+
+for both `coverageStartedAt` and `currentThrough`, with `status = ARMED`, `readOnly = true`, and `lastError = null`.
 
 ---
 
@@ -127,31 +197,39 @@ No live matcher has been enabled pending that decision.
 
 The branch still does **not**:
 
-- activate a V2.4 LISTENING installation into the live V2.3 candidate array;
+- activate a V2.4 LISTENING installation into the live V2.3 execution path;
 - ACK a real completed local installation;
 - bind a real broker fill through the V2.4-origin path;
-- implement exact-account V2.4 fill matching;
-- implement partial/fragmented entry lifecycle and authorized-quantity variance;
+- implement the downstream fragmented-entry / ADD / PARTIAL / FLAT / REVERSAL exact-account lifecycle;
 - implement universal discard retirement / anti-resurrection synchronization;
 - implement fast Revise → Re-arm;
 - place, modify, cancel, or flatten broker orders.
 
-Therefore a V2.4 internal `ARMED`, handoff `PENDING`/`CLAIMED`, pure `ADMITTED`, `PREPARED`, or dormant `LISTENING` record does not yet create live V2.3 broker-fill ownership.
+Therefore a V2.4 internal `ARMED`, handoff `PENDING`/`CLAIMED`, pure `ADMITTED`, `PREPARED`, or dormant `LISTENING` record still does not create live V2.3 broker-fill ownership.
 
 ---
 
 ## 9. Next implementation focus
 
-Freeze the execution-event retention rule required for safe sequence-item-8 matching, then implement a pure initial-fill matcher using:
+Before live installation/ACK activation, complete the already-approved Decision 11 implementation protocol:
+
+> **Every pre-fill V2.4 ownership contract must be durably discardable/retirable without allowing reload, redelivery, or a later broker event to resurrect automatic fill eligibility.**
+
+The remaining design details to freeze are the durable retirement record, fill-vs-discard cutoff semantics, synchronization with already-terminal handoff delivery state, restart behavior, and safe symbol release.
+
+After that retirement protocol is accepted, wire sequence item 7 live through:
 
 ```text
-exact authorized account
-+ exact symbol
-+ correct opening direction
-+ authoritative executionTime >= executionListeningAt
+discover
+→ claim
+→ PREPARED durable install
+→ exact readback
+→ final broker revalidation
+→ LISTENING durable install
+→ exact readback
+→ ACK
+→ exact-account first-fill ownership
 ```
-
-Only after that matcher is accepted will sequence item 7 be wired live through final admission revalidation, durable listening activation, and ACK.
 
 ---
 
