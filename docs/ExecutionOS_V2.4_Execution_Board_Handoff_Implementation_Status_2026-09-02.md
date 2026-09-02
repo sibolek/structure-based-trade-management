@@ -4,7 +4,7 @@
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
 **Approved addenda:** Decisions 10–20 in addenda v0.1–v1.0  
-**Overall status:** **IN PROGRESS — DECISIONS 10–19 ACCEPTED; DECISION 20 SERIALIZED RUNTIME ROUTER / ATOMIC OWNERSHIP TRANSFER IMPLEMENTED / AWAITING ACCEPTANCE; LIVE ROUTER FEATURE GATE DEFAULTS OFF PENDING ACCEPTANCE**
+**Overall status:** **IN PROGRESS — DECISIONS 10–20 ACCEPTED; NEXT: SYNTHETIC DASHBOARD E2E WITH V2.4 RUNTIME ROUTER EXPLICITLY ENABLED; LIVE ROUTER FEATURE GATE REMAINS DEFAULT OFF**
 
 ---
 
@@ -16,7 +16,7 @@ Broker order placement, modification, cancellation, stop replacement, automatic 
 
 ---
 
-## 2. Accepted checkpoint through Decision 19
+## 2. Accepted checkpoint through Decision 20
 
 | Work | Status |
 |---|---|
@@ -29,18 +29,21 @@ Broker order placement, modification, cancellation, stop replacement, automatic 
 | Decision 17 atomic LISTENING activation | **ACCEPTED** |
 | Decision 18 exact-account LIVE lifecycle | **ACCEPTED** |
 | Decision 19 canonical store authority + React migration | **ACCEPTED** |
-| Decision 20 top-level runtime router + ownership transfer | **IMPLEMENTED / AWAITING ACCEPTANCE** |
+| Decision 20 top-level runtime router + ownership transfer | **ACCEPTED** |
 
-Decision 19 acceptance evidence supplied by the operator:
+Decision 20 final acceptance evidence supplied by the operator:
 
 ```text
-v24:store-authority-test   15/15 PASS
-v24:v23-install-test       16/16 PASS
-v24:retirement-test        14/14 PASS
-v24:activation-test        20/20 PASS
-v24:live-lifecycle-test    15/15 PASS
-v24:v23-compat-test        13/13 PASS
-production build           PASS
+v24:runtime-router-test   18/18 PASS
+v24:store-authority-test  15/15 PASS
+v24:v23-install-test      16/16 PASS
+v24:retirement-test       14/14 PASS
+v24:activation-test       20/20 PASS
+v24:fill-ownership-test   24/24 PASS
+v24:live-lifecycle-test   15/15 PASS
+v24:v23-compat-test       13/13 PASS
+schwab:state-test         10/10 PASS
+production build          PASS
 ```
 
 ---
@@ -65,7 +68,7 @@ Decision 20 authority:
 
 ---
 
-## 4. Decision 20 implementation — awaiting acceptance
+## 4. Decision 20 implementation — ACCEPTED
 
 ### Runtime core
 
@@ -117,15 +120,15 @@ Behavior:
 - V2.4 lifecycle quantity/average comes from Decision-18 durable lifecycle, never symbol-only current-position inference;
 - `LIVE_RECONCILIATION_REQUIRED` remains visibly owned and cannot fall back into legacy execution logic.
 
-### Acceptance safety gate
+### Post-acceptance safety gate
 
-The router is mounted in `App`, but live execution of the loop defaults **OFF** until this implementation is accepted:
+The router is mounted in `App`, but live execution of the loop still defaults **OFF** while the synthetic dashboard E2E is performed:
 
 ```text
 VITE_EXECUTIONOS_V24_ROUTER_ENABLED=false   # default when unset
 ```
 
-Therefore pulling/building this checkpoint cannot begin new handoff claims or LIVE routing unless the operator explicitly enables the flag. No real trade is required for the acceptance gate.
+Therefore pulling/building this checkpoint cannot begin new handoff claims or LIVE routing unless the operator explicitly enables the flag. The next synthetic E2E will enable the flag deliberately while remaining broker-read-only and without requiring a real fill.
 
 ---
 
@@ -157,9 +160,9 @@ The focused suite covers:
 
 ---
 
-## 6. Acceptance gate
+## 6. Decision 20 acceptance — COMPLETE
 
-Run:
+Final acceptance suite:
 
 ```text
 npm run v24:runtime-router-test
@@ -174,7 +177,9 @@ npm run schwab:state-test
 npm run build
 ```
 
-If green, Decision 20 implementation may be accepted. The next step is a **synthetic dashboard E2E with the feature gate explicitly enabled**, still without requiring a real broker fill. Only after that smoke passes should the router default be considered for normal enablement or a real-fill test.
+All required checks passed. **Decision 20 is ACCEPTED.**
+
+The next step is a **synthetic dashboard end-to-end test with the V2.4 runtime router explicitly enabled**, still broker-read-only and without requiring a real broker fill. Synthetic handoff creation must occur server-side through the real durable repositories; there is intentionally no browser/API route that creates handoffs. Only after that smoke test passes should the router default be considered for normal enablement or a real-fill test.
 
 ---
 
