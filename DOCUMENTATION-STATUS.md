@@ -1,6 +1,6 @@
 # ExecutionOS Documentation Status
 
-**Updated:** 2026-09-01
+**Updated:** 2026-09-02
 
 This file distinguishes current authoritative project records from historical planning snapshots and dated approval artifacts.
 
@@ -12,7 +12,7 @@ The **living operator guide** for ExecutionOS as it exists on current `main`.
 
 It is the primary day-to-day reference for installation, Schwab authorization, startup, current V2.4/V2.3 architecture boundaries, risk and ARM semantics, broker binding, execution management, persistence, troubleshooting, security, CLI commands, and the enriched End-of-Day workflow.
 
-Important current distinction: V2.4 Phase 4 internal risk sizing and `ARMED` provenance are merged, but the explicit V2.4 internal `ARMED` → existing V2.3 Execution Board transfer remains deferred. Normal broker order entry remains in thinkorswim/Schwab and the Schwab integration remains read-only.
+Important current distinction: V2.4 Phase 4 internal risk sizing and `ARMED` provenance are merged to `main`. The explicit V2.4 internal `ARMED` → existing V2.3 Execution Board integration is now **under implementation on branch `v24-execution-board-handoff`**, but end-to-end transfer/binding is not yet operational. Normal broker order entry remains in thinkorswim/Schwab and the Schwab integration remains read-only.
 
 ### `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md`
 
@@ -21,6 +21,27 @@ The **authoritative top-level V2.4 design baseline**.
 It records the approved pre-trade architecture, source boundary, lifecycle, Phase 3 DSS design, Phase 3→4 handoff, context/decision-gate direction, and ARM boundary.
 
 Its approval-time implementation-status statements are historical snapshots and should not be rewritten.
+
+### `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`
+
+The **authoritative Execution Board handoff integration design baseline**.
+
+It locks the approved internal V2.4 `ARMED` → V2.3 transfer protocol, immutable handoff authority, receiver claim semantics, broker conflict/account boundaries, `executionListeningAt` ownership boundary, effective-stop/quantity provenance, idempotent delivery, and no-broker-write constraint.
+
+Its design decisions are frozen; implementation status belongs in the branch implementation-status record.
+
+### `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Implementation_Status_2026-09-02.md`
+
+The **current branch-local implementation/acceptance record** for the handoff workstream.
+
+At the current checkpoint it records:
+
+- Increment 1 immutable handoff contract + persistence — **IMPLEMENTED / ACCEPTED**;
+- Increment 2 claim/delivery state machine — **IMPLEMENTED / ACCEPTED**;
+- focused handoff acceptance at **31/31 PASS**;
+- Increment 1 regression evidence of 170/170 Phase 4, 91/91 Phase 3, 307/307 full tests, 10/10 V2.3 state, and production build PASS;
+- remaining unimplemented downstream integration gates;
+- explicit statement that end-to-end V2.4 → V2.3 ownership is not yet complete.
 
 ### `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md`
 
@@ -76,11 +97,11 @@ Authoritative technical provenance for the preserved historical study.
 
 ### `README.md`
 
-Current project/repository overview. Defer to the User Guide for operation, design baselines for architecture, and closeout records for implementation acceptance.
+Current project/repository overview. Defer to the User Guide for operation, design baselines for architecture, and closeout/status records for implementation acceptance.
 
 ### `docs/ExecutionOS_Documentation_Index.md`
 
-The cross-document inventory and authority map. Update it whenever phase status, major merge state, or authoritative documentation changes.
+The cross-document inventory and authority map. Update it whenever phase status, major merge state, active implementation workstream status, or authoritative documentation changes.
 
 ---
 
@@ -100,7 +121,7 @@ baabb75f36050599f20e6c89e8db2f1f7d7769a1
 
 This remains the frozen broker-fill ownership and execution-management reference.
 
-### V2.4 merge state
+### V2.4 merged state on `main`
 
 - Phase 1 Candidate Ingestion — **COMPLETE / MERGED**;
 - Phase 2 MarketDataProvider — **COMPLETE / MERGED / LIVE-ACCEPTED**;
@@ -124,19 +145,59 @@ schwab:state-test      10/10 PASS
 production build      PASS
 ```
 
+### Execution Board handoff integration branch
+
+Active branch:
+
+```text
+v24-execution-board-handoff
+```
+
+Current accepted implementation checkpoint:
+
+```text
+Increment 1 — Immutable handoff contract + persistence      ACCEPTED
+Increment 2 — Claim / delivery state machine                ACCEPTED
+v24:handoff-test                                             31/31 PASS
+```
+
+Increment 1 also completed the following regression gate:
+
+```text
+v24:risk-sizing-test  170/170 PASS
+v24:dss-test           91/91 PASS
+analytics:test        307/307 PASS
+schwab:state-test      10/10 PASS
+production build      PASS
+```
+
+The handoff branch is **not yet end-to-end operational**. It currently has immutable authorization transport and durable claim/delivery state, but it does not yet install V2.4 candidates into V2.3 or bind broker fills.
+
+Next planned increment:
+
+```text
+Increment 3 — Broker account identity + execution-coverage provenance
+```
+
 ### What is still intentionally not complete
 
-The following remain outside the merged Phase 4 scope:
+The following remain outside the merged Phase 4 scope and/or unfinished in the active handoff branch:
 
 - broader context/decision-gate logic beyond the Phase 4 risk consequence;
-- explicit V2.4 internal `ARMED` → existing V2.3 Execution Board transfer/binding;
+- complete V2.4 internal `ARMED` → existing V2.3 Execution Board installation/binding;
+- broker account/public-state identity upgrade required by handoff admission;
+- broker execution-coverage provenance and clean-interval proof;
+- handoff API/browser delivery;
+- V2.3 idempotent local installation and exact-account fill matching;
+- quantity-variance and wrong-account conflict handling;
+- end-to-end handoff dashboard acceptance;
 - broker write/order placement, replacement, cancellation, stop replacement, or flattening;
 - buying-power/margin eligibility gating;
 - portfolio heat / aggregate concurrent-risk controls;
 - non-USD currency conversion and additional asset types;
 - automatic NinjaTrader futures binding.
 
-`ARMED` in the Phase 4 closeout is an internal authorization/provenance state. It is not proof that an order was sent or that a fill is owned by the V2.3 Execution Board.
+`ARMED` in the Phase 4 closeout remains an internal authorization/provenance state. It is not proof that an order was sent or that a fill is owned by the V2.3 Execution Board. The handoff workstream must explicitly establish that ownership boundary through `executionListeningAt` before downstream fills may be claimed.
 
 V3 has not started.
 
@@ -162,7 +223,7 @@ Historical snapshot only. Architecture/design decisions remain important, but em
 
 ### V2.4 approved-design implementation-status prose
 
-Historical at approval time. Do not rewrite design baselines merely because Phase 3 and Phase 4 are now implemented and merged.
+Historical at approval time. Do not rewrite design baselines merely because later implementation succeeds.
 
 ---
 
@@ -178,6 +239,7 @@ Historical at approval time. Do not rewrite design baselines merely because Phas
 - **PR #12** — V2.4 Phase 3 DSS implementation; merged.
 - **PR #13** — Phase 3 post-merge documentation cleanup; merged.
 - **PR #14** — V2.4 Phase 4 Effective-Stop Risk Sizing; merged at `0a976fb8bc68f64fd479d48322a011c9d419b2c2`.
+- Execution Board handoff integration — **ACTIVE BRANCH WORK; PR NOT YET OPENED**.
 
 Use current repository history and the Documentation Index for present status.
 
@@ -189,6 +251,6 @@ Do not rewrite historical or approved dated documents merely because later evide
 
 When a change affects day-to-day operation, update the User Guide as part of the same documentation closeout.
 
-When an approved architecture phase is implemented, create/update a formal implementation/acceptance record and synchronize this status file plus the Documentation Index.
+When an approved architecture workstream is implemented incrementally, maintain a current implementation-status record and synchronize this status file plus the Documentation Index at accepted checkpoints.
 
 When project-wide architecture changes beyond the scope of an existing dated specification, create a new specification revision rather than silently rewriting the old one.
