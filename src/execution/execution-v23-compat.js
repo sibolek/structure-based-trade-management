@@ -89,6 +89,12 @@ function normalizeHandoffForV23(handoff) {
   if (!["LONG", "SHORT"].includes(direction)) {
     throw compatibilityError("handoff direction must be LONG or SHORT", "INVALID_V24_EXECUTION_PROVENANCE");
   }
+  if (!handoff.trigger || typeof handoff.trigger !== "object" || Array.isArray(handoff.trigger)) {
+    throw compatibilityError("handoff trigger object is required", "INVALID_V24_EXECUTION_PROVENANCE");
+  }
+  if (!Array.isArray(handoff.targets)) {
+    throw compatibilityError("handoff targets must be an array", "INVALID_V24_EXECUTION_PROVENANCE");
+  }
   if ([structuralInvalidation, effectiveStop, currentExpectedEntry, selectedQuantity].some((value) => value === null)) {
     throw compatibilityError("handoff stop/entry/quantity provenance is incomplete", "INVALID_V24_EXECUTION_PROVENANCE");
   }
@@ -117,7 +123,7 @@ function normalizeHandoffForV23(handoff) {
     timeframe: text(handoff.timeframe),
     thesis: text(handoff.thesis),
     trigger: structuredClone(handoff.trigger),
-    targets: Array.isArray(handoff.targets) ? structuredClone(handoff.targets) : [],
+    targets: structuredClone(handoff.targets),
     managementPlan: handoff.managementPlan ?? null,
     structuralInvalidation,
     effectiveStop,
