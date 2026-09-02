@@ -55,6 +55,7 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
   };
 
   let server = null;
+  let executionActivityFault = null;
 
   function touch() {
     state.updatedAt = nowIso();
@@ -79,6 +80,14 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
     if (!contract.valid) {
       const error = new Error(`invalid broker execution coverage: ${contract.errors.join("; ")}`);
       error.code = "INVALID_BROKER_EXECUTION_COVERAGE";
+      throw error;
+    }
+
+    if (coverage.status === "CONTIGUOUS" && executionActivityFault) {
+      const error = new Error(
+        `execution activity provenance is faulted: ${executionActivityFault.message}`,
+      );
+      error.code = "BROKER_EXECUTION_ACTIVITY_PROVENANCE_FAULT";
       throw error;
     }
 
@@ -142,10 +151,21 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
   }
 
   function recordExecution(execution) {
-    // Validate event-time authority before publishing the execution anywhere. If this
-    // throws, the monitor's existing catch path marks coverage GAP and the watermark
-    // is reset by setExecutionCoverage().
-    executionTimeRequired(execution);
+    // Validate event-time authority before publishing the execution anywhere. The
+    // monitor currently marks an unseen execution as seen before calling here, so a
+    // malformed executionTime creates a sticky provenance fault for this process.
+    // That prevents later polls from silently recovering after the bad event has
+    // disappeared from the unseen path. A monitor restart establishes a new baseline.
+    try {
+      executionTimeRequired(execution);
+    } catch (error) {
+      executionActivityFault = {
+        code: error.code || "BROKER_EXECUTION_TIME_REQUIRED",
+        message: error.message,
+        faultedAt: nowIso(),
+      };
+      throw error;
+    }
 
     if (state.executionActivity?.coverageStartedAt && state.executionActivity?.currentThrough) {
       state.executionActivity = clone(advanceBrokerExecutionActivity(state.executionActivity, {
