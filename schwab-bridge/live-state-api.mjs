@@ -1,4 +1,8 @@
 import http from "node:http";
+import {
+  createBrokerExecutionCoverage,
+  validateBrokerExecutionCoverage,
+} from "./broker-execution-provenance.mjs";
 
 const DEFAULT_HOST = "127.0.0.1";
 const MAX_EXECUTIONS = 25;
@@ -7,8 +11,12 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function positionKey(account, symbol) {
-  return `${account}|${String(symbol || "?").toUpperCase()}`;
+function accountKey(value) {
+  return String(value?.accountId ?? value?.account ?? "").trim();
+}
+
+function positionKey(position) {
+  return `${accountKey(position)}|${String(position?.symbol || "?").toUpperCase()}`;
 }
 
 function clone(value) {
@@ -17,7 +25,7 @@ function clone(value) {
 
 export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
   let state = {
-    version: 1,
+    version: 2,
     status: "BOOTING",
     readOnly: true,
     source: "SCHWAB",
@@ -26,6 +34,7 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
     accounts: [],
     positions: [],
     executions: [],
+    executionCoverage: createBrokerExecutionCoverage(),
     lastError: null,
   };
 
@@ -49,16 +58,28 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
     touch();
   }
 
+  function setExecutionCoverage(coverage) {
+    const contract = validateBrokerExecutionCoverage(coverage);
+    if (!contract.valid) {
+      const error = new Error(`invalid broker execution coverage: ${contract.errors.join("; ")}`);
+      error.code = "INVALID_BROKER_EXECUTION_COVERAGE";
+      throw error;
+    }
+    state.executionCoverage = clone(coverage);
+    touch();
+  }
+
   function updateAccount(account) {
-    const index = state.accounts.findIndex((item) => item.account === account.account);
+    const key = accountKey(account);
+    const index = state.accounts.findIndex((item) => accountKey(item) === key);
     if (index >= 0) state.accounts[index] = { ...state.accounts[index], ...clone(account) };
     else state.accounts.push(clone(account));
     touch();
   }
 
   function updatePosition(position) {
-    const key = positionKey(position.account, position.symbol);
-    const index = state.positions.findIndex((item) => positionKey(item.account, item.symbol) === key);
+    const key = positionKey(position);
+    const index = state.positions.findIndex((item) => positionKey(item) === key);
 
     if (!position.quantity) {
       if (index >= 0) state.positions.splice(index, 1);
@@ -107,7 +128,12 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
 
       if (request.url === "/health") {
         response.statusCode = 200;
-        response.end(JSON.stringify({ ok: true, status: state.status, updatedAt: state.updatedAt }));
+        response.end(JSON.stringify({
+          ok: true,
+          status: state.status,
+          updatedAt: state.updatedAt,
+          executionCoverage: state.executionCoverage,
+        }));
         return;
       }
 
@@ -150,6 +176,7 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
     stop,
     setStatus,
     setBootstrap,
+    setExecutionCoverage,
     updateAccount,
     updatePosition,
     recordExecution,
