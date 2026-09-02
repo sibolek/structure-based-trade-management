@@ -10,7 +10,7 @@ This file distinguishes current authoritative project records from historical pl
 
 The **living operator guide** for ExecutionOS as it exists on current `main`.
 
-Important current distinction: V2.4 Phases 1–4 are merged to `main`. The explicit internal V2.4 `ARMED` → existing V2.3 Execution Board integration is under implementation on branch `v24-execution-board-handoff`. Increments 1–4 are implemented and accepted; Decisions 10–11 are now approved/frozen; V2.3 installation and broker-fill ownership through the new path are not yet enabled. Normal broker order entry remains in thinkorswim/Schwab and the Schwab integration remains read-only.
+Important current distinction: V2.4 Phases 1–4 are merged to `main`. The explicit internal V2.4 `ARMED` → existing V2.3 Execution Board integration is under implementation on branch `v24-execution-board-handoff`. Increments 1–4 are implemented and accepted; Decisions 10–13 are approved/frozen; the execution-activity/admission increment is implemented on the branch but **not yet accepted**. V2.3 installation and broker-fill ownership through the new path are not yet enabled. Normal broker order entry remains in thinkorswim/Schwab and the Schwab integration remains read-only.
 
 ### `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md`
 
@@ -22,10 +22,22 @@ Authoritative original handoff-integration design baseline. It locks immutable h
 
 ### `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.1_APPROVED.md`
 
-Authoritative approved post-baseline handoff addendum. It freezes:
+Authoritative approved addendum freezing:
 
-- **Decision 10 — V2.4-origin authorization immutability**, including `V24_AUTHORIZATION_IMMUTABLE`, automated fast `REVISE → RE-ARM`, reuse of valid completed-bar/DSS state where allowed, mandatory fresh Phase 4 inputs, and an engineering target of median revise/re-arm latency under one second in normal Schwab conditions;
-- **Decision 11 — Universal pre-fill discard/disarm**, applying to both V2.4-origin and manual V2.3 armed/listening trades, with immediate fill-ineligibility/symbol-release/audit preservation, no post-first-fill discard, anti-resurrection synchronization for V2.4 handoffs, and no broker-order cancellation under the read-only boundary.
+- **Decision 10 — V2.4-origin authorization immutability + fast Revise/Re-arm**;
+- **Decision 11 — Universal pre-fill discard/disarm**.
+
+### `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.2_APPROVED.md`
+
+Authoritative approved addendum freezing:
+
+- **Decision 12 — Broker cleanliness is symbol-global across connected accounts** while exact Phase 4 account identity remains the only account allowed to own the trade.
+
+### `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.3_APPROVED.md`
+
+Authoritative approved addendum freezing:
+
+- **Decision 13 — Schwab `executionTime` is authoritative event time; the recent execution list is UI-only; a separate lossless account+symbol execution-activity watermark proves intervening activity for the current contiguous coverage interval; missing/invalid execution time fails closed.**
 
 ### `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Implementation_Status_2026-09-02.md`
 
@@ -37,10 +49,16 @@ Current accepted checkpoint:
 - Increment 2 claim/delivery state machine — **ACCEPTED**;
 - Increment 3 exact broker account identity + execution coverage — **ACCEPTED / LIVE-PROVEN**;
 - Increment 4 server-side handoff transport API — **ACCEPTED / ISOLATED RUNTIME-PROVEN**;
-- Decision 10 V2.4 authorization immutability + fast revise/re-arm — **APPROVED / FROZEN**;
-- Decision 11 universal pre-fill discard/disarm — **APPROVED / FROZEN**.
+- Decisions 10–13 — **APPROVED / FROZEN**.
 
-Latest deterministic evidence:
+Current unaccepted branch implementation:
+
+- lossless execution-activity watermark;
+- live-state coverage/activity synchronization and malformed-execution-time fail-closed behavior;
+- pure pre-install handoff admission evaluator;
+- focused activity/admission tests.
+
+Latest **accepted** deterministic evidence remains:
 
 ```text
 v24:handoff-api-test         7/7 PASS
@@ -49,6 +67,8 @@ v24:broker-provenance-test  13/13 PASS
 schwab:state-test            10/10 PASS
 production build            PASS
 ```
+
+The new activity/admission code must pass its focused tests and regressions before these counts/statuses are advanced.
 
 ### `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md`
 
@@ -132,28 +152,35 @@ Increment 4 — Server-side handoff transport API             ACCEPTED / RUNTIME
 Approved post-baseline rules:
 
 ```text
-Decision 10 — V2.4 authorization immutability + fast revise/re-arm   APPROVED / FROZEN
-Decision 11 — Universal pre-fill discard/disarm                       APPROVED / FROZEN
+Decision 10 — V2.4 authorization immutability + fast revise/re-arm       APPROVED / FROZEN
+Decision 11 — Universal pre-fill discard/disarm                           APPROVED / FROZEN
+Decision 12 — Symbol-global broker cleanliness across connected accounts  APPROVED / FROZEN
+Decision 13 — Authoritative executionTime + lossless activity watermark   APPROVED / FROZEN
 ```
 
 The branch is **not yet end-to-end operational**. No V2.4 handoff is yet installed into V2.3 by the new path and no new broker-fill ownership behavior is enabled.
 
-### Next implementation focus
+### Current implementation awaiting acceptance
 
-The next work can proceed into downstream admission/installation support, beginning with the pre-install broker conflict/coverage gate and local ownership constraints, while implementing the approved immutability, revise/re-arm, and universal discard semantics.
+The branch now contains the Decision 13 activity-provenance layer and a pure Decision 12/13 admission evaluator. This work is intentionally not wired into V2.3 installation yet. Focused acceptance commands are:
+
+```text
+npm run v24:broker-provenance-test
+npm run v24:handoff-admission-test
+```
 
 ### What remains incomplete
 
+- acceptance of the activity/admission increment;
 - code-level V2.4 authorization immutability and V2.4-specific Edit behavior;
 - fast revise/re-arm implementation and latency instrumentation;
 - universal discard/retirement persistence and anti-resurrection synchronization;
 - stable browser receiver identity;
-- pre-install broker conflict/coverage gate;
-- same-symbol V2.3 ownership gate;
-- exact-account installation gate;
+- V2.3 local symbol-ownership adapter for the admission evaluator;
 - idempotent local installation/read-back verification;
+- final install-time revalidation and durable `executionListeningAt` establishment;
 - V2.4-origin provenance mapping and effective-stop execution authority;
-- exact-account fill matching from `executionListeningAt`;
+- exact-account fill matching from `executionListeningAt` using authoritative `executionTime`;
 - partial/fragmented quantity variance and wrong-account handling;
 - delivered-but-local-missing reconciliation;
 - end-to-end dashboard acceptance;
