@@ -14,6 +14,7 @@
     "v24:dss-test": "node --test tests/pretrade-state.test.mjs tests/wilder-atr.test.mjs tests/effective-stop.test.mjs tests/dss-evaluator.test.mjs tests/dss-evaluation-lifecycle.test.mjs tests/dss-runtime.test.mjs tests/dss-input-assembler.test.mjs tests/dss-live-probe.test.mjs tests/reg-nms-equity-price-increment.test.mjs tests/dss-permission-service.test.mjs",
     "v24:risk-sizing-test": "node --test tests/risk-sizing-calculator.test.mjs tests/expected-entry-resolver.test.mjs tests/account-risk-provider.test.mjs tests/instrument-sizing-metadata-provider.test.mjs tests/risk-evaluation.test.mjs tests/risk-evaluation-repository.test.mjs tests/risk-sizing-permission-service.test.mjs tests/arm-dss-handoff.test.mjs tests/risk-sizing-arm-refresh.test.mjs tests/risk-sizing-permission-handoff.test.mjs tests/arm-risk-preparation-service.test.mjs tests/arm-authorization-service.test.mjs",
     "v24:handoff-test": "node --test tests/execution-board-handoff.test.mjs tests/execution-board-handoff-delivery.test.mjs",
+    "v24:broker-provenance-test": "node --test tests/broker-execution-provenance.test.mjs",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
