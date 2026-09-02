@@ -3,8 +3,8 @@
 
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
-**Approved addenda:** Decisions 10–16 in addenda v0.1–v0.6  
-**Overall status:** **IN PROGRESS — HANDOFF CONTRACT/DELIVERY, BROKER PROVENANCE, PURE ADMISSION GATE, V2.3 COMPATIBILITY/PROVENANCE, STABLE RECEIVER IDENTITY, DORMANT LOCAL INSTALLATION FOUNDATION, LOSSLESS EXACT-ACCOUNT INITIAL-FILL OWNERSHIP, AND DURABLE PRE-FILL RETIREMENT ACCEPTED; LIVE V2.4 INSTALL/ACK PATH NOT YET ENABLED**
+**Approved addenda:** Decisions 10–17 in addenda v0.1–v0.7  
+**Overall status:** **IN PROGRESS — HANDOFF CONTRACT/DELIVERY, BROKER PROVENANCE, ADMISSION, V2.3 COMPATIBILITY, STABLE RECEIVER IDENTITY, LOCAL INSTALLATION, LOSSLESS INITIAL-FILL OWNERSHIP, DURABLE RETIREMENT, AND ATOMIC INSTALL/ACK ACTIVATION CORE ACCEPTED; LIVE REACT EXECUTION ROUTING AND DOWNSTREAM EXACT-ACCOUNT LIFECYCLE NOT YET ENABLED**
 
 ---
 
@@ -24,33 +24,35 @@ Broker order placement, modification, cancellation, stop replacement, or automat
 | Increment 2 — Claim / delivery state machine | **ACCEPTED** |
 | Increment 3 — Exact broker account identity + execution coverage | **ACCEPTED / LIVE-PROVEN** |
 | Increment 4 — Server-side handoff transport API | **ACCEPTED / ISOLATED RUNTIME-PROVEN** |
-| Sequence item 6 — execution-activity provenance + pure pre-install admission gate | **ACCEPTED / LIVE-PROVEN** |
+| Sequence item 6 — execution-activity provenance + pure admission gate | **ACCEPTED / LIVE-PROVEN** |
 | Sequence item 5 — V2.3 compatibility helpers / provenance model | **ACCEPTED** |
-| Sequence item 7 foundation — stable receiver identity + dormant PREPARED/LISTENING local persistence | **ACCEPTED** |
-| Sequence item 8 first slice — lossless ownership journal + exact-account initial-fill matcher | **ACCEPTED / LIVE-PROVEN** |
-| Decision 11/16 implementation — durable pre-fill retirement + anti-resurrection | **ACCEPTED** |
+| Sequence item 7 foundation — receiver identity + durable PREPARED/LISTENING persistence | **ACCEPTED** |
+| Sequence item 8 first slice — lossless journal + exact-account initial-fill matcher | **ACCEPTED / LIVE-PROVEN** |
+| Decision 11/16 — durable pre-fill retirement + anti-resurrection | **ACCEPTED** |
+| Decision 17 — atomic LISTENING activation + browser transport/orchestrator | **ACCEPTED** |
 
-The sequence-item-7 foundation remains deliberately dormant: it is not yet wired into the live Execution Board ownership path.
-
----
-
-## 3. Approved design freezes
-
-- **Decision 10 — V2.4 authorization immutability:** V2.4 authorization-bearing fields may not be edited in place. Mutation fails with `V24_AUTHORIZATION_IMMUTABLE`. Desired changes use fast Revise → retire → fresh authorization → Re-arm. Manual/legacy V2.3 Edit remains unchanged.
-- **Decision 11 — Universal pre-fill discard/disarm:** every pre-fill `ARMED` / `LISTENING` trade may be discarded regardless of origin; discard ends fill eligibility, releases symbol ownership after safe retirement, preserves audit history, and does not cancel broker orders.
-- **Decision 12 — Symbol-global broker cleanliness:** exact Phase 4 account determines which account may own the trade, while current-position and intervening-execution cleanliness is checked across all observable connected accounts.
-- **Decision 13 — Authoritative execution timing:** Schwab `executionTime` governs admission and fill ownership; `detectedAt` is audit-only. Safety uses lossless broker provenance rather than the bounded recent-execution UI list.
-- **Decision 14 — Stable Execution Board receiver identity:** each browser/profile owns one stable opaque receiver ID persisted independently of trade state. Losing that storage creates a new receiver; sticky claims are never silently migrated or stolen.
-- **Decision 15 — Lossless execution-event evidence for broker-fill ownership:** the bounded recent-execution UI list is never ownership authority. A lossless current-coverage execution journal is the ownership source, and a coverage gap after `executionListeningAt` suspends automatic ownership without silent recovery.
-- **Decision 16 — Durable retirement cutoff:** discard freezes an immediate eligibility cutoff. A qualifying fill with authoritative `executionTime < cutoffAt` wins; `executionTime >= cutoffAt` cannot bind. Clean continuous proof through the cutoff finalizes `RETIRED`; insufficient proof requires `RECONCILIATION_REQUIRED`. Retirement persists separately from immutable handoff-delivery history and cannot be undone by reload or later execution discovery.
+The Decision-17 activation core is still intentionally not mounted into the continuously running React Execution Board. This prevents a V2.4 trade from reaching the legacy symbol-only lifecycle before the downstream exact-account lifecycle is ready.
 
 ---
 
-## 4. Accepted broker provenance + pure admission gate
+## 3. Frozen decisions 10–17
 
-Accepted runtime includes `broker-execution-activity.mjs`, `execution-board-handoff-admission.mjs`, and aligned live-state coverage/activity provenance.
+- **Decision 10 — authorization immutability:** V2.4 authorization-bearing fields cannot be edited in place; mutation fails with `V24_AUTHORIZATION_IMMUTABLE`.
+- **Decision 11 — universal pre-fill discard/disarm:** pre-fill ownership may be discarded, preserving audit and never altering broker orders.
+- **Decision 12 — symbol-global broker cleanliness:** exact authorized account owns the trade; cleanliness is checked across all observable accounts.
+- **Decision 13 — authoritative broker timing:** Schwab `executionTime` governs admission and fill ownership; `detectedAt` is audit-only.
+- **Decision 14 — stable receiver identity:** each browser/profile owns one durable opaque `executionBoardReceiverId`; sticky claims are never silently migrated.
+- **Decision 15 — lossless ownership evidence:** V2.4 ownership uses `executionOwnershipJournal`, never bounded `executions[25]`; coverage loss suspends automatic ownership.
+- **Decision 16 — durable retirement cutoff:** fill with `executionTime < cutoffAt` wins; `executionTime >= cutoffAt` cannot bind; incomplete proof requires reconciliation.
+- **Decision 17 — atomic LISTENING activation:** proposed `executionListeningAt = T` is chosen only after durable PREPARED readback, broker cleanliness is proven continuously through exact T, LISTENING(T) is durably read back before T becomes effective, and ACK retries must preserve exact T.
 
-Accepted evidence:
+---
+
+## 4. Accepted broker provenance and admission
+
+Accepted runtime includes `broker-execution-activity.mjs`, `broker-execution-ownership-journal.mjs`, `live-state-api.mjs`, and `execution-board-handoff-admission.mjs`.
+
+Accepted evidence includes:
 
 ```text
 v24:broker-provenance-test  24/24 PASS
@@ -61,15 +63,19 @@ schwab:state-test            10/10 PASS
 production build            PASS
 ```
 
-Live Schwab proof confirmed aligned execution coverage/activity, `status = ARMED`, `readOnly = true`, and `lastError = null`.
+Live Schwab proof confirmed exact timestamp alignment among `executionCoverage`, `executionActivity`, and `executionOwnershipJournal`, with `status = ARMED`, `readOnly = true`, and `lastError = null`.
 
 ---
 
-## 5. Accepted V2.3 compatibility / provenance
+## 5. Accepted V2.3 compatibility and local installation
 
-Runtime: `src/execution/execution-v23-compat.js`.
+Runtime:
 
-Key accepted rule:
+- `src/execution/execution-v23-compat.js`
+- `src/execution/execution-board-receiver.js`
+- `src/execution/execution-v24-local-installation.js`
+
+Key compatibility rule:
 
 ```text
 executionStop(trade)
@@ -77,28 +83,7 @@ executionStop(trade)
   legacy/manual → originalPlan.structuralStop
 ```
 
-The layer preserves structural invalidation separately, selected quantity, exact account, candidate/version/hash, DSS/risk IDs, handoff/receiver provenance, authorization time, and one-time `executionListeningAt`. V2.4 authorization mutation fails with `V24_AUTHORIZATION_IMMUTABLE`; manual/legacy behavior remains compatible.
-
-Focused acceptance:
-
-```text
-v24:v23-compat-test          13/13 PASS
-v24:handoff-admission-test  16/16 PASS
-v24:handoff-test            34/34 PASS
-schwab:state-test            10/10 PASS
-production build            PASS
-```
-
----
-
-## 6. Accepted sequence-item-7 foundation
-
-Runtime:
-
-- `src/execution/execution-board-receiver.js`
-- `src/execution/execution-v24-local-installation.js`
-
-Accepted behavior includes dedicated durable receiver identity, exact PREPARED persistence/readback, idempotent same-handoff recovery, content-conflict detection, symbol ownership, one-time PREPARED → LISTENING binding of `executionListeningAt`, and construction of a V2.3-shaped V2.4 candidate without losing Phase 3 `effectiveStop` authority.
+The local layer provides exact durable PREPARED/LISTENING persistence, readback, one-time listening-boundary binding, handoff-content conflict protection, and preserved V2.4 account/quantity/DSS/risk/stop provenance.
 
 Focused acceptance:
 
@@ -106,36 +91,14 @@ Focused acceptance:
 v24:v23-install-test         16/16 PASS
 v24:v23-compat-test          13/13 PASS
 v24:handoff-admission-test  16/16 PASS
-schwab:state-test            10/10 PASS
 production build            PASS
 ```
 
-This is not full sequence-item-7 completion yet. Final broker revalidation, live activation, and transport ACK remain to be wired.
-
 ---
 
-## 7. Accepted Decision 15 / initial-fill ownership slice
+## 6. Accepted initial-fill ownership and retirement
 
-Runtime:
-
-- `schwab-bridge/broker-execution-ownership-journal.mjs`
-- upgraded `schwab-bridge/live-state-api.mjs`
-- `src/execution/execution-v24-initial-fill-matcher.js`
-
-Accepted data-role separation:
-
-```text
-executions[25]
-    = bounded dashboard / human display only
-
-executionActivity
-    = account+symbol latest-execution watermark for admission cleanliness
-
-executionOwnershipJournal
-    = lossless execution-event evidence for V2.4 fill ownership
-```
-
-Accepted initial-fill contract:
+Initial ownership uses only the lossless journal with:
 
 ```text
 exact authorized account
@@ -146,53 +109,64 @@ exact authorized account
 + uninterrupted proven coverage from executionListeningAt
 ```
 
+A qualifying partial fill establishes ownership immediately. Oversized first fills are owned but flagged `AUTHORIZED_QUANTITY_EXCEEDED`. Wrong-account or unexpected same-symbol activity before first ownership suspends automatic matching.
+
+Retirement provides exact fill-vs-discard cutoff semantics, anti-resurrection after reload, symbol release only after safe retirement, and explicit reconciliation when coverage cannot prove the interval.
+
 Focused acceptance:
 
 ```text
-v24:fill-ownership-test      24/24 PASS
-v24:broker-provenance-test  24/24 PASS
-v24:v23-install-test         16/16 PASS
-v24:v23-compat-test          13/13 PASS
-v24:handoff-admission-test  16/16 PASS
-schwab:state-test            10/10 PASS
-production build            PASS
+v24:fill-ownership-test  24/24 PASS
+v24:retirement-test      14/14 PASS
 ```
-
-Live Schwab proof confirmed exact timestamp alignment among `executionCoverage`, `executionActivity`, and `executionOwnershipJournal` for both `coverageStartedAt` and `currentThrough`.
 
 ---
 
-## 8. Accepted Decision 16 / Decision 11 retirement implementation
+## 7. Accepted Decision 17 activation core
 
 Runtime:
 
-- `src/execution/execution-v24-retirement.js`
+- `src/execution/execution-v24-handoff-transport.js`
+- `src/execution/execution-v24-handoff-activation.js`
 
 Approved design authority:
 
-- `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.6_APPROVED.md`
+- `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.7_APPROVED.md`
 
-Accepted behavior:
+Accepted flow:
 
-- PREPARED discard finalizes immediately because fill ownership never began;
-- LISTENING discard freezes one immutable REQUESTED cutoff;
-- a qualifying fill executed before the cutoff wins even if detected after the discard request;
-- an execution exactly at or after the cutoff is ineligible and cannot resurrect the listener;
-- complete continuous proof through the cutoff finalizes `RETIRED` and releases symbol ownership;
-- a coverage gap or recovered interval beginning after `executionListeningAt` produces `RECONCILIATION_REQUIRED` and retains ownership pending explicit reconciliation;
-- wrong-account activity is never adopted as the trade;
-- `SUPERSEDED_BY_PRIOR_FILL` retains ownership for downstream LIVE promotion;
-- retired handoffs cannot be prepared, rebound, or activated after reload;
-- retirement is receiver-bound and persistence failures fail closed;
-- retirement does not mutate terminal handoff-delivery history and authorizes no broker writes.
+```text
+PENDING
+→ sticky receiver CLAIM
+→ initial admission
+→ PREPARED durable write/readback
+→ hold one proposed boundary T
+→ wait for broker coverage through T
+→ final admission with requiredThrough = T
+→ LISTENING(T) durable write/readback
+→ ACK exact T
+```
+
+Accepted recovery/failure behavior:
+
+- ACK outage leaves durable LISTENING(T) authoritative and retryable;
+- restart with LISTENING preserves exact original T and retries ACK;
+- LISTENING persistence failure leaves PREPARED authoritative and proposed T ineffective;
+- final admission failure after PREPARED retires the local reservation before server-side BLOCK;
+- existing broker positions or local symbol owners block before PREPARED;
+- server `DELIVERED` with missing/conflicting local LISTENING requires explicit reconciliation;
+- PREPARED restart may choose a fresh proposal because no previous proposal became authoritative;
+- proposed T never precedes sticky claim time;
+- retired handoffs cannot reactivate;
+- browser transport preserves exact receiver identity, exact ACK T, exact block reason, server error codes, and fail-closed network semantics.
 
 Focused acceptance and regressions:
 
 ```text
+v24:activation-test          20/20 PASS
 v24:retirement-test          14/14 PASS
 v24:fill-ownership-test      24/24 PASS
 v24:v23-install-test         16/16 PASS
-v24:v23-compat-test          13/13 PASS
 v24:handoff-admission-test  16/16 PASS
 v24:handoff-test             34/34 PASS
 v24:handoff-api-test          7/7 PASS
@@ -202,42 +176,41 @@ production build            PASS
 
 ---
 
-## 9. Current boundary — not yet end-to-end
+## 8. Current boundary — not yet end-to-end
 
 The branch still does **not**:
 
-- execute the real browser discovery → claim → PREPARED → final revalidation → LISTENING → ACK path;
-- expose a V2.4 LISTENING record as a live Execution Board listener;
+- mount the Decision-17 receiver loop into the live React Execution Board;
 - promote a real matched V2.4 first fill into V2.3 LIVE ownership;
-- implement the downstream fragmented-entry / ADD / PARTIAL / FLAT / REVERSAL exact-account lifecycle;
+- process V2.4 fragmented entry / ADD / PARTIAL / FLAT / REVERSAL lifecycle through exact account + lossless journal semantics;
 - implement fast Revise → Re-arm;
 - place, modify, cancel, or flatten broker orders.
 
-Therefore V2.4 remains short of a true end-to-end live execution-ownership test.
+Therefore V2.4 remains short of a safe real-fill end-to-end live test.
 
 ---
 
-## 10. Next implementation focus
+## 9. Next implementation focus
 
-The next work is live sequence-item-7 activation. Before coding it, freeze the exact atomic listening-boundary protocol that closes the race between final broker admission proof and the durable `executionListeningAt` transition.
+Before mounting the live receiver loop, freeze and implement the downstream V2.4 broker lifecycle so that a V2.4 trade can never fall into the existing legacy V2.3 symbol-only / `detectedAt` lifecycle after first fill.
 
-Target flow:
+Target principle:
 
 ```text
-discover
-→ claim
-→ PREPARED durable install
-→ exact readback
-→ freeze proposed listening cutoff
-→ prove broker cleanliness continuously through that exact cutoff
-→ LISTENING durable install with that exact executionListeningAt
-→ exact readback
-→ ACK the same executionListeningAt
-→ exact-account ownership matcher becomes eligible
+V2.4 LISTENING
+→ exact-account first fill
+→ LIVE
+→ every later entry fragment / ADD / PARTIAL / FLAT / REVERSAL
+   uses exact frozen executionAccountId
+   + lossless executionOwnershipJournal
+   + authoritative executionTime
+→ existing V2.3 UI/history projection
 ```
+
+Legacy/manual V2.3 behavior remains unchanged.
 
 ---
 
-## 11. Documentation rule
+## 10. Documentation rule
 
 `USER-GUIDE.md` remains intentionally unchanged because there is still no accepted end-to-end operator workflow. Approved dated design records remain immutable; this status record tracks current accepted implementation behavior.
