@@ -3,21 +3,15 @@
 
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
-**Overall status:** **IN PROGRESS — INCREMENTS 1–3 IMPLEMENTED / ACCEPTED; END-TO-END V2.4 → V2.3 TRANSFER NOT YET COMPLETE**
+**Overall status:** **IN PROGRESS — INCREMENTS 1–4 IMPLEMENTED / ACCEPTED; V2.3 INSTALLATION / BROKER-FILL OWNERSHIP NOT YET ENABLED**
 
 ---
 
-## 1. Scope and authority boundary
-
-This workstream implements the explicit transfer from an internally authorized V2.4 `ARMED` candidate into the existing V2.3 Execution Board without creating a second execution engine and without adding broker-write authority.
-
-The approved governing boundary remains:
+## 1. Governing boundary
 
 > **V2.4 authorizes; the handoff transfers; V2.3 owns execution.**
 
-The handoff workstream is a focused V2.4 integration project and does **not** renumber the approved top-level V2.4 phases.
-
-Existing V2.3 broker-fill ownership, LIVE promotion, ADD / PARTIAL / FLAT / REVERSAL semantics, execution management, and History remain downstream authority.
+This focused integration workstream does not renumber the approved V2.4 phases and does not create a second execution engine.
 
 Broker order placement, modification, cancellation, stop replacement, or automatic flattening remain **NOT AUTHORIZED / NOT IMPLEMENTED**.
 
@@ -27,44 +21,26 @@ Broker order placement, modification, cancellation, stop replacement, or automat
 
 **Status:** **IMPLEMENTED / ACCEPTED**
 
-Implemented runtime:
+Implemented:
 
-- `schwab-bridge/execution-board-handoff.mjs`
-- `schwab-bridge/execution-board-handoff-repository.mjs`
+- immutable `ExecutionBoardHandoff` construction from exact internal V2.4 `ARMED` provenance;
+- exact candidate/version/hash, DSS, risk, selected quantity, and execution-account provenance;
+- structural invalidation preserved separately from Phase 3 `effectiveStop`;
+- Phase 4 `currentExpectedEntry` preserved;
+- one handoff per ARM risk authorization;
+- duplicate/corrupt/orphan protection;
+- atomic persistence with rollback;
+- no broker-write authority.
 
-Implemented tests:
-
-- `tests/execution-board-handoff.test.mjs`
-
-Accepted behavior includes:
-
-- immutable `ExecutionBoardHandoff` construction from an internally `ARMED` candidate;
-- exact candidate ID, contract version, content hash, symbol, and direction provenance;
-- exact frozen `authorizedDssEvaluationId` / `authorizedRiskEvaluationId` / ARM provenance agreement;
-- separate preservation of structural invalidation and Phase 3 `effectiveStop`;
-- Phase 4 `currentExpectedEntry` provenance;
-- exact Phase 4 execution-account identity;
-- selected quantity at or below the Phase 4 affordable maximum;
-- one immutable handoff per ARM risk authorization;
-- duplicate handoff rejection;
-- corrupt persisted-contract detection on restart;
-- atomic temp-file persistence with in-memory rollback on persistence failure;
-- no broker-order authority.
-
-Initial focused acceptance:
+Acceptance:
 
 ```text
-v24:handoff-test  14/14 PASS
-```
-
-Regression/acceptance gate completed after Increment 1:
-
-```text
-v24:risk-sizing-test  170/170 PASS
-v24:dss-test           91/91 PASS
-schwab:state-test      10/10 PASS
-analytics:test        307/307 PASS
-production build      PASS
+Initial focused handoff gate: 14/14 PASS
+v24:risk-sizing-test:         170/170 PASS
+v24:dss-test:                  91/91 PASS
+analytics:test:               307/307 PASS
+schwab:state-test:             10/10 PASS
+production build:             PASS
 ```
 
 ---
@@ -73,16 +49,7 @@ production build      PASS
 
 **Status:** **IMPLEMENTED / ACCEPTED**
 
-Implemented runtime:
-
-- `schwab-bridge/execution-board-handoff-delivery.mjs`
-- `schwab-bridge/execution-board-handoff-delivery-repository.mjs`
-
-Implemented tests:
-
-- `tests/execution-board-handoff-delivery.test.mjs`
-
-Implemented durable delivery lifecycle:
+Durable lifecycle:
 
 ```text
 PENDING
@@ -94,28 +61,24 @@ DELIVERED
 BLOCKED
 ```
 
-Accepted behavior includes:
+Accepted behavior:
 
-- one stable opaque Execution Board receiver claim per handoff;
-- same-receiver claim retry is idempotent;
-- a different receiver can never steal an existing claim;
+- one sticky opaque receiver claim per handoff;
+- same-receiver retry is idempotent;
+- no claim stealing;
 - `claimedAt` does not establish broker-fill ownership;
-- delivery requires the exact claiming receiver;
-- `executionListeningAt` is frozen only on successful delivery acknowledgment;
+- delivery requires exact claiming receiver;
+- `executionListeningAt` freezes only on successful delivery acknowledgment;
 - identical ACK retry is idempotent;
-- conflicting ACK/listening provenance fails closed;
-- `DELIVERED` and `BLOCKED` are terminal;
-- `BLOCKED` preserves explicit failure reason provenance;
-- delivery records reference an existing immutable handoff and cannot be orphaned;
-- delivery state survives restart;
-- corrupt/orphaned persisted delivery state fails closed;
-- persistence failure rolls back the in-memory transition;
-- repository-clock failure also rolls state back rather than leaving an unpersisted transition visible.
+- conflicting ACK provenance fails closed;
+- `DELIVERED` / `BLOCKED` are terminal;
+- restart durability and persistence rollback;
+- idempotent claim/ACK/block retries do not require a fresh clock or rewrite persistence.
 
-Focused acceptance after Increment 2:
+Current handoff regression gate after Increment 4:
 
 ```text
-v24:handoff-test  31/31 PASS
+v24:handoff-test  34/34 PASS
 ```
 
 ---
@@ -124,94 +87,90 @@ v24:handoff-test  31/31 PASS
 
 **Status:** **IMPLEMENTED / ACCEPTED — INCLUDING LIVE READ-ONLY SCHWAB PROOF**
 
-Implemented runtime:
+Implemented:
 
-- `schwab-bridge/broker-execution-provenance.mjs`
-- upgraded `schwab-bridge/live-state-api.mjs`
-- upgraded `schwab-bridge/monitor.mjs`
-
-Implemented tests:
-
-- `tests/broker-execution-provenance.test.mjs`
-
-Accepted behavior includes:
-
-- stable opaque Schwab `accountId` is exposed separately from masked human display account;
-- the same exact opaque account identity is carried on public account, position, and execution records;
-- masked account display is never used as the machine identity key;
-- monitor publishes explicit execution-coverage provenance;
-- coverage begins `ESTABLISHING`, becomes `CONTIGUOUS` only after successful execution baseline completion, and advances only on successful Schwab order-API polls;
-- monitor poll failure marks coverage `GAP` without advancing `currentThrough`;
-- the first successful poll after a gap begins a new provable continuous interval by moving `coverageStartedAt` forward to the recovery point;
-- the system never claims coverage across a failed interval;
-- invalid/missing account identity and invalid coverage provenance fail closed;
+- stable opaque Schwab `accountId` separate from masked display identity;
+- exact account identity on public accounts, positions, and executions;
+- explicit monitor execution-coverage provenance;
+- `ESTABLISHING → CONTIGUOUS → GAP → CONTIGUOUS(new coverageStartedAt)` semantics;
+- no claimed coverage across monitor polling gaps;
 - broker integration remains read-only.
 
-Coverage contract:
-
-```text
-executionCoverage {
-  schemaVersion,
-  status: ESTABLISHING | CONTIGUOUS | GAP,
-  source: SCHWAB_ORDER_API_POLL,
-  coverageStartedAt,
-  baselineCompletedAt,
-  currentThrough,
-  lastGapAt,
-  lastGapReason
-}
-```
-
-Deterministic acceptance after Increment 3:
+Deterministic acceptance:
 
 ```text
 v24:broker-provenance-test  13/13 PASS
-v24:handoff-test            31/31 PASS
 schwab:state-test            10/10 PASS
 production build            PASS
 ```
 
-Live read-only Schwab smoke proof on 2026-09-02 confirmed:
+Live read-only Schwab proof confirmed:
 
-- API state version `2`;
-- monitor status `ARMED` and `readOnly: true`;
-- exact opaque account identity present on account and open positions;
-- masked account display remains separate;
+- monitor `status = ARMED`;
+- `readOnly = true`;
+- stable opaque `accountId` on account and positions;
+- masked account display remained separate;
 - `executionCoverage.status = CONTIGUOUS`;
-- `coverageStartedAt = baselineCompletedAt` at baseline completion;
-- `currentThrough` advanced on successful one-second polling;
-- `lastGapAt = null` / `lastGapReason = null` during the proof.
-
-No trade, order placement, order modification, cancellation, stop replacement, or flattening was used to obtain this acceptance evidence.
+- `currentThrough` advanced on successful polling;
+- no coverage gap existed during the proof.
 
 ---
 
-## 5. What is NOT yet implemented
+## 5. Increment 4 — Server-side handoff transport API
 
-The following approved handoff design elements remain pending:
+**Status:** **IMPLEMENTED / ACCEPTED — INCLUDING ISOLATED RUNTIME SMOKE TEST**
 
-1. handoff service/API endpoints for pending discovery, atomic claim, block, and ACK;
-2. browser-side stable `executionBoardReceiverId`;
-3. pre-install broker conflict gate using the accepted account/coverage provenance;
-4. existing V2.3 same-symbol ownership gate at handoff installation;
-5. exact-account installation gate;
-6. idempotent V2.3 local installation/read-back verification;
-7. V2.4-origin candidate provenance mapping into V2.3;
-8. `effectiveStop` execution-risk authority with legacy `structuralStop` compatibility;
-9. exact-account fill matching using `executionListeningAt` rather than V2.4 `authorizedAt`;
-10. partial/fragmented entry accumulation and authorized-quantity variance handling;
-11. wrong-account same-symbol execution conflict handling;
-12. delivered-but-local-state-missing reconciliation detection;
-13. end-to-end synthetic dashboard acceptance;
-14. final regression, documentation closeout, PR, and merge.
+Implemented runtime:
 
-Therefore an internally V2.4 `ARMED` candidate is **still not automatically installed into or owned by the V2.3 Execution Board** at this checkpoint.
+- `schwab-bridge/execution-board-handoff-api.mjs`;
+- pre-trade API integration using separately configurable handoff/delivery persistence files;
+- hardened delivery-repository retry behavior.
+
+Transport contract:
+
+```text
+GET  /api/handoffs?receiverId=...
+POST /api/handoffs/:handoffId/claim
+POST /api/handoffs/:handoffId/ack
+POST /api/handoffs/:handoffId/block
+```
+
+Accepted behavior:
+
+- discovery requires a receiver identity;
+- discovery returns PENDING handoffs plus CLAIMED handoffs owned by that same receiver;
+- browser/API has no route to create or register an immutable handoff;
+- claim is durable and exclusive;
+- competing receiver receives `EXECUTION_BOARD_HANDOFF_ALREADY_CLAIMED`;
+- ACK freezes `executionListeningAt` and identical retry is idempotent;
+- terminal block reporting is durable;
+- disallowed cross-origin mutation is rejected before state changes;
+- every response preserves `brokerWriteAuthority: false` where applicable;
+- service remains loopback/local-origin constrained.
+
+Deterministic acceptance:
+
+```text
+v24:handoff-api-test         7/7 PASS
+v24:handoff-test            34/34 PASS
+v24:broker-provenance-test  13/13 PASS
+schwab:state-test            10/10 PASS
+production build            PASS
+```
+
+Isolated runtime smoke proof used port `8798` and temporary files under `/tmp`, not normal V2.4 state. It confirmed:
+
+1. `/health` reported the temporary state/handoff/delivery files and `brokerWriteAuthority: false`;
+2. synthetic `smoke-handoff-001` was discoverable as `PENDING`;
+3. `smoke-receiver-A` claimed it successfully;
+4. the claimed record preserved `executionListeningAt: null`, proving claim did not begin broker-fill ownership;
+5. `smoke-receiver-B` was rejected with `EXECUTION_BOARD_HANDOFF_ALREADY_CLAIMED`.
+
+No ACK was fabricated during the smoke test because `executionListeningAt` must ultimately be created by successful downstream installation rather than by an operator test command.
 
 ---
 
-## 6. Current safety invariants already enforced by code
-
-At this checkpoint the new handoff layer already enforces:
+## 6. Current safety invariants enforced by code
 
 > **One ARM risk authorization → at most one immutable handoff.**
 
@@ -219,46 +178,56 @@ At this checkpoint the new handoff layer already enforces:
 
 > **Claiming does not start broker-fill ownership.**
 
-> **Delivery cannot occur without an exact receiver claim.**
-
-> **Structural invalidation and effective stop remain distinct.**
+> **Structural invalidation and Phase 3 effective stop remain distinct.**
 
 > **Selected quantity and exact Phase 4 account provenance cannot be rewritten by the handoff.**
 
-> **Stable opaque account identity is distinct from masked display identity.**
+> **Exact broker account identity is separate from masked display identity.**
 
 > **Execution coverage never bridges a monitor polling gap.**
 
-> **Persistence or provenance uncertainty fails closed.**
-
-The still-unimplemented downstream gates must preserve these invariants.
+> **Transport retries are idempotent and persistence/provenance uncertainty fails closed.**
 
 ---
 
-## 7. Next implementation increment
+## 7. Still pending before end-to-end V2.4 → V2.3 ownership
 
-**Increment 4 — Server-side handoff endpoints**
+The following remain unfinished:
 
-Objective:
+1. explicit V2.4-origin authorization-field immutability in the existing V2.3 Execution Board edit path;
+2. stable browser `executionBoardReceiverId`;
+3. pre-install broker conflict/coverage gate;
+4. same-symbol V2.3 ownership gate;
+5. exact authorized-account installation gate;
+6. idempotent local V2.3 installation/read-back verification;
+7. V2.4-origin candidate/provenance mapping into V2.3;
+8. `effectiveStop` execution-risk authority with legacy/manual `structuralStop` fallback;
+9. exact-account fill matching beginning at `executionListeningAt`;
+10. partial/fragmented entry accumulation and authorized-quantity variance handling;
+11. wrong-account same-symbol execution handling;
+12. delivered-but-local-state-missing reconciliation;
+13. explicit pre-fill cancel/retire/disarm synchronization;
+14. end-to-end synthetic dashboard acceptance;
+15. final regression, operator documentation, closeout, PR, and merge.
 
-- expose pending/claimed handoffs to the local Execution Board through the V2.4 service;
-- provide atomic claim using the durable delivery repository;
-- provide terminal block reporting;
-- provide idempotent ACK/delivery with exact `executionListeningAt` provenance;
-- preserve loopback/local-origin restrictions;
-- keep the broker boundary read-only;
-- do not yet install handoffs into V2.3 or change fill matching.
-
-Increment 4 requires focused API acceptance before browser delivery logic is added.
+Therefore the handoff is **not yet an operator workflow** and an internal V2.4 `ARMED`, PENDING, or CLAIMED record does not make V2.3 own a broker position.
 
 ---
 
-## 8. Documentation rule at this checkpoint
+## 8. Next design freeze required before V2.3 installation work
 
-This file is the branch-local implementation-status record while the handoff integration is in progress.
+Before implementing any browser/V2.3 installation path, the existing V2.3 **Edit** behavior must be reconciled with immutable V2.4 authorization. The current legacy edit workflow can modify plan/risk fields while a saved candidate remains listening, which is incompatible with the handoff's frozen Phase 3/Phase 4 authority.
+
+This must be resolved explicitly before downstream installation code is enabled.
+
+---
+
+## 9. Documentation rule
+
+This file is the branch-local implementation-status record while handoff integration remains in progress.
 
 The approved design baseline remains immutable as an approval-time architecture record.
 
-`USER-GUIDE.md` is intentionally **not** changed yet because the operator workflow has not changed: no end-to-end V2.4 → V2.3 handoff is available to the user at this checkpoint.
+`USER-GUIDE.md` remains intentionally unchanged because there is still no accepted end-to-end operator workflow.
 
-Before merge, the final handoff closeout must synchronize `USER-GUIDE.md`, `README.md`, `DOCUMENTATION-STATUS.md`, and `docs/ExecutionOS_Documentation_Index.md` with the actually accepted end-to-end behavior.
+Before merge, synchronize `USER-GUIDE.md`, `README.md`, `DOCUMENTATION-STATUS.md`, and `docs/ExecutionOS_Documentation_Index.md` with the actually accepted end-to-end behavior.
