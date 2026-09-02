@@ -9,6 +9,12 @@ import {
   establishBrokerExecutionActivity,
   validateBrokerExecutionActivity,
 } from "./broker-execution-activity.mjs";
+import {
+  advanceBrokerExecutionOwnershipJournal,
+  appendBrokerExecutionOwnershipEvent,
+  createBrokerExecutionOwnershipJournal,
+  establishBrokerExecutionOwnershipJournal,
+} from "./broker-execution-ownership-journal.mjs";
 
 const DEFAULT_HOST = "127.0.0.1";
 const MAX_EXECUTIONS = 25;
@@ -51,6 +57,7 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
     executions: [],
     executionCoverage: createBrokerExecutionCoverage(),
     executionActivity: createBrokerExecutionActivity(),
+    executionOwnershipJournal: createBrokerExecutionOwnershipJournal(),
     lastError: null,
   };
 
@@ -92,28 +99,42 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
     }
 
     let nextActivity;
+    let nextOwnershipJournal;
     if (coverage.status !== "CONTIGUOUS") {
-      // Decision 13: activity completeness never survives a coverage gap.
+      // Decisions 13 and 15: completeness and ownership evidence never survive a coverage gap.
       nextActivity = createBrokerExecutionActivity();
+      nextOwnershipJournal = createBrokerExecutionOwnershipJournal();
     } else if (
       !state.executionActivity?.coverageStartedAt
       || state.executionActivity.coverageStartedAt !== coverage.coverageStartedAt
     ) {
-      // Baseline establishment or successful recovery begins a new proof interval.
+      // Baseline establishment or successful recovery begins a new proof/evidence interval.
       nextActivity = establishBrokerExecutionActivity(createBrokerExecutionActivity(), {
         coverageStartedAt: coverage.coverageStartedAt,
         currentThrough: coverage.currentThrough,
       });
+      nextOwnershipJournal = establishBrokerExecutionOwnershipJournal(
+        createBrokerExecutionOwnershipJournal(),
+        {
+          coverageStartedAt: coverage.coverageStartedAt,
+          currentThrough: coverage.currentThrough,
+        },
+      );
     } else {
-      // A successful poll advances both proofs through the same observation point.
+      // A successful poll advances all broker-provenance views through the same observation point.
       nextActivity = advanceBrokerExecutionActivity(state.executionActivity, {
         observedThrough: coverage.currentThrough,
         executions: [],
       });
+      nextOwnershipJournal = advanceBrokerExecutionOwnershipJournal(
+        state.executionOwnershipJournal,
+        { observedThrough: coverage.currentThrough },
+      );
     }
 
     state.executionCoverage = clone(coverage);
     state.executionActivity = clone(nextActivity);
+    state.executionOwnershipJournal = clone(nextOwnershipJournal);
     touch();
   }
 
@@ -176,6 +197,13 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
       }));
     }
 
+    if (state.executionOwnershipJournal?.coverageStartedAt) {
+      state.executionOwnershipJournal = clone(appendBrokerExecutionOwnershipEvent(
+        state.executionOwnershipJournal,
+        execution,
+      ));
+    }
+
     state.executions = [clone(execution), ...state.executions].slice(0, MAX_EXECUTIONS);
     state.lastError = null;
     touch();
@@ -218,6 +246,13 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
           updatedAt: state.updatedAt,
           executionCoverage: state.executionCoverage,
           executionActivity: state.executionActivity,
+          executionOwnershipJournal: {
+            schemaVersion: state.executionOwnershipJournal.schemaVersion,
+            source: state.executionOwnershipJournal.source,
+            coverageStartedAt: state.executionOwnershipJournal.coverageStartedAt,
+            currentThrough: state.executionOwnershipJournal.currentThrough,
+            entryCount: state.executionOwnershipJournal.entries.length,
+          },
         }));
         return;
       }
