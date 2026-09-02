@@ -4,7 +4,7 @@
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
 **Approved addenda:** Decisions 10–21 in addenda v0.1–v1.1  
-**Overall status:** **IN PROGRESS — DECISIONS 10–20 ACCEPTED; SYNTHETIC ROUTING E2E PASSED THROUGH LISTENING/DELIVERED/NO-WRITE PROOF; DECISION 21 FULL TRADE SPECIFICATION INSPECTOR IMPLEMENTED, AWAITING OPERATOR UI ACCEPTANCE**
+**Overall status:** **IN PROGRESS — DECISIONS 10–21 ACCEPTED; SYNTHETIC ROUTING E2E PASSED THROUGH LISTENING/DELIVERED/NO-WRITE PROOF; NEXT: RETIRE SYNTHETIC V24E2E AUTHORIZATION AND CLOSE THE DASHBOARD E2E**
 
 ---
 
@@ -16,7 +16,7 @@ Broker order placement, modification, cancellation, stop replacement, automatic 
 
 ---
 
-## 2. Accepted checkpoint through Decision 20
+## 2. Accepted checkpoint through Decision 21
 
 | Work | Status |
 |---|---|
@@ -31,7 +31,7 @@ Broker order placement, modification, cancellation, stop replacement, automatic 
 | Decision 19 canonical store authority + React migration | **ACCEPTED** |
 | Decision 20 top-level runtime router + ownership transfer | **ACCEPTED** |
 | Synthetic dashboard routing E2E | **PASS THROUGH LISTENING / DELIVERED / BROKER NO-WRITE PROOF** |
-| Decision 21 full trade specification inspector | **IMPLEMENTED — AWAITING OPERATOR UI ACCEPTANCE** |
+| Decision 21 full trade specification inspector | **ACCEPTED** |
 
 Decision 20 final acceptance evidence supplied by the operator:
 
@@ -46,6 +46,14 @@ v24:live-lifecycle-test   15/15 PASS
 v24:v23-compat-test       13/13 PASS
 schwab:state-test         10/10 PASS
 production build          PASS
+```
+
+Decision 21 final acceptance evidence supplied by the operator:
+
+```text
+execution-v24-trade-specification-ui.test.mjs   6/6 PASS
+production build                                 PASS
+operator visual acceptance                       PASS
 ```
 
 ---
@@ -63,7 +71,7 @@ production build          PASS
 - **Decision 18:** after first fill, V2.4 LIVE lifecycle remains exact-account, lossless-journal, authoritative-time, order-provenance driven; coverage discontinuity requires reconciliation.
 - **Decision 19:** the Execution Board has one durable store authority; React is a projection and every mutation starts from latest durable state.
 - **Decision 20:** one serialized top-level V2.4 router owns activation → retirement → first-fill → LIVE lifecycle orchestration; exact first fill atomically creates lifecycle + visible V2.4 LIVE projection; immutable installation becomes provenance-only after lifecycle creation; ownership releases only after EXIT reaches History.
-- **Decision 21:** clicking a compact V2.4 authorization card opens a sleek, read-only full-trade-specification inspector over the immutable handoff envelope; trading information is primary, technical/API provenance is collapsible, and DISCARD remains an independent action.
+- **Decision 21:** clicking a compact V2.4 authorization card opens a sleek, read-only full-trade-specification inspector over the immutable handoff envelope; trading information is primary, technical/API provenance is collapsible, and DISCARD remains an independent action. The setup is a first-class labeled body field, not merely unlabeled header chrome.
 
 Decision 20 authority:
 
@@ -169,11 +177,11 @@ broker status:      ARMED
 readOnly:           true
 ```
 
-The synthetic authorization has intentionally not yet been retired because it is being reused to visually accept Decision 21.
+The synthetic authorization remains active only long enough to perform the final Decision-16 retirement/cleanup step.
 
 ---
 
-## 6. Decision 21 implementation — AWAITING OPERATOR UI ACCEPTANCE
+## 6. Decision 21 full trade specification inspector — ACCEPTED
 
 Approved design:
 
@@ -188,23 +196,29 @@ Updated:
 
 - `src/components/V24AuthorizedTradesBoard.jsx`
 
-Implemented behavior:
+Accepted behavior:
 
-- authorization cards remain compact and now advertise `View full trade specification`;
+- authorization cards remain compact and advertise `View full trade specification`;
 - card click or keyboard Enter/Space opens the inspector;
 - DISCARD stops event propagation and remains a separate Decision-16 action;
-- modal renders setup, thesis, complete trigger object, expected entry, effective stop, structural invalidation, authorized quantity, frozen max risk, targets, management plan, account display, and authorization timeline;
+- `Trade Setup` is a prominent, explicitly labeled first-class body field;
+- modal renders thesis, complete trigger object, expected entry, effective stop, structural invalidation, authorized quantity, frozen max risk, targets, management plan, account display, and authorization timeline;
 - technical/API provenance is available in a collapsed section;
 - modal closes with X, Escape, or backdrop click;
 - inspector is explicitly read-only and adds no mutation or broker-write path.
 
-Focused source-level UI test:
+Final acceptance evidence:
 
 ```text
 node --test tests/execution-v24-trade-specification-ui.test.mjs
-```
+6 tests / 6 pass / 0 fail
 
-Acceptance requires the focused test, production build, and operator visual confirmation using the still-active `V24E2E` authorization.
+npm run build
+PASS
+
+operator visual acceptance
+PASS
+```
 
 ---
 
