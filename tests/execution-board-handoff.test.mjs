@@ -27,6 +27,8 @@ function candidate(overrides = {}) {
     targets: [226.5, 227.2],
     managementPlan: "Manage against structure.",
     lifecycleState: "ARMED",
+    authorizedDssEvaluationId: "dss-003",
+    authorizedRiskEvaluationId: "risk-003",
     arm: {
       authorizedAt: "2026-09-02T14:00:00.000Z",
       candidateVersion: 3,
@@ -116,6 +118,14 @@ test("requires internal ARMED state before creating a handoff", () => {
   );
 });
 
+test("rejects inconsistent frozen ARM state", () => {
+  const altered = candidate({ authorizedRiskEvaluationId: "risk-other" });
+  assert.throws(
+    () => build({ candidate: altered }),
+    (error) => error.code === "EXECUTION_BOARD_HANDOFF_ARM_STATE_MISMATCH",
+  );
+});
+
 test("rejects mismatched immutable risk identity", () => {
   const risk = riskEvaluation({
     candidate: {
@@ -131,6 +141,7 @@ test("rejects mismatched immutable risk identity", () => {
 
 test("rejects ARM provenance that does not match the risk evaluation", () => {
   const altered = candidate({
+    authorizedRiskEvaluationId: "risk-other",
     arm: {
       ...candidate().arm,
       riskEvaluationId: "risk-other",
