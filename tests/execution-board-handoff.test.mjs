@@ -225,6 +225,25 @@ test("repository permits only one handoff per ARM risk authorization", () => {
   );
 });
 
+test("repository rolls back in-memory state when persistence fails", () => {
+  const repository = new ExecutionBoardHandoffRepository({
+    filePath: tempFile(),
+    clock: () => "2026-09-02T14:00:02.000Z",
+  });
+  repository.load();
+  repository.save = () => { throw new Error("simulated disk failure"); };
+
+  assert.throws(
+    () => repository.record(build()),
+    (error) => error.code === "EXECUTION_BOARD_HANDOFF_PERSISTENCE_ERROR",
+  );
+  assert.deepEqual(repository.snapshot(), {
+    schemaVersion: 1,
+    updatedAt: null,
+    handoffs: [],
+  });
+});
+
 test("repository detects corrupted persisted contracts on restart", () => {
   const filePath = tempFile();
   const corrupted = {
