@@ -3,7 +3,8 @@
 
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
-**Overall status:** **IN PROGRESS — INCREMENTS 1–4 IMPLEMENTED / ACCEPTED; V2.3 INSTALLATION / BROKER-FILL OWNERSHIP NOT YET ENABLED**
+**Approved addendum:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.1_APPROVED.md`  
+**Overall status:** **IN PROGRESS — INCREMENTS 1–4 IMPLEMENTED / ACCEPTED; DECISIONS 10–11 APPROVED; V2.3 INSTALLATION / BROKER-FILL OWNERSHIP NOT YET ENABLED**
 
 ---
 
@@ -170,7 +171,40 @@ No ACK was fabricated during the smoke test because `executionListeningAt` must 
 
 ---
 
-## 6. Current safety invariants enforced by code
+## 6. Approved post-baseline design freezes
+
+Authority:
+
+```text
+docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.1_APPROVED.md
+```
+
+### Decision 10 — V2.4-origin authorization immutability
+
+**APPROVED / FROZEN**
+
+- V2.4 authorization-bearing fields become immutable once installed into the Execution Board;
+- programmatic mutation fails closed with `V24_AUTHORIZATION_IMMUTABLE`;
+- manual/legacy V2.3 Edit remains unchanged;
+- a desired pre-fill change uses automated `REVISE → retire old authorization → fresh validation/risk evaluation → new authorization → RE-ARM`;
+- the workflow must not wait for a new 2-minute bar unless existing Phase 3 rules actually require new completed-bar data;
+- fresh Phase 4 market/account inputs remain mandatory;
+- engineering performance target: **median revise/re-arm latency < 1 second under normal Schwab conditions** without bypassing freshness or risk checks.
+
+### Decision 11 — Universal pre-fill discard / disarm
+
+**APPROVED / FROZEN**
+
+- every pre-fill `ARMED` / `LISTENING` trade can be discarded regardless of whether it originated from V2.4 or manual V2.3 arming;
+- discard immediately terminates future fill eligibility, releases symbol ownership, removes the trade from the active/armed board, and preserves audit history;
+- V2.4-origin discard must synchronize retirement so a delivered/persisted handoff cannot resurrect the discarded trade;
+- after the first owned fill the trade is LIVE and may not be discarded; normal execution management/exit semantics apply;
+- under the current read-only broker boundary, discard never cancels or modifies a working thinkorswim/Schwab order;
+- UI warning must state: **“ExecutionOS listener discarded. Broker orders, if any, are unchanged.”**
+
+---
+
+## 7. Current safety invariants
 
 > **One ARM risk authorization → at most one immutable handoff.**
 
@@ -186,47 +220,52 @@ No ACK was fabricated during the smoke test because `executionListeningAt` must 
 
 > **Execution coverage never bridges a monitor polling gap.**
 
+> **V2.4 authorization cannot be edited in place after installation.**
+
+> **Every pre-fill armed/listening trade remains user-discardable.**
+
 > **Transport retries are idempotent and persistence/provenance uncertainty fails closed.**
 
 ---
 
-## 7. Still pending before end-to-end V2.4 → V2.3 ownership
+## 8. Still pending before end-to-end V2.4 → V2.3 ownership
 
 The following remain unfinished:
 
-1. explicit V2.4-origin authorization-field immutability in the existing V2.3 Execution Board edit path;
-2. stable browser `executionBoardReceiverId`;
-3. pre-install broker conflict/coverage gate;
-4. same-symbol V2.3 ownership gate;
-5. exact authorized-account installation gate;
-6. idempotent local V2.3 installation/read-back verification;
-7. V2.4-origin candidate/provenance mapping into V2.3;
-8. `effectiveStop` execution-risk authority with legacy/manual `structuralStop` fallback;
-9. exact-account fill matching beginning at `executionListeningAt`;
-10. partial/fragmented entry accumulation and authorized-quantity variance handling;
-11. wrong-account same-symbol execution handling;
-12. delivered-but-local-state-missing reconciliation;
-13. explicit pre-fill cancel/retire/disarm synchronization;
-14. end-to-end synthetic dashboard acceptance;
-15. final regression, operator documentation, closeout, PR, and merge.
+1. code-level V2.4 authorization immutability guard and V2.4-specific Edit behavior;
+2. fast `REVISE → RE-ARM` implementation and latency instrumentation;
+3. universal discard/retirement persistence and anti-resurrection synchronization;
+4. stable browser `executionBoardReceiverId`;
+5. pre-install broker conflict/coverage gate;
+6. same-symbol V2.3 ownership gate;
+7. exact authorized-account installation gate;
+8. idempotent local V2.3 installation/read-back verification;
+9. V2.4-origin candidate/provenance mapping into V2.3;
+10. `effectiveStop` execution-risk authority with legacy/manual `structuralStop` fallback;
+11. exact-account fill matching beginning at `executionListeningAt`;
+12. partial/fragmented entry accumulation and authorized-quantity variance handling;
+13. wrong-account same-symbol execution handling;
+14. delivered-but-local-state-missing reconciliation;
+15. end-to-end synthetic dashboard acceptance;
+16. final regression, operator documentation, closeout, PR, and merge.
 
 Therefore the handoff is **not yet an operator workflow** and an internal V2.4 `ARMED`, PENDING, or CLAIMED record does not make V2.3 own a broker position.
 
 ---
 
-## 8. Next design freeze required before V2.3 installation work
+## 9. Next implementation focus
 
-Before implementing any browser/V2.3 installation path, the existing V2.3 **Edit** behavior must be reconciled with immutable V2.4 authorization. The current legacy edit workflow can modify plan/risk fields while a saved candidate remains listening, which is incompatible with the handoff's frozen Phase 3/Phase 4 authority.
+With Decisions 10 and 11 now frozen, the next implementation work can safely proceed into downstream admission/installation support. The immediate focus is the **pre-install broker conflict/admission gate plus the local ownership constraints needed before a handoff may become LISTENING**.
 
-This must be resolved explicitly before downstream installation code is enabled.
+The implementation must preserve the newly approved revise/re-arm and universal discard semantics rather than relying on the legacy Edit/discard behavior for V2.4-origin contracts.
 
 ---
 
-## 9. Documentation rule
+## 10. Documentation rule
 
 This file is the branch-local implementation-status record while handoff integration remains in progress.
 
-The approved design baseline remains immutable as an approval-time architecture record.
+The original design baseline remains immutable as an approval-time architecture record; later approved decisions live in the approved addendum.
 
 `USER-GUIDE.md` remains intentionally unchanged because there is still no accepted end-to-end operator workflow.
 
