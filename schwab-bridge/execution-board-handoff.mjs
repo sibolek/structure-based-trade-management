@@ -86,8 +86,10 @@ export function validateExecutionBoardHandoffContract(handoff) {
     }
   }
 
-  const authorizedAtMs = isoTimestamp(value.authorizedAt) ? Date.parse(isoTimestamp(value.authorizedAt)) : null;
-  const createdAtMs = isoTimestamp(value.createdAt) ? Date.parse(isoTimestamp(value.createdAt)) : null;
+  const authorizedAtIso = isoTimestamp(value.authorizedAt);
+  const createdAtIso = isoTimestamp(value.createdAt);
+  const authorizedAtMs = authorizedAtIso ? Date.parse(authorizedAtIso) : null;
+  const createdAtMs = createdAtIso ? Date.parse(createdAtIso) : null;
   if (authorizedAtMs !== null && createdAtMs !== null && createdAtMs < authorizedAtMs) {
     errors.push("createdAt cannot precede authorizedAt");
   }
@@ -116,6 +118,15 @@ export function buildExecutionBoardHandoff({
   const arm = candidateArm(candidate);
   if (!arm) {
     throw handoffError("candidate ARM provenance is required", "EXECUTION_BOARD_HANDOFF_ARM_PROVENANCE_REQUIRED");
+  }
+  if (Number(arm.candidateVersion) !== Number(candidate.contractVersion)) {
+    throw handoffError("ARM candidate version does not match candidate", "EXECUTION_BOARD_HANDOFF_ARM_STATE_MISMATCH");
+  }
+  if (
+    text(candidate.authorizedDssEvaluationId) !== text(arm.dssEvaluationId)
+    || text(candidate.authorizedRiskEvaluationId) !== text(arm.riskEvaluationId)
+  ) {
+    throw handoffError("candidate frozen ARM identity is inconsistent", "EXECUTION_BOARD_HANDOFF_ARM_STATE_MISMATCH");
   }
 
   if (!riskEvaluation || typeof riskEvaluation !== "object" || upper(riskEvaluation.status) !== "VALID") {
