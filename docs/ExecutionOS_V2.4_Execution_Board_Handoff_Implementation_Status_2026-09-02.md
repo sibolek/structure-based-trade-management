@@ -8,7 +8,7 @@
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.2_APPROVED.md` — Decision 12
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v0.3_APPROVED.md` — Decision 13
 
-**Overall status:** **IN PROGRESS — INCREMENTS 1–4 ACCEPTED; DECISIONS 10–13 APPROVED; EXECUTION-ACTIVITY / ADMISSION INCREMENT IMPLEMENTED AND AWAITING ACCEPTANCE; V2.3 INSTALLATION / BROKER-FILL OWNERSHIP NOT YET ENABLED**
+**Overall status:** **IN PROGRESS — INCREMENTS 1–4 ACCEPTED; DECISIONS 10–13 APPROVED; EXECUTION-ACTIVITY PROVENANCE + PURE PRE-INSTALL ADMISSION GATE ACCEPTED / LIVE-PROVEN; V2.3 INSTALLATION / BROKER-FILL OWNERSHIP NOT YET ENABLED**
 
 ---
 
@@ -52,7 +52,7 @@ PENDING → CLAIMED → DELIVERED
 
 Accepted behavior includes one sticky receiver claim, no claim stealing, claim not starting broker-fill ownership, exact-receiver delivery, frozen `executionListeningAt` only on ACK, terminal `DELIVERED` / `BLOCKED`, restart durability, persistence rollback, and clock-independent idempotent retries.
 
-Current handoff regression gate after Increment 4:
+Current regression evidence:
 
 ```text
 v24:handoff-test  34/34 PASS
@@ -64,15 +64,7 @@ v24:handoff-test  34/34 PASS
 
 Accepted behavior includes stable opaque `accountId`, exact identity on public account/position/execution records, explicit `ESTABLISHING / CONTIGUOUS / GAP` coverage provenance, new continuous interval after recovery, no bridging of monitor gaps, and read-only broker integration.
 
-Accepted evidence:
-
-```text
-v24:broker-provenance-test  13/13 PASS
-schwab:state-test            10/10 PASS
-production build            PASS
-```
-
-Live proof confirmed `status = ARMED`, `readOnly = true`, exact account IDs, separate masked display labels, `executionCoverage.status = CONTIGUOUS`, forward-moving `currentThrough`, and no gap during the proof.
+This area is now strengthened by accepted Decision 13 execution-activity provenance described below.
 
 ### Increment 4 — Server-side handoff transport API
 
@@ -87,17 +79,7 @@ POST /api/handoffs/:handoffId/ack
 POST /api/handoffs/:handoffId/block
 ```
 
-Accepted deterministic evidence:
-
-```text
-v24:handoff-api-test         7/7 PASS
-v24:handoff-test            34/34 PASS
-v24:broker-provenance-test  13/13 PASS
-schwab:state-test            10/10 PASS
-production build            PASS
-```
-
-Isolated runtime proof used temporary `/tmp` persistence and port `8798`. It confirmed PENDING discovery, exclusive CLAIMED ownership, `executionListeningAt: null` after claim, competing-receiver rejection, and `brokerWriteAuthority: false` without touching normal V2.4 state.
+Accepted behavior includes PENDING discovery, sticky exclusive CLAIMED ownership, `executionListeningAt: null` after claim, competing-receiver rejection, durable ACK/block state, idempotent retries, no browser handoff-creation route, and `brokerWriteAuthority: false`.
 
 ---
 
@@ -133,48 +115,100 @@ Schwab `executionTime` is authoritative for clean-interval and downstream fill-o
 
 ---
 
-## 4. Current unaccepted implementation — execution activity + pure admission evaluator
+## 4. Accepted execution-activity provenance + pure pre-install admission gate
 
-**Status:** **IMPLEMENTED ON BRANCH / AWAITING USER ACCEPTANCE TESTS**
+**Status:** **IMPLEMENTED / ACCEPTED — INCLUDING LIVE READ-ONLY SCHWAB PROOF**
 
-New runtime:
+This accepted work implements the Decision 13 safety provenance and the pure Decision 12/13 pre-install evaluator without yet wiring V2.4 handoffs into V2.3 installation.
+
+Runtime:
 
 - `schwab-bridge/broker-execution-activity.mjs`
 - `schwab-bridge/execution-board-handoff-admission.mjs`
 - upgraded `schwab-bridge/live-state-api.mjs`
 
-New tests:
+Tests:
 
 - `tests/broker-execution-activity.test.mjs`
 - `tests/execution-board-handoff-admission.test.mjs`
 
-Focused commands:
+Accepted behavior:
+
+- immutable validated account+symbol execution-activity watermark;
+- one latest authoritative `executionTime` per exact account+symbol pair;
+- bounded recent `executions` array remains independent and UI-only;
+- coverage and activity proof intervals remain exactly aligned;
+- activity proof resets on `GAP` and re-establishes only for the new continuous interval;
+- missing/invalid authoritative execution time creates a sticky fail-closed provenance fault for the running monitor process;
+- exact authorized account must exist;
+- broker state must be healthy/read-only/Schwab-backed;
+- coverage must begin no later than `authorizedAt` and extend through the caller-required proof point;
+- any same-symbol non-zero position on any observed account blocks with `EXISTING_POSITION_AT_HANDOFF`;
+- authorized-account same-symbol activity at/after `authorizedAt` blocks with `INTERVENING_BROKER_ACTIVITY`;
+- other-account same-symbol activity blocks with `WRONG_ACCOUNT_EXECUTION_OBSERVED`;
+- local V2.3 symbol ownership blocks with `EXECUTION_SYMBOL_OWNERSHIP_CONFLICT` only after broker cleanliness passes;
+- `executionTime`, not `detectedAt`, controls interval eligibility;
+- final-install callers can demand proof through a later `requiredThrough` timestamp;
+- no V2.3 candidate installation, ACK, fill matching, or broker write is enabled by this accepted gate alone.
+
+### Deterministic acceptance evidence
 
 ```text
-npm run v24:broker-provenance-test
-npm run v24:handoff-admission-test
+v24:broker-provenance-test  24/24 PASS
+v24:handoff-admission-test  16/16 PASS
+v24:handoff-test            34/34 PASS
+v24:handoff-api-test         7/7 PASS
+schwab:state-test            10/10 PASS
+production build            PASS
 ```
 
-Implemented behavior awaiting acceptance includes:
+### Live read-only Schwab proof
 
-- immutable validated account+symbol activity watermark;
-- one latest authoritative execution timestamp per exact account+symbol pair;
-- recent UI execution list remains capped independently;
-- coverage transitions automatically align/reset activity proof;
-- activity proof is discarded on `GAP` and re-established empty on a new recovered interval;
-- malformed/missing Schwab `executionTime` creates a sticky provenance fault for the current monitor process so coverage cannot silently recover after the bad execution has already been marked seen;
-- pure admission ordering for exact account, broker availability, complete aligned coverage/activity proof, symbol-global current positions, symbol-global intervening executions, and existing local symbol ownership;
-- wrong-account execution evidence maps to `WRONG_ACCOUNT_EXECUTION_OBSERVED`;
-- authorized-account activity maps to `INTERVENING_BROKER_ACTIVITY`;
-- bounded `brokerState.executions` is deliberately ignored by the safety evaluator;
-- final-install callers can demand proof through a later `requiredThrough` timestamp;
-- no browser installation, ACK, fill matching, or broker write is enabled by this increment.
+Live state confirmed:
 
-This section is **not acceptance evidence**. The new focused tests and regressions must pass before this increment is marked accepted.
+```text
+status    = ARMED
+readOnly  = true
+source    = SCHWAB
+lastError = null
+
+executionCoverage.status = CONTIGUOUS
+executionActivity.source = SCHWAB_ORDER_API_POLL
+```
+
+The proof intervals were exactly aligned:
+
+```text
+executionCoverage.coverageStartedAt = 2026-09-02T17:34:32.363Z
+executionActivity.coverageStartedAt = 2026-09-02T17:34:32.363Z
+
+executionCoverage.currentThrough = 2026-09-02T17:35:07.829Z
+executionActivity.currentThrough = 2026-09-02T17:35:07.829Z
+```
+
+`executionActivity.entries` was empty, correctly proving that no new Schwab execution had occurred during that continuous observation interval. Existing live positions included SAGT, NVDA, and FGI; therefore a contemporaneous NVDA handoff would correctly fail the symbol-global position gate rather than adopt the existing position.
 
 ---
 
-## 5. Current safety invariants
+## 5. Implementation-sequence note
+
+The approved baseline implementation sequence remains authoritative:
+
+```text
+5. V2.3 compatibility helpers / provenance model
+6. pre-install safety gates
+7. idempotent local installation + ACK
+8. exact-account fill matching
+...
+```
+
+The pure pre-install gate corresponding to sequence item 6 has now been implemented and accepted **ahead of downstream wiring** because its required broker provenance was isolated and testable. This does **not** renumber the sequence and does **not** mean item 5 has been completed.
+
+The next implementation focus returns to **item 5 — V2.3 compatibility helpers / provenance model**, followed by wiring the already-accepted admission evaluator into item 7 installation.
+
+---
+
+## 6. Current safety invariants
 
 > **One ARM risk authorization → at most one immutable handoff.**
 
@@ -192,6 +226,8 @@ This section is **not acceptance evidence**. The new focused tests and regressio
 
 > **The bounded recent-execution UI list is never treated as execution-history completeness proof.**
 
+> **Schwab `executionTime` is authoritative for broker event timing.**
+
 > **V2.4 authorization cannot be edited in place after installation.**
 
 > **Every pre-fill armed/listening trade remains user-discardable.**
@@ -200,31 +236,29 @@ This section is **not acceptance evidence**. The new focused tests and regressio
 
 ---
 
-## 6. Still pending before end-to-end V2.4 → V2.3 ownership
+## 7. Still pending before end-to-end V2.4 → V2.3 ownership
 
-The following remain unfinished or unaccepted:
-
-1. acceptance of the new execution-activity/admission increment;
-2. code-level V2.4 authorization immutability guard and V2.4-specific Edit behavior;
-3. fast `REVISE → RE-ARM` implementation and latency instrumentation;
-4. universal discard/retirement persistence and anti-resurrection synchronization;
-5. stable browser `executionBoardReceiverId`;
-6. V2.3 adapter that produces the exact nonterminal symbol-ownership set used by the accepted admission evaluator;
-7. idempotent local V2.3 installation/read-back verification;
-8. final pre-install revalidation and durable `executionListeningAt` establishment;
-9. V2.4-origin candidate/provenance mapping into V2.3;
-10. `effectiveStop` execution-risk authority with legacy/manual `structuralStop` fallback;
-11. exact-account fill matching beginning at `executionListeningAt` using authoritative `executionTime`;
+1. V2.3 compatibility helpers / provenance model;
+2. canonical `executionStop(trade)` using V2.4 `effectiveStop` with legacy/manual `structuralStop` fallback;
+3. code-level `V24_AUTHORIZATION_IMMUTABLE` enforcement and V2.4-specific Edit behavior;
+4. stable browser `executionBoardReceiverId`;
+5. V2.3 adapter producing the exact nonterminal symbol-ownership set consumed by the accepted admission evaluator;
+6. idempotent local V2.3 installation/read-back verification;
+7. final install-time broker revalidation and durable `executionListeningAt` establishment;
+8. durable ACK after exact local installation;
+9. universal discard/retirement persistence and anti-resurrection synchronization;
+10. fast `REVISE → RE-ARM` implementation and latency instrumentation;
+11. exact-account fill matching from `executionListeningAt` using authoritative `executionTime`;
 12. partial/fragmented entry accumulation and authorized-quantity variance handling;
 13. delivered-but-local-state-missing reconciliation;
 14. end-to-end synthetic dashboard acceptance;
 15. final regression, operator documentation, closeout, PR, and merge.
 
-Therefore the handoff remains **not yet an operator workflow** and an internal V2.4 `ARMED`, PENDING, CLAIMED, or pure admission result does not make V2.3 own a broker position.
+Therefore the handoff remains **not yet an operator workflow**. Internal V2.4 `ARMED`, handoff PENDING/CLAIMED, or an `ADMITTED` pure-gate result does not itself make V2.3 own a broker fill.
 
 ---
 
-## 7. Documentation rule
+## 8. Documentation rule
 
 This file is the branch-local implementation-status record while handoff integration remains in progress.
 
