@@ -9,8 +9,12 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
+import {
+  readV23ExecutionProjection,
+  subscribeV23ExecutionProjection,
+  transactV23ExecutionProjection,
+} from "../execution/execution-v23-store-authority.js";
 
-const STORE_KEY = "execution-v23-store";
 const FUTURES = new Set(["MES", "MNQ", "MCL", "ES", "NQ", "CL"]);
 const CHAIN = ["READ", "PLAN", "RISK", "ARM", "TRIGGER", "HOLD", "UPDATE", "EXIT", "REVIEW"];
 
@@ -94,10 +98,10 @@ function makeCandidate(plan, risk, existing = null) {
 
 function normalizeStore(raw) {
   const clean = raw && typeof raw === "object" ? raw : {};
-  const candidates = Array.isArray(clean.candidates) ? clean.candidates : [];
-  const liveTrades = Array.isArray(clean.liveTrades) ? clean.liveTrades : [];
-  const history = Array.isArray(clean.history) ? clean.history : [];
-  let draft = clean.draft && typeof clean.draft === "object" ? clean.draft : freshDraft();
+  const candidates = Array.isArray(clean.candidates) ? structuredClone(clean.candidates) : [];
+  const liveTrades = Array.isArray(clean.liveTrades) ? structuredClone(clean.liveTrades) : [];
+  const history = Array.isArray(clean.history) ? structuredClone(clean.history) : [];
+  let draft = clean.draft && typeof clean.draft === "object" ? structuredClone(clean.draft) : freshDraft();
 
   // Migration for the short-lived V2.3 behavior that removed a candidate while editing.
   // Test/draft state is restored as a continuously editable candidate from load-forward.
@@ -133,12 +137,11 @@ function normalizeStore(raw) {
 
 function initialStore() {
   try {
-    const saved = localStorage.getItem(STORE_KEY);
-    if (saved) return normalizeStore(JSON.parse(saved));
+    return readV23ExecutionProjection({ project: normalizeStore });
   } catch {
-    // Fall through to clean store.
+    // Render a non-authoritative clean projection only; repository writes still fail closed.
+    return normalizeStore({});
   }
-  return { draft: freshDraft(), candidates: [], liveTrades: [], history: [], view: "TRADE", notice: "" };
 }
 
 function sourceFor(symbol) {
@@ -453,11 +456,23 @@ function HistoryView({ history, onBack }) {
 }
 
 export default function ExecutionV23({ broker }) {
-  const [store, setStore] = useState(initialStore);
+  const [store, setStoreProjection] = useState(initialStore);
   const executions = broker?.state?.executions || [];
   const positions = broker?.state?.positions || [];
 
-  useEffect(() => { localStorage.setItem(STORE_KEY, JSON.stringify(store)); }, [store]);
+  useEffect(() => subscribeV23ExecutionProjection({
+    project: normalizeStore,
+    listener: setStoreProjection,
+  }), []);
+
+  const setStore = (updater) => {
+    const committed = transactV23ExecutionProjection({
+      project: normalizeStore,
+      updater,
+    });
+    setStoreProjection(committed);
+    return committed;
+  };
 
   const setDraft = (updater) => setStore((current) => ({ ...current, draft: typeof updater === "function" ? updater(current.draft) : updater }));
 
@@ -513,6 +528,7 @@ export default function ExecutionV23({ broker }) {
     if (!store.candidates.length || !executions.length) return;
     const matches = [];
     for (const candidate of store.candidates) {
+      if (candidate?.origin === "V24_HANDOFF") continue;
       const armedMs = Date.parse(candidate.armedAt);
       const expectedInstruction = openingInstruction(candidate.originalPlan.direction);
       const opening = executions
@@ -554,6 +570,7 @@ export default function ExecutionV23({ broker }) {
     if (!store.liveTrades.length) return;
     let changed = false;
     const nextTrades = store.liveTrades.map((trade) => {
+      if (trade?.origin === "V24_HANDOFF") return trade;
       if (trade.phase !== "LIVE" || !trade.broker.entryDetectedAt) return trade;
       const position = positions.find((item) => item.symbol === trade.originalPlan.symbol);
       let next = trade;
