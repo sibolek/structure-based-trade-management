@@ -71,6 +71,9 @@ export function validateExecutionBoardHandoffContract(handoff) {
   if (positiveNumber(value.effectiveStop) === null) errors.push("effectiveStop must be positive");
   if (positiveNumber(value.currentExpectedEntry) === null) errors.push("currentExpectedEntry must be positive");
   if (positiveNumber(value.selectedQuantity) === null) errors.push("selectedQuantity must be positive");
+  if (value.authorizedMaxDollarRisk !== undefined && value.authorizedMaxDollarRisk !== null && positiveNumber(value.authorizedMaxDollarRisk) === null) {
+    errors.push("authorizedMaxDollarRisk must be positive when present");
+  }
   if (!text(value.authorizedExecutionAccountId)) errors.push("authorizedExecutionAccountId is required");
   if (!text(value.dssEvaluationId)) errors.push("dssEvaluationId is required");
   if (!text(value.riskEvaluationId)) errors.push("riskEvaluationId is required");
@@ -78,12 +81,8 @@ export function validateExecutionBoardHandoffContract(handoff) {
   const expectedEntry = positiveNumber(value.currentExpectedEntry);
   const effectiveStop = positiveNumber(value.effectiveStop);
   if (expectedEntry !== null && effectiveStop !== null) {
-    if (upper(value.direction) === "LONG" && !(expectedEntry > effectiveStop)) {
-      errors.push("LONG currentExpectedEntry must be above effectiveStop");
-    }
-    if (upper(value.direction) === "SHORT" && !(expectedEntry < effectiveStop)) {
-      errors.push("SHORT currentExpectedEntry must be below effectiveStop");
-    }
+    if (upper(value.direction) === "LONG" && !(expectedEntry > effectiveStop)) errors.push("LONG currentExpectedEntry must be above effectiveStop");
+    if (upper(value.direction) === "SHORT" && !(expectedEntry < effectiveStop)) errors.push("SHORT currentExpectedEntry must be below effectiveStop");
   }
 
   const authorizedAtIso = isoTimestamp(value.authorizedAt);
@@ -97,35 +96,16 @@ export function validateExecutionBoardHandoffContract(handoff) {
   return { valid: errors.length === 0, errors: Object.freeze(errors) };
 }
 
-export function buildExecutionBoardHandoff({
-  handoffId,
-  createdAt = Date.now(),
-  candidate,
-  riskEvaluation,
-} = {}) {
+export function buildExecutionBoardHandoff({ handoffId, createdAt = Date.now(), candidate, riskEvaluation } = {}) {
   const normalizedHandoffId = text(handoffId);
-  if (!normalizedHandoffId) {
-    throw handoffError("handoffId is required", "EXECUTION_BOARD_HANDOFF_ID_REQUIRED");
-  }
-
-  if (!candidate || typeof candidate !== "object") {
-    throw handoffError("candidate is required", "EXECUTION_BOARD_HANDOFF_CANDIDATE_REQUIRED");
-  }
-  if (upper(candidate.lifecycleState) !== "ARMED") {
-    throw handoffError("candidate must be internally ARMED before handoff creation", "EXECUTION_BOARD_HANDOFF_CANDIDATE_NOT_ARMED");
-  }
+  if (!normalizedHandoffId) throw handoffError("handoffId is required", "EXECUTION_BOARD_HANDOFF_ID_REQUIRED");
+  if (!candidate || typeof candidate !== "object") throw handoffError("candidate is required", "EXECUTION_BOARD_HANDOFF_CANDIDATE_REQUIRED");
+  if (upper(candidate.lifecycleState) !== "ARMED") throw handoffError("candidate must be internally ARMED before handoff creation", "EXECUTION_BOARD_HANDOFF_CANDIDATE_NOT_ARMED");
 
   const arm = candidateArm(candidate);
-  if (!arm) {
-    throw handoffError("candidate ARM provenance is required", "EXECUTION_BOARD_HANDOFF_ARM_PROVENANCE_REQUIRED");
-  }
-  if (Number(arm.candidateVersion) !== Number(candidate.contractVersion)) {
-    throw handoffError("ARM candidate version does not match candidate", "EXECUTION_BOARD_HANDOFF_ARM_STATE_MISMATCH");
-  }
-  if (
-    text(candidate.authorizedDssEvaluationId) !== text(arm.dssEvaluationId)
-    || text(candidate.authorizedRiskEvaluationId) !== text(arm.riskEvaluationId)
-  ) {
+  if (!arm) throw handoffError("candidate ARM provenance is required", "EXECUTION_BOARD_HANDOFF_ARM_PROVENANCE_REQUIRED");
+  if (Number(arm.candidateVersion) !== Number(candidate.contractVersion)) throw handoffError("ARM candidate version does not match candidate", "EXECUTION_BOARD_HANDOFF_ARM_STATE_MISMATCH");
+  if (text(candidate.authorizedDssEvaluationId) !== text(arm.dssEvaluationId) || text(candidate.authorizedRiskEvaluationId) !== text(arm.riskEvaluationId)) {
     throw handoffError("candidate frozen ARM identity is inconsistent", "EXECUTION_BOARD_HANDOFF_ARM_STATE_MISMATCH");
   }
 
@@ -140,14 +120,9 @@ export function buildExecutionBoardHandoff({
     && upper(riskEvaluation.candidate?.symbol) === upper(candidate.symbol)
     && upper(riskEvaluation.candidate?.direction) === upper(candidate.direction)
   );
-  if (!identityMatches) {
-    throw handoffError("risk evaluation candidate identity does not match ARMED candidate", "EXECUTION_BOARD_HANDOFF_RISK_IDENTITY_MISMATCH");
-  }
+  if (!identityMatches) throw handoffError("risk evaluation candidate identity does not match ARMED candidate", "EXECUTION_BOARD_HANDOFF_RISK_IDENTITY_MISMATCH");
 
-  if (
-    text(arm.dssEvaluationId) !== text(riskEvaluation.dss?.dssEvaluationId)
-    || text(arm.riskEvaluationId) !== text(riskEvaluation.riskEvaluationId)
-  ) {
+  if (text(arm.dssEvaluationId) !== text(riskEvaluation.dss?.dssEvaluationId) || text(arm.riskEvaluationId) !== text(riskEvaluation.riskEvaluationId)) {
     throw handoffError("ARM provenance does not match risk evaluation", "EXECUTION_BOARD_HANDOFF_ARM_RISK_MISMATCH");
   }
 
@@ -160,22 +135,17 @@ export function buildExecutionBoardHandoff({
   const structuralInvalidation = positiveNumber(riskEvaluation.dss?.structuralInvalidation);
   const effectiveStop = positiveNumber(riskEvaluation.dss?.effectiveStop);
   const currentExpectedEntry = positiveNumber(riskEvaluation.entry?.currentExpectedEntry);
+  const authorizedMaxDollarRisk = positiveNumber(riskEvaluation.account?.maxDollarRisk);
   const authorizedExecutionAccountId = text(riskEvaluation.account?.accountId);
   const authorizedAt = isoTimestamp(arm.authorizedAt);
   const normalizedCreatedAt = isoTimestamp(createdAt);
 
-  if (!authorizedAt) {
-    throw handoffError("ARM authorizedAt is invalid", "EXECUTION_BOARD_HANDOFF_AUTHORIZED_AT_INVALID");
+  if (!authorizedAt) throw handoffError("ARM authorizedAt is invalid", "EXECUTION_BOARD_HANDOFF_AUTHORIZED_AT_INVALID");
+  if (!normalizedCreatedAt) throw handoffError("handoff createdAt is invalid", "EXECUTION_BOARD_HANDOFF_CREATED_AT_INVALID");
+  if (structuralInvalidation === null || effectiveStop === null || currentExpectedEntry === null || authorizedMaxDollarRisk === null) {
+    throw handoffError("risk evaluation stop/entry/budget provenance is incomplete", "EXECUTION_BOARD_HANDOFF_RISK_PROVENANCE_INCOMPLETE");
   }
-  if (!normalizedCreatedAt) {
-    throw handoffError("handoff createdAt is invalid", "EXECUTION_BOARD_HANDOFF_CREATED_AT_INVALID");
-  }
-  if (structuralInvalidation === null || effectiveStop === null || currentExpectedEntry === null) {
-    throw handoffError("risk evaluation stop/entry provenance is incomplete", "EXECUTION_BOARD_HANDOFF_RISK_PROVENANCE_INCOMPLETE");
-  }
-  if (!authorizedExecutionAccountId) {
-    throw handoffError("authorized execution account is missing", "EXECUTION_BOARD_HANDOFF_ACCOUNT_REQUIRED");
-  }
+  if (!authorizedExecutionAccountId) throw handoffError("authorized execution account is missing", "EXECUTION_BOARD_HANDOFF_ACCOUNT_REQUIRED");
 
   const handoff = {
     schemaVersion: EXECUTION_BOARD_HANDOFF_SCHEMA_VERSION,
@@ -198,6 +168,7 @@ export function buildExecutionBoardHandoff({
     effectiveStop,
     currentExpectedEntry,
     selectedQuantity,
+    authorizedMaxDollarRisk,
     authorizedExecutionAccountId,
     dssEvaluationId: text(arm.dssEvaluationId),
     riskEvaluationId: text(arm.riskEvaluationId),
@@ -205,11 +176,7 @@ export function buildExecutionBoardHandoff({
 
   const contract = validateExecutionBoardHandoffContract(handoff);
   if (!contract.valid) {
-    throw handoffError(
-      `constructed Execution Board handoff is invalid: ${contract.errors.join("; ")}`,
-      "INVALID_EXECUTION_BOARD_HANDOFF",
-    );
+    throw handoffError(`constructed Execution Board handoff is invalid: ${contract.errors.join("; ")}`, "INVALID_EXECUTION_BOARD_HANDOFF");
   }
-
   return immutable(handoff);
 }
