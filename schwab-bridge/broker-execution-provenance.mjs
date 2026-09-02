@@ -16,6 +16,13 @@ function upper(value) {
   return text(value).toUpperCase();
 }
 
+function finiteNumber(value) {
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function isoTimestamp(value) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
@@ -87,8 +94,8 @@ export function validateBrokerExecutionCoverage(coverage) {
   if (baselineMs !== null && currentMs !== null && currentMs < baselineMs) {
     errors.push("currentThrough cannot precede baselineCompletedAt");
   }
-  if (currentMs !== null && gapMs !== null && gapMs < currentMs) {
-    errors.push("lastGapAt cannot precede currentThrough");
+  if (status === "GAP" && currentMs !== null && gapMs !== null && gapMs < currentMs) {
+    errors.push("lastGapAt cannot precede currentThrough while coverage is GAP");
   }
 
   return { valid: errors.length === 0, errors: Object.freeze(errors) };
@@ -218,8 +225,8 @@ export function publicBrokerAccount(snapshot) {
   return immutable({
     accountId,
     account: text(snapshot?.accountDisplay ?? snapshot?.account) || null,
-    equity: Number.isFinite(Number(snapshot?.equity)) ? Number(snapshot.equity) : null,
-    maxRisk: Number.isFinite(Number(snapshot?.maxRisk)) ? Number(snapshot.maxRisk) : null,
+    equity: finiteNumber(snapshot?.equity),
+    maxRisk: finiteNumber(snapshot?.maxRisk),
   });
 }
 
@@ -233,8 +240,8 @@ export function publicBrokerPosition({ accountId, accountDisplay, state } = {}) 
     account: text(accountDisplay) || null,
     symbol: upper(state.symbol) || "?",
     side: upper(state.side) || null,
-    quantity: Number(state.quantity || 0),
-    averagePrice: Number.isFinite(Number(state.averagePrice)) ? Number(state.averagePrice) : null,
+    quantity: finiteNumber(state.quantity) ?? 0,
+    averagePrice: finiteNumber(state.averagePrice),
   });
 }
 
@@ -259,15 +266,15 @@ export function publicBrokerExecution({ fill, detectedAt, result } = {}) {
     symbol: upper(fill?.symbol) || "?",
     instruction: upper(fill?.instruction) || "?",
     positionEffect: upper(fill?.positionEffect) || "?",
-    quantity: Number(fill?.quantity || 0),
-    price: Number(fill?.price || 0),
+    quantity: finiteNumber(fill?.quantity) ?? 0,
+    price: finiteNumber(fill?.price),
     executionTime,
     observedDelayMs: executionMs === null ? null : detectedMs - executionMs,
     stateEvent: upper(result.event) || null,
     previousSide: upper(result.previousSide) || null,
-    previousQuantity: Number(result.previousQuantity || 0),
+    previousQuantity: finiteNumber(result.previousQuantity) ?? 0,
     nextSide: upper(result.nextSide) || null,
-    nextQuantity: Number(result.nextQuantity || 0),
-    averagePrice: Number.isFinite(Number(result.nextAveragePrice)) ? Number(result.nextAveragePrice) : null,
+    nextQuantity: finiteNumber(result.nextQuantity) ?? 0,
+    averagePrice: finiteNumber(result.nextAveragePrice),
   });
 }
