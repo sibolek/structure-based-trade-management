@@ -20,6 +20,7 @@
     "v24:v23-compat-test": "node --test tests/execution-v23-compat.test.mjs",
     "v24:v23-install-test": "node --test tests/execution-board-receiver.test.mjs tests/execution-v24-local-installation.test.mjs",
     "v24:fill-ownership-test": "node --test tests/broker-execution-ownership-journal.test.mjs tests/execution-v24-initial-fill-matcher.test.mjs",
+    "v24:retirement-test": "node --test tests/execution-v24-retirement.test.mjs",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
