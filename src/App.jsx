@@ -2,6 +2,7 @@ import { useState } from "react";
 import BrokerStatusPanel from "./components/BrokerStatusPanel.jsx";
 import PreTradeWaitingBoard from "./components/PreTradeWaitingBoard.jsx";
 import V24AuthorizedTradesBoard from "./components/V24AuthorizedTradesBoard.jsx";
+import V24LiveExecutionBoard from "./components/V24LiveExecutionBoard.jsx";
 import WorkspaceNav from "./components/WorkspaceNav.jsx";
 import useBrokerState from "./hooks/useBrokerState.js";
 import usePretradeState from "./hooks/usePretradeState.js";
@@ -30,6 +31,7 @@ export default function App() {
       <div className={workspace === "EXECUTION" ? "block" : "hidden"}>
         <div className="mx-auto max-w-7xl px-3 pt-4 md:px-5">
           <V24AuthorizedTradesBoard broker={broker} v24Router={v24Router} />
+          <V24LiveExecutionBoard />
         </div>
         <ExecutionV23 broker={broker} v24Router={v24Router} />
       </div>
