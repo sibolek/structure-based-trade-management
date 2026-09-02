@@ -1,5 +1,9 @@
 import { validateBrokerExecutionOwnershipJournal } from "../../schwab-bridge/broker-execution-ownership-journal.mjs";
 import {
+  readExecutionBoardStore,
+  transactExecutionBoardStore,
+} from "./execution-board-store-repository.js";
+import {
   EXECUTION_V23_STORE_KEY,
   bindAndPersistV24ExecutionListeningAt,
   buildV23CandidateFromListeningInstallation,
@@ -47,58 +51,14 @@ function retirementError(message, code) {
   return error;
 }
 
-function requireStorage(storage) {
-  if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") {
-    throw retirementError("durable local execution storage is unavailable", "LOCAL_EXECUTION_PERSISTENCE_FAILED");
-  }
-  return storage;
-}
-
-function parseStore(storage, storeKey) {
-  const durable = requireStorage(storage);
-  try {
-    const raw = durable.getItem(storeKey);
-    if (!raw) return { candidates: [], liveTrades: [], history: [], v24Installations: [], v24Retirements: [] };
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("store root must be an object");
-    return {
-      ...parsed,
-      candidates: Array.isArray(parsed.candidates) ? parsed.candidates : [],
-      liveTrades: Array.isArray(parsed.liveTrades) ? parsed.liveTrades : [],
-      history: Array.isArray(parsed.history) ? parsed.history : [],
-      v24Installations: Array.isArray(parsed.v24Installations) ? parsed.v24Installations : [],
-      v24Retirements: Array.isArray(parsed.v24Retirements) ? parsed.v24Retirements : [],
-    };
-  } catch (error) {
-    throw retirementError(`local execution store could not be read: ${error.message}`, "LOCAL_EXECUTION_PERSISTENCE_FAILED");
-  }
-}
-
-function writeStore(storage, storeKey, nextStore) {
-  const durable = requireStorage(storage);
-  const prior = durable.getItem(storeKey);
-  const serialized = JSON.stringify(nextStore);
-  try {
-    durable.setItem(storeKey, serialized);
-    if (durable.getItem(storeKey) !== serialized) throw new Error("exact store readback mismatch");
-    return parseStore(durable, storeKey);
-  } catch (error) {
-    try {
-      if (prior !== null) durable.setItem(storeKey, prior);
-    } catch {
-      // Best-effort rollback only. The caller still fails closed.
-    }
-    if (error?.code === "LOCAL_EXECUTION_PERSISTENCE_FAILED") throw error;
-    throw retirementError(`local execution retirement could not be persisted exactly: ${error.message}`, "LOCAL_EXECUTION_PERSISTENCE_FAILED");
-  }
-}
-
 function installationById(store, handoffId) {
-  return store.v24Installations.find((item) => text(item?.handoffId) === text(handoffId)) || null;
+  return (Array.isArray(store?.v24Installations) ? store.v24Installations : [])
+    .find((item) => text(item?.handoffId) === text(handoffId)) || null;
 }
 
 function retirementById(store, handoffId) {
-  return store.v24Retirements.find((item) => text(item?.handoffId) === text(handoffId)) || null;
+  return (Array.isArray(store?.v24Retirements) ? store.v24Retirements : [])
+    .find((item) => text(item?.handoffId) === text(handoffId)) || null;
 }
 
 function replaceRetirement(store, record) {
@@ -170,7 +130,7 @@ export function readV24Retirement({
   storeKey = EXECUTION_V23_STORE_KEY,
   handoffId,
 } = {}) {
-  const found = retirementById(parseStore(storage, storeKey), handoffId);
+  const found = retirementById(readExecutionBoardStore({ storage, storeKey }), handoffId);
   return found ? immutable(found) : null;
 }
 
@@ -182,43 +142,55 @@ export function requestV24Retirement({
   requestedAt = Date.now(),
   reason = "USER_DISCARD",
 } = {}) {
-  const store = parseStore(storage, storeKey);
-  const existing = retirementById(store, handoffId);
-  if (existing) return immutable(existing);
+  const current = readExecutionBoardStore({ storage, storeKey });
+  const already = retirementById(current, handoffId);
+  if (already) return immutable(already);
 
-  const installation = installationById(store, handoffId);
-  const receiver = requireMatchingInstallation(installation, receiverId);
   const requested = isoTimestamp(requestedAt);
   if (!requested) throw retirementError("discardRequestedAt is invalid", "V24_RETIREMENT_CUTOFF_INVALID");
 
-  const listeningAt = listeningAtFor(installation);
-  const preparedOnly = upper(installation.status) === "PREPARED";
-  if (!preparedOnly && !listeningAt) {
-    throw retirementError("LISTENING installation has no executionListeningAt", "V24_EXECUTION_LISTENING_AT_INVALID");
-  }
-  if (listeningAt && Date.parse(requested) < Date.parse(listeningAt)) {
-    throw retirementError("discard cutoff cannot precede executionListeningAt", "V24_RETIREMENT_CUTOFF_INVALID");
-  }
+  let record = null;
+  const committed = transactExecutionBoardStore({
+    storage,
+    storeKey,
+    mutate: (store) => {
+      const existing = retirementById(store, handoffId);
+      if (existing) {
+        record = structuredClone(existing);
+        return store;
+      }
 
-  const record = {
-    schemaVersion: V24_RETIREMENT_SCHEMA_VERSION,
-    retirementId: `retirement:${text(handoffId)}`,
-    handoffId: text(handoffId),
-    receiverId: receiver,
-    symbol: upper(installation.symbol ?? installation.compatibility?.v24?.symbol),
-    executionListeningAt: listeningAt,
-    requestedAt: requested,
-    cutoffAt: requested,
-    reason: text(reason) || "USER_DISCARD",
-    status: preparedOnly ? "RETIRED" : "REQUESTED",
-    finalizedAt: preparedOnly ? requested : null,
-    priorFill: null,
-  };
+      const installation = installationById(store, handoffId);
+      const receiver = requireMatchingInstallation(installation, receiverId);
+      const listeningAt = listeningAtFor(installation);
+      const preparedOnly = upper(installation.status) === "PREPARED";
+      if (!preparedOnly && !listeningAt) {
+        throw retirementError("LISTENING installation has no executionListeningAt", "V24_EXECUTION_LISTENING_AT_INVALID");
+      }
+      if (listeningAt && Date.parse(requested) < Date.parse(listeningAt)) {
+        throw retirementError("discard cutoff cannot precede executionListeningAt", "V24_RETIREMENT_CUTOFF_INVALID");
+      }
 
-  return verifyRetirement(
-    writeStore(storage, storeKey, replaceRetirement(store, record)),
-    record,
-  );
+      record = {
+        schemaVersion: V24_RETIREMENT_SCHEMA_VERSION,
+        retirementId: `retirement:${text(handoffId)}`,
+        handoffId: text(handoffId),
+        receiverId: receiver,
+        symbol: upper(installation.symbol ?? installation.compatibility?.v24?.symbol),
+        executionListeningAt: listeningAt,
+        requestedAt: requested,
+        cutoffAt: requested,
+        reason: text(reason) || "USER_DISCARD",
+        status: preparedOnly ? "RETIRED" : "REQUESTED",
+        finalizedAt: preparedOnly ? requested : null,
+        priorFill: null,
+      };
+
+      return replaceRetirement(store, record);
+    },
+  });
+
+  return verifyRetirement(committed, record);
 }
 
 export function resolveV24Retirement({
@@ -228,77 +200,87 @@ export function resolveV24Retirement({
   brokerState,
   finalizedAt = Date.now(),
 } = {}) {
-  const store = parseStore(storage, storeKey);
-  const retirement = retirementById(store, handoffId);
-  if (!retirement) throw retirementError("retirement request was not found", "V24_RETIREMENT_NOT_FOUND");
-  if (terminal(retirement.status)) return immutable(retirement);
-  if (upper(retirement.status) !== "REQUESTED") {
-    throw retirementError("retirement is not resolvable", "INVALID_V24_RETIREMENT_STATE");
-  }
-
-  const installation = installationById(store, handoffId);
-  if (!installation || upper(installation.status) !== "LISTENING") {
-    throw retirementError("LISTENING installation is required to resolve discard", "V24_LISTENING_INSTALLATION_REQUIRED");
-  }
-
   const finalized = isoTimestamp(finalizedAt);
   if (!finalized) throw retirementError("retirement finalizedAt is invalid", "V24_RETIREMENT_FINALIZED_AT_INVALID");
 
-  let nextStatus = "RECONCILIATION_REQUIRED";
-  let priorFill = null;
+  const current = readExecutionBoardStore({ storage, storeKey });
+  const already = retirementById(current, handoffId);
+  if (!already) throw retirementError("retirement request was not found", "V24_RETIREMENT_NOT_FOUND");
+  if (terminal(already.status)) return immutable(already);
 
-  const coverage = brokerState?.executionCoverage;
-  const journal = brokerState?.executionOwnershipJournal;
-  const journalContract = validateBrokerExecutionOwnershipJournal(journal);
-  const listeningAt = retirement.executionListeningAt;
-  const cutoffAt = retirement.cutoffAt;
+  let resolved = null;
+  const committed = transactExecutionBoardStore({
+    storage,
+    storeKey,
+    mutate: (store) => {
+      const retirement = retirementById(store, handoffId);
+      if (!retirement) throw retirementError("retirement request was not found", "V24_RETIREMENT_NOT_FOUND");
+      if (terminal(retirement.status)) {
+        resolved = structuredClone(retirement);
+        return store;
+      }
+      if (upper(retirement.status) !== "REQUESTED") {
+        throw retirementError("retirement is not resolvable", "INVALID_V24_RETIREMENT_STATE");
+      }
 
-  const accountId = text(installation.compatibility?.v24?.authorizedExecutionAccountId);
-  const accountPresent = (Array.isArray(brokerState?.accounts) ? brokerState.accounts : [])
-    .some((account) => text(account?.accountId) === accountId);
+      const installation = installationById(store, handoffId);
+      if (!installation || upper(installation.status) !== "LISTENING") {
+        throw retirementError("LISTENING installation is required to resolve discard", "V24_LISTENING_INSTALLATION_REQUIRED");
+      }
 
-  const complete = Boolean(
-    brokerUsable(brokerState)
-    && accountId
-    && accountPresent
-    && upper(coverage?.status) === "CONTIGUOUS"
-    && journalContract.valid
-    && coverage?.coverageStartedAt === journal?.coverageStartedAt
-    && coverage?.currentThrough === journal?.currentThrough
-    && isoTimestamp(coverage?.coverageStartedAt)
-    && isoTimestamp(coverage?.currentThrough)
-    && Date.parse(coverage.coverageStartedAt) <= Date.parse(listeningAt)
-    && Date.parse(coverage.currentThrough) >= Date.parse(cutoffAt),
-  );
+      let nextStatus = "RECONCILIATION_REQUIRED";
+      let priorFill = null;
+      const coverage = brokerState?.executionCoverage;
+      const journal = brokerState?.executionOwnershipJournal;
+      const journalContract = validateBrokerExecutionOwnershipJournal(journal);
+      const listeningAt = retirement.executionListeningAt;
+      const cutoffAt = retirement.cutoffAt;
+      const accountId = text(installation.compatibility?.v24?.authorizedExecutionAccountId);
+      const accountPresent = (Array.isArray(brokerState?.accounts) ? brokerState.accounts : [])
+        .some((account) => text(account?.accountId) === accountId);
 
-  if (complete) {
-    const ownership = evaluateV24InitialFillOwnership({
-      installation,
-      brokerState: resolutionBrokerState(brokerState, cutoffAt),
-    });
+      const complete = Boolean(
+        brokerUsable(brokerState)
+        && accountId
+        && accountPresent
+        && upper(coverage?.status) === "CONTIGUOUS"
+        && journalContract.valid
+        && coverage?.coverageStartedAt === journal?.coverageStartedAt
+        && coverage?.currentThrough === journal?.currentThrough
+        && isoTimestamp(coverage?.coverageStartedAt)
+        && isoTimestamp(coverage?.currentThrough)
+        && Date.parse(coverage.coverageStartedAt) <= Date.parse(listeningAt)
+        && Date.parse(coverage.currentThrough) >= Date.parse(cutoffAt),
+      );
 
-    if (ownership.status === "MATCHED") {
-      nextStatus = "SUPERSEDED_BY_PRIOR_FILL";
-      priorFill = structuredClone(ownership.matchedExecution);
-    } else if (
-      ownership.status === "WAITING"
-      || ["WRONG_ACCOUNT_EXECUTION_OBSERVED", "UNEXPECTED_AUTHORIZED_ACCOUNT_EXECUTION"].includes(ownership.reason)
-    ) {
-      nextStatus = "RETIRED";
-    }
-  }
+      if (complete) {
+        const ownership = evaluateV24InitialFillOwnership({
+          installation,
+          brokerState: resolutionBrokerState(brokerState, cutoffAt),
+        });
 
-  const resolved = {
-    ...structuredClone(retirement),
-    status: nextStatus,
-    finalizedAt: finalized,
-    priorFill,
-  };
+        if (ownership.status === "MATCHED") {
+          nextStatus = "SUPERSEDED_BY_PRIOR_FILL";
+          priorFill = structuredClone(ownership.matchedExecution);
+        } else if (
+          ownership.status === "WAITING"
+          || ["WRONG_ACCOUNT_EXECUTION_OBSERVED", "UNEXPECTED_AUTHORIZED_ACCOUNT_EXECUTION"].includes(ownership.reason)
+        ) {
+          nextStatus = "RETIRED";
+        }
+      }
 
-  return verifyRetirement(
-    writeStore(storage, storeKey, replaceRetirement(store, resolved)),
-    resolved,
-  );
+      resolved = {
+        ...structuredClone(retirement),
+        status: nextStatus,
+        finalizedAt: finalized,
+        priorFill,
+      };
+      return replaceRetirement(store, resolved);
+    },
+  });
+
+  return verifyRetirement(committed, resolved);
 }
 
 export function assertV24HandoffRetirementAllowsActivation({
