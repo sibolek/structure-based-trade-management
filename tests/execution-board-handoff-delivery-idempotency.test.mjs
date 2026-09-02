@@ -96,6 +96,7 @@ test("identical delivered ACK retry does not consult a broken repository clock",
   const { deliveryRepository, setClock } = repositories();
   const claimed = deliveryRepository.claim("handoff-idempotency", "receiver-A");
   const listeningAt = new Date(Date.parse(claimed.claimedAt) + 1000).toISOString();
+  setClock("2026-09-02T17:00:05.000Z");
   const delivered = deliveryRepository.deliver("handoff-idempotency", {
     receiverId: "receiver-A",
     executionListeningAt: listeningAt,
