@@ -23,6 +23,7 @@
     "v24:retirement-test": "node --test tests/execution-v24-retirement.test.mjs",
     "v24:activation-test": "node --test tests/execution-v24-handoff-transport.test.mjs tests/execution-v24-handoff-activation.test.mjs",
     "v24:live-lifecycle-test": "node --test tests/execution-v24-live-lifecycle.test.mjs",
+    "v24:store-authority-test": "node --test tests/execution-board-store-repository.test.mjs",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
