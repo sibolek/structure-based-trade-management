@@ -2,6 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { applyExecution, createSymbolState } from "./trade-state.mjs";
 import { createLiveStateApi } from "./live-state-api.mjs";
+import {
+  advanceBrokerExecutionCoverage,
+  createBrokerExecutionCoverage,
+  establishBrokerExecutionCoverage,
+  markBrokerExecutionCoverageGap,
+  publicBrokerAccount,
+  publicBrokerExecution,
+  publicBrokerPosition,
+} from "./broker-execution-provenance.mjs";
 
 const ROOT = process.cwd();
 const ENV_PATH = path.join(ROOT, ".env.local");
@@ -237,21 +246,18 @@ function formatPosition(state) {
 }
 
 function publicAccount(snapshot) {
-  return {
-    account: maskAccount(snapshot.accountNumber),
-    equity: snapshot.equity,
-    maxRisk: snapshot.maxRisk,
-  };
+  return publicBrokerAccount({
+    ...snapshot,
+    accountDisplay: maskAccount(snapshot.accountNumber),
+  });
 }
 
-function publicPosition(accountNumber, state) {
-  return {
-    account: maskAccount(accountNumber),
-    symbol: state.symbol,
-    side: state.side,
-    quantity: state.quantity,
-    averagePrice: state.averagePrice,
-  };
+function publicPosition(accountNumber, accountHash, state) {
+  return publicBrokerPosition({
+    accountId: accountHash,
+    accountDisplay: maskAccount(accountNumber),
+    state,
+  });
 }
 
 function executionKey(accountHash, orderId, execution, legId) {
@@ -426,25 +432,23 @@ function printRiskSnapshot(snapshot, label = "ACCOUNT RISK") {
 }
 
 function publicExecution(fill, detectedAt, result) {
-  const executionMs = Date.parse(fill.executionTime || "");
-  const detectedMs = detectedAt.getTime();
-  return {
-    detectedAt: detectedAt.toISOString(),
-    account: maskAccount(fill.accountNumber),
-    symbol: fill.symbol,
-    instruction: fill.instruction,
-    positionEffect: fill.positionEffect,
-    quantity: fill.quantity,
-    price: fill.price,
-    executionTime: fill.executionTime,
-    observedDelayMs: Number.isFinite(executionMs) ? detectedMs - executionMs : null,
-    stateEvent: result.event,
-    previousSide: result.previousSide,
-    previousQuantity: result.previousQuantity,
-    nextSide: result.nextSide,
-    nextQuantity: result.nextQuantity,
-    averagePrice: result.nextAveragePrice,
-  };
+  return publicBrokerExecution({
+    fill: {
+      ...fill,
+      accountDisplay: maskAccount(fill.accountNumber),
+    },
+    detectedAt,
+    result,
+  });
+}
+
+function coverageTimestampAtOrAfter(coverage, value = Date.now()) {
+  const requested = Number(value);
+  const floors = [coverage?.baselineCompletedAt, coverage?.currentThrough]
+    .map((item) => Date.parse(item || ""))
+    .filter(Number.isFinite);
+  const floor = floors.length ? Math.max(...floors) : 0;
+  return new Date(Math.max(Number.isFinite(requested) ? requested : Date.now(), floor)).toISOString();
 }
 
 async function monitor() {
@@ -461,6 +465,9 @@ async function monitor() {
   } catch (error) {
     throw new Error(`ExecutionOS local API could not start on 127.0.0.1:${apiPort}: ${error.message}`);
   }
+
+  let executionCoverage = createBrokerExecutionCoverage();
+  liveApi.setExecutionCoverage(executionCoverage);
 
   console.log("\nEXECUTIONOS TOS / SCHWAB FILL MONITOR\n");
   console.log("✓ Schwab authenticated");
@@ -479,7 +486,7 @@ async function monitor() {
   liveApi.setBootstrap({
     pollMs,
     accounts: bootstrap.accountSnapshots.map(publicAccount),
-    positions: bootstrap.openPositions.map((item) => publicPosition(item.accountNumber, item.state)),
+    positions: bootstrap.openPositions.map((item) => publicPosition(item.accountNumber, item.accountHash, item.state)),
   });
 
   console.log(`✓ Position bootstrap complete (${bootstrap.openPositions.length} open position(s))`);
@@ -511,12 +518,17 @@ async function monitor() {
   const baseline = await fetchAllExecutions(accounts);
   for (const fill of baseline) seen.add(fill.key);
 
+  const baselineCompletedAt = new Date().toISOString();
+  executionCoverage = establishBrokerExecutionCoverage(executionCoverage, { baselineCompletedAt });
+  liveApi.setExecutionCoverage(executionCoverage);
   liveApi.setStatus("ARMED");
+
   console.log(`✓ Baseline complete (${baseline.length} existing execution leg(s) ignored)`);
+  console.log(`✓ Continuous execution-observation coverage begins at ${baselineCompletedAt}`);
   console.log("✓ MONITOR ARMED — new Schwab execution fills will print below");
   console.log("✓ Live state is seeded from broker positions; new fills update that state automatically");
   console.log("✓ Equity and the 0.5% risk budget refresh after completed trade cycles");
-  console.log("✓ React can now read masked broker state from the local UI API");
+  console.log("✓ React can read masked display labels, stable opaque account IDs, and execution coverage provenance");
   console.log("Press Ctrl+C to stop.\n");
 
   let consecutiveErrors = 0;
@@ -543,7 +555,7 @@ async function monitor() {
         const result = applyExecution(current, fill);
         liveStates.set(key, result.state);
         printFill(fill, detectedAt, result);
-        liveApi.updatePosition(publicPosition(fill.accountNumber, result.state));
+        liveApi.updatePosition(publicPosition(fill.accountNumber, fill.accountHash, result.state));
         liveApi.recordExecution(publicExecution(fill, detectedAt, result));
 
         if (result.event === "FLAT" || result.event === "REVERSAL") {
@@ -568,10 +580,24 @@ async function monitor() {
         }
       }
 
+      executionCoverage = advanceBrokerExecutionCoverage(executionCoverage, {
+        observedThrough: coverageTimestampAtOrAfter(executionCoverage, detectedAt.getTime()),
+      });
+      liveApi.setExecutionCoverage(executionCoverage);
+
       consecutiveErrors = 0;
       liveApi.setStatus("ARMED");
     } catch (error) {
       consecutiveErrors += 1;
+      try {
+        executionCoverage = markBrokerExecutionCoverageGap(executionCoverage, {
+          gapDetectedAt: coverageTimestampAtOrAfter(executionCoverage),
+          reason: error.message,
+        });
+        liveApi.setExecutionCoverage(executionCoverage);
+      } catch (coverageError) {
+        console.error(`\n⚠ Execution coverage could not be updated: ${coverageError.message}`);
+      }
       liveApi.setError(error.message);
       const backoffMs = Math.min(pollMs * (2 ** consecutiveErrors), 30_000);
       console.error(`\n⚠ Monitor poll failed: ${error.message}`);
