@@ -19,8 +19,8 @@ function immutable(value) {
   return deepFreeze(structuredClone(value));
 }
 
-function repositoryError(message, code) {
-  const error = new Error(message);
+function repositoryError(message, code, cause = null) {
+  const error = new Error(message, cause ? { cause } : undefined);
   error.code = code;
   return error;
 }
@@ -106,26 +106,27 @@ export class ExecutionBoardHandoffRepository {
       );
     }
 
-    const immutableHandoff = immutable(handoff);
-    this.state.handoffs.push(immutableHandoff);
-
     const recordedAt = this.clock();
     if (!text(recordedAt) || Number.isNaN(Date.parse(recordedAt))) {
-      this.state.handoffs.pop();
       throw repositoryError(
         "repository clock returned an invalid timestamp",
         "EXECUTION_BOARD_HANDOFF_REPOSITORY_CLOCK_INVALID",
       );
     }
 
+    const previousState = structuredClone(this.state);
+    const immutableHandoff = immutable(handoff);
+    this.state.handoffs.push(immutableHandoff);
     this.state.updatedAt = new Date(Date.parse(recordedAt)).toISOString();
+
     try {
       this.save();
     } catch (error) {
-      this.state.handoffs.pop();
+      this.state = previousState;
       throw repositoryError(
         "Execution Board handoff persistence failed",
         "EXECUTION_BOARD_HANDOFF_PERSISTENCE_ERROR",
+        error,
       );
     }
 
