@@ -1,4 +1,6 @@
 import { evaluateExecutionBoardHandoffAdmission } from "../../schwab-bridge/execution-board-handoff-admission.mjs";
+import { readExecutionBoardStore } from "./execution-board-store-repository.js";
+import { executionOwnedSymbolsForHandoffAdmission } from "./execution-v24-active-ownership.js";
 import {
   EXECUTION_V23_STORE_KEY,
   buildPreparedV24LocalInstallation,
@@ -67,53 +69,6 @@ function requireTransport(transport) {
     throw activationError("compatible handoff transport is required", "V24_HANDOFF_TRANSPORT_REQUIRED");
   }
   return transport;
-}
-
-function readStore(storage, storeKey) {
-  try {
-    const raw = storage?.getItem?.(storeKey);
-    if (!raw) return { candidates: [], liveTrades: [], history: [], v24Installations: [], v24Retirements: [] };
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("store root must be an object");
-    return {
-      ...parsed,
-      candidates: Array.isArray(parsed.candidates) ? parsed.candidates : [],
-      liveTrades: Array.isArray(parsed.liveTrades) ? parsed.liveTrades : [],
-      v24Installations: Array.isArray(parsed.v24Installations) ? parsed.v24Installations : [],
-      v24Retirements: Array.isArray(parsed.v24Retirements) ? parsed.v24Retirements : [],
-    };
-  } catch (error) {
-    throw activationError(`local execution store could not be read: ${error.message}`, "LOCAL_EXECUTION_PERSISTENCE_FAILED");
-  }
-}
-
-function localOwnedSymbols(store, { excludeHandoffId = null } = {}) {
-  const symbols = new Set();
-  const retirements = new Map(
-    store.v24Retirements.map((item) => [text(item?.handoffId), upper(item?.status)]),
-  );
-
-  for (const candidate of store.candidates) {
-    const symbol = upper(candidate?.originalPlan?.symbol ?? candidate?.v24?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-  for (const trade of store.liveTrades) {
-    const symbol = upper(trade?.originalPlan?.symbol ?? trade?.v24?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-  if (store.draft?.mode === "EDIT") {
-    const symbol = upper(store.draft?.originalPlan?.symbol ?? store.draft?.plan?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-  for (const installation of store.v24Installations) {
-    if (excludeHandoffId && text(installation?.handoffId) === text(excludeHandoffId)) continue;
-    if (!["PREPARED", "LISTENING"].includes(upper(installation?.status))) continue;
-    if (retirements.get(text(installation?.handoffId)) === "RETIRED") continue;
-    const symbol = upper(installation?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-
-  return Object.freeze([...symbols].sort());
 }
 
 async function blockDelivery({ transport, handoffId, receiverId, reason }) {
@@ -240,12 +195,12 @@ export async function advanceV24HandoffActivation({
 
   let prepared = local;
   if (!prepared) {
-    const initialStore = readStore(storage, storeKey);
+    const initialStore = readExecutionBoardStore({ storage, storeKey });
     const initialRequiredThrough = brokerThrough(brokerState) || handoff.createdAt;
     const initialAdmission = evaluateExecutionBoardHandoffAdmission({
       handoff,
       brokerState,
-      executionOwnedSymbols: localOwnedSymbols(initialStore),
+      executionOwnedSymbols: executionOwnedSymbolsForHandoffAdmission(initialStore),
       requiredThrough: initialRequiredThrough,
     });
 
@@ -284,11 +239,11 @@ export async function advanceV24HandoffActivation({
     });
   }
 
-  const finalStore = readStore(storage, storeKey);
+  const finalStore = readExecutionBoardStore({ storage, storeKey });
   const finalAdmission = evaluateExecutionBoardHandoffAdmission({
     handoff,
     brokerState,
-    executionOwnedSymbols: localOwnedSymbols(finalStore, { excludeHandoffId: handoffId }),
+    executionOwnedSymbols: executionOwnedSymbolsForHandoffAdmission(finalStore, { excludeHandoffId: handoffId }),
     requiredThrough: proposed,
   });
 
