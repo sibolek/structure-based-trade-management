@@ -29,6 +29,7 @@ test("DISCARD remains independent from card inspection", () => {
 
 test("trade specification modal renders the complete trading plan", () => {
   for (const field of [
+    "Trade Setup",
     "Trade Thesis",
     "Entry Trigger",
     "Expected Entry",
@@ -44,6 +45,7 @@ test("trade specification modal renders the complete trading plan", () => {
   }
 
   for (const property of [
+    "v24.setup",
     "v24.thesis",
     "v24.trigger",
     "v24.currentExpectedEntry",
@@ -59,6 +61,10 @@ test("trade specification modal renders the complete trading plan", () => {
   ]) {
     assert.match(modal, new RegExp(property.replace(".", "\\.")));
   }
+});
+
+test("setup is a first-class labeled body field, not just header chrome", () => {
+  assert.match(modal, /<Narrative label="Trade Setup" emphasis>\{v24\.setup \|\| "—"\}<\/Narrative>/);
 });
 
 test("technical provenance remains available but visually secondary", () => {
