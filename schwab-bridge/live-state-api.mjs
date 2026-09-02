@@ -3,6 +3,10 @@ import {
   createBrokerExecutionCoverage,
   validateBrokerExecutionCoverage,
 } from "./broker-execution-provenance.mjs";
+import {
+  createBrokerExecutionActivity,
+  validateBrokerExecutionActivity,
+} from "./broker-execution-activity.mjs";
 
 const DEFAULT_HOST = "127.0.0.1";
 const MAX_EXECUTIONS = 25;
@@ -35,6 +39,7 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
     positions: [],
     executions: [],
     executionCoverage: createBrokerExecutionCoverage(),
+    executionActivity: createBrokerExecutionActivity(),
     lastError: null,
   };
 
@@ -66,6 +71,17 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
       throw error;
     }
     state.executionCoverage = clone(coverage);
+    touch();
+  }
+
+  function setExecutionActivity(activity) {
+    const contract = validateBrokerExecutionActivity(activity);
+    if (!contract.valid) {
+      const error = new Error(`invalid broker execution activity: ${contract.errors.join("; ")}`);
+      error.code = "INVALID_BROKER_EXECUTION_ACTIVITY";
+      throw error;
+    }
+    state.executionActivity = clone(activity);
     touch();
   }
 
@@ -133,6 +149,7 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
           status: state.status,
           updatedAt: state.updatedAt,
           executionCoverage: state.executionCoverage,
+          executionActivity: state.executionActivity,
         }));
         return;
       }
@@ -177,6 +194,7 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
     setStatus,
     setBootstrap,
     setExecutionCoverage,
+    setExecutionActivity,
     updateAccount,
     updatePosition,
     recordExecution,
