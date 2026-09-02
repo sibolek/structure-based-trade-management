@@ -171,8 +171,6 @@ export function advanceBrokerExecutionCoverage(coverage, { observedThrough } = {
     }));
   }
 
-  // A successful poll after a GAP begins a new provable continuous interval.
-  // It does not heal or claim coverage across the failed interval.
   return immutable(requireValidCoverage({
     ...structuredClone(coverage),
     status: "CONTIGUOUS",
@@ -263,6 +261,8 @@ export function publicBrokerExecution({ fill, detectedAt, result } = {}) {
     detectedAt: detected,
     accountId,
     account: text(fill?.accountDisplay ?? fill?.account) || null,
+    orderId: text(fill?.orderId) || null,
+    executionKey: text(fill?.key ?? fill?.executionKey) || null,
     symbol: upper(fill?.symbol) || "?",
     instruction: upper(fill?.instruction) || "?",
     positionEffect: upper(fill?.positionEffect) || "?",
