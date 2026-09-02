@@ -3,6 +3,7 @@ import {
   readExecutionBoardStore,
   transactExecutionBoardStore,
 } from "./execution-board-store-repository.js";
+import { executionOwnedSymbolsForHandoffAdmission } from "./execution-v24-active-ownership.js";
 import {
   EXECUTION_V23_STORE_KEY,
   bindAndPersistV24ExecutionListeningAt,
@@ -313,34 +314,6 @@ export function buildV23CandidateFromActiveListeningInstallation({ installation,
   return buildV23CandidateFromListeningInstallation(installation);
 }
 
-export function executionOwnedSymbolsFromV23StoreWithRetirement(store) {
-  const clean = store && typeof store === "object" ? store : {};
-  const retirements = new Map(
-    (Array.isArray(clean.v24Retirements) ? clean.v24Retirements : [])
-      .map((item) => [text(item?.handoffId), item]),
-  );
-  const symbols = new Set();
-
-  for (const candidate of Array.isArray(clean.candidates) ? clean.candidates : []) {
-    const symbol = upper(candidate?.originalPlan?.symbol ?? candidate?.v24?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-  for (const trade of Array.isArray(clean.liveTrades) ? clean.liveTrades : []) {
-    const symbol = upper(trade?.originalPlan?.symbol ?? trade?.v24?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-  if (clean.draft?.mode === "EDIT") {
-    const symbol = upper(clean.draft?.originalPlan?.symbol ?? clean.draft?.plan?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-
-  for (const installation of Array.isArray(clean.v24Installations) ? clean.v24Installations : []) {
-    if (!["PREPARED", "LISTENING"].includes(upper(installation?.status))) continue;
-    const retirement = retirements.get(text(installation?.handoffId));
-    if (retirement?.status === "RETIRED") continue;
-    const symbol = upper(installation?.symbol);
-    if (symbol) symbols.add(symbol);
-  }
-
-  return Object.freeze([...symbols].sort());
+export function executionOwnedSymbolsFromV23StoreWithRetirement(store, { excludeHandoffId = null } = {}) {
+  return executionOwnedSymbolsForHandoffAdmission(store, { excludeHandoffId });
 }
