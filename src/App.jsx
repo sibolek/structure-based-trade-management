@@ -4,11 +4,13 @@ import PreTradeWaitingBoard from "./components/PreTradeWaitingBoard.jsx";
 import WorkspaceNav from "./components/WorkspaceNav.jsx";
 import useBrokerState from "./hooks/useBrokerState.js";
 import usePretradeState from "./hooks/usePretradeState.js";
+import useV24ExecutionRouter from "./hooks/useV24ExecutionRouter.js";
 import ExecutionV23 from "./pages/ExecutionV23.jsx";
 
 export default function App() {
   const broker = useBrokerState();
   const pretrade = usePretradeState();
+  const v24Router = useV24ExecutionRouter({ broker, pretrade });
   const [workspace, setWorkspace] = useState("PRETRADE");
 
   return (
@@ -25,7 +27,7 @@ export default function App() {
       </div>
 
       <div className={workspace === "EXECUTION" ? "block" : "hidden"}>
-        <ExecutionV23 broker={broker} />
+        <ExecutionV23 broker={broker} v24Router={v24Router} />
       </div>
     </div>
   );
