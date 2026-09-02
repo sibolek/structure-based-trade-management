@@ -5,6 +5,7 @@ import { runV24ExecutionRouterCycle } from "../execution/execution-v24-runtime-r
 
 const ROUTER_LOCK_NAME = "executionos-v24-runtime-router";
 const LOOP_DELAY_MS = 500;
+const ROUTER_ENABLED = String(import.meta.env.VITE_EXECUTIONOS_V24_ROUTER_ENABLED || "false").toLowerCase() === "true";
 
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -18,18 +19,21 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
   const latest = useRef({ broker, pretrade });
   const proposedBoundaries = useRef(new Map());
   const [state, setState] = useState(() => ({
-    status: "STARTING",
+    status: ROUTER_ENABLED ? "STARTING" : "DISABLED_PENDING_ACCEPTANCE",
     receiverId: null,
     leader: false,
     lastCycleAt: null,
     lastResult: null,
     error: "",
     brokerWriteAuthority: false,
+    enabled: ROUTER_ENABLED,
   }));
 
   latest.current = { broker, pretrade };
 
   useEffect(() => {
+    if (!ROUTER_ENABLED) return undefined;
+
     let cancelled = false;
     const lockManager = globalThis?.navigator?.locks;
     if (!lockManager || typeof lockManager.request !== "function") {
@@ -92,6 +96,7 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
               lastResult: result,
               error: "",
               brokerWriteAuthority: false,
+              enabled: true,
             });
           }
         } catch (error) {
@@ -122,7 +127,6 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
 
     return () => {
       cancelled = true;
-      setState((current) => ({ ...current, leader: false }));
     };
   }, []);
 
