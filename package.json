@@ -18,6 +18,7 @@
     "v24:broker-provenance-test": "node --test tests/broker-execution-provenance.test.mjs tests/broker-execution-activity.test.mjs",
     "v24:handoff-admission-test": "node --test tests/execution-board-handoff-admission.test.mjs",
     "v24:v23-compat-test": "node --test tests/execution-v23-compat.test.mjs",
+    "v24:v23-install-test": "node --test tests/execution-board-receiver.test.mjs tests/execution-v24-local-installation.test.mjs",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
