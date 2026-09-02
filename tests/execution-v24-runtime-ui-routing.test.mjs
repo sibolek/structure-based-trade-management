@@ -98,6 +98,14 @@ test("runtime hook uses an exclusive Web Lock so StrictMode or another tab canno
   assert.match(hook, /proposedBoundaries = useRef\(new Map\(\)\)/);
 });
 
+test("runtime router feature gate defaults disabled when enable flag is unset", () => {
+  const hook = source("src/hooks/useV24ExecutionRouter.js");
+  assert.match(hook, /VITE_EXECUTIONOS_V24_ROUTER_ENABLED/);
+  assert.match(hook, /\|\| "false"/);
+  assert.match(hook, /DISABLED_PENDING_ACCEPTANCE/);
+  assert.match(hook, /if \(!ROUTER_ENABLED\) return undefined/);
+});
+
 test("V2.4 live card uses effective-stop authority and frozen ARM-time max risk", () => {
   const card = source("src/components/V24LiveTradeCard.jsx");
   assert.match(card, /executionStop\(trade\)/);
