@@ -139,26 +139,47 @@ export class ExecutionBoardHandoffDeliveryRepository {
   }
 
   claim(handoffId, receiverId) {
-    return this.#replace(handoffId, (current) => claimExecutionBoardHandoffDelivery(current, {
-      receiverId,
-      claimedAt: this.#nowIso("EXECUTION_BOARD_HANDOFF_DELIVERY_CLOCK_INVALID"),
-    }));
+    return this.#replace(handoffId, (current) => {
+      if (current.status === "CLAIMED" && text(current.claimedBy) === text(receiverId)) {
+        return immutable(current);
+      }
+      return claimExecutionBoardHandoffDelivery(current, {
+        receiverId,
+        claimedAt: this.#nowIso("EXECUTION_BOARD_HANDOFF_DELIVERY_CLOCK_INVALID"),
+      });
+    });
   }
 
   deliver(handoffId, { receiverId, executionListeningAt } = {}) {
-    return this.#replace(handoffId, (current) => deliverExecutionBoardHandoffDelivery(current, {
-      receiverId,
-      executionListeningAt,
-      deliveredAt: this.#nowIso("EXECUTION_BOARD_HANDOFF_DELIVERY_CLOCK_INVALID"),
-    }));
+    return this.#replace(handoffId, (current) => {
+      if (current.status === "DELIVERED") {
+        return deliverExecutionBoardHandoffDelivery(current, {
+          receiverId,
+          executionListeningAt,
+        });
+      }
+      return deliverExecutionBoardHandoffDelivery(current, {
+        receiverId,
+        executionListeningAt,
+        deliveredAt: this.#nowIso("EXECUTION_BOARD_HANDOFF_DELIVERY_CLOCK_INVALID"),
+      });
+    });
   }
 
   block(handoffId, { receiverId, reason } = {}) {
-    return this.#replace(handoffId, (current) => blockExecutionBoardHandoffDelivery(current, {
-      receiverId,
-      reason,
-      blockedAt: this.#nowIso("EXECUTION_BOARD_HANDOFF_DELIVERY_CLOCK_INVALID"),
-    }));
+    return this.#replace(handoffId, (current) => {
+      if (current.status === "BLOCKED") {
+        return blockExecutionBoardHandoffDelivery(current, {
+          receiverId,
+          reason,
+        });
+      }
+      return blockExecutionBoardHandoffDelivery(current, {
+        receiverId,
+        reason,
+        blockedAt: this.#nowIso("EXECUTION_BOARD_HANDOFF_DELIVERY_CLOCK_INVALID"),
+      });
+    });
   }
 
   #replace(handoffId, transition) {
