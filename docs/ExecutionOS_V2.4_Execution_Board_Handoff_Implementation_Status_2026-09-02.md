@@ -4,7 +4,7 @@
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
 **Approved addenda:** Decisions 10–19 in addenda v0.1–v0.9  
-**Overall status:** **IN PROGRESS — DECISIONS 10–18 ACCEPTED; DECISION-19 CANONICAL STORE FOUNDATION ACCEPTED; REACT + LIVE-LIFECYCLE STORE MIGRATION IMPLEMENTED / AWAITING ACCEPTANCE; LIVE V2.4 RECEIVER ROUTING NOT YET ENABLED**
+**Overall status:** **IN PROGRESS — DECISIONS 10–19 ACCEPTED; LIVE V2.4 RECEIVER / OWNERSHIP ROUTING NOT YET ENABLED**
 
 ---
 
@@ -31,10 +31,9 @@ Broker order placement, modification, cancellation, stop replacement, automatic 
 | Decision 11/16 durable retirement | **ACCEPTED** |
 | Decision 17 atomic LISTENING activation | **ACCEPTED** |
 | Decision 18 exact-account LIVE lifecycle | **ACCEPTED** |
-| Decision 19 canonical store authority foundation | **ACCEPTED** |
-| Decision 19 React + LIVE-lifecycle store migration | **IMPLEMENTED / AWAITING ACCEPTANCE** |
+| Decision 19 canonical store authority + React migration | **ACCEPTED** |
 
-The V2.4 receiver/ownership route remains intentionally unmounted from the continuously running React Execution Board until the full Decision-19 store migration is accepted.
+The live V2.4 receiver/ownership route remains intentionally unmounted pending the next frozen runtime-routing decision.
 
 ---
 
@@ -53,26 +52,7 @@ The V2.4 receiver/ownership route remains intentionally unmounted from the conti
 
 ---
 
-## 4. Accepted Decision 18 evidence
-
-```text
-v24:live-lifecycle-test       15/15 PASS
-v24:broker-provenance-test   24/24 PASS
-v24:fill-ownership-test      24/24 PASS
-v24:v23-compat-test          13/13 PASS
-v24:v23-install-test         16/16 PASS
-v24:handoff-admission-test   16/16 PASS
-v24:handoff-test             34/34 PASS
-v24:handoff-api-test          7/7 PASS
-v24:retirement-test          14/14 PASS
-v24:activation-test          20/20 PASS
-schwab:state-test            10/10 PASS
-production build             PASS
-```
-
----
-
-## 5. Decision 19 canonical store authority — foundation accepted
+## 4. Decision 19 — accepted
 
 Approved design authority:
 
@@ -81,129 +61,66 @@ Approved design authority:
 Canonical runtime:
 
 - `src/execution/execution-board-store-repository.js`
+- `src/execution/execution-v23-store-authority.js`
 
-Already migrated and accepted:
+Migrated durable writers/projections:
 
 - `src/execution/execution-v24-local-installation.js`
 - `src/execution/execution-v24-retirement.js`
-
-The canonical repository preserves:
-
-```text
-storeSchemaVersion
-storeRevision
-
-draft
-candidates
-liveTrades
-history
-view
-notice
-
-v24Installations
-v24Retirements
-v24Lifecycles
-
-+ unknown forward-compatible namespaces
-```
-
-Accepted transaction contract:
-
-```text
-read latest durable store
-→ normalize canonical namespaces
-→ mutate latest state
-→ increment storeRevision exactly once
-→ write complete store
-→ exact durable readback
-→ publish committed snapshot to same-context subscribers
-```
-
-Foundation acceptance evidence supplied by operator:
-
-```text
-v24:store-authority-test   8/8 PASS
-v24:v23-install-test      16/16 PASS
-v24:retirement-test       14/14 PASS
-v24:activation-test       20/20 PASS
-v24:live-lifecycle-test   15/15 PASS
-production build          PASS
-```
-
----
-
-## 6. Decision 19 second slice — implemented / awaiting acceptance
-
-Runtime added:
-
-- `src/execution/execution-v23-store-authority.js`
-
-Runtime migrated:
-
 - `src/execution/execution-v24-live-lifecycle.js`
 - `src/pages/ExecutionV23.jsx`
 
-Implemented behavior:
+Accepted behavior:
 
-- V2.4 LIVE lifecycle persistence now transacts through the same canonical repository as installation and retirement;
-- V2.3 React state is now a projection of the canonical repository, not a persistence authority;
-- every manual V2.3 UI mutation starts from the latest durable store and writes only the legacy projection fields back into that latest canonical snapshot;
-- React subscribes to same-context canonical commits so V2.4 writes cannot remain hidden behind a stale component snapshot;
-- direct full-store `localStorage.setItem` persistence has been removed from `ExecutionV23`;
-- canonical `storeRevision` continues to advance on repository transactions;
-- V2.4/unknown namespaces survive unrelated manual V2.3 UI mutations;
-- the legacy V2.3 first-fill matcher explicitly skips `origin = V24_HANDOFF` records;
-- the legacy V2.3 LIVE lifecycle matcher explicitly skips `origin = V24_HANDOFF` records;
-- legacy/manual V2.3 symbol/`detectedAt` execution behavior is otherwise unchanged.
+- all legacy and V2.4 mutations start from the latest canonical durable store;
+- `storeRevision` advances monotonically on committed transactions;
+- direct full-store persistence has been removed from `ExecutionV23`;
+- React subscribes to canonical same-context commits and is never persistence authority;
+- V2.4 and unknown forward-compatible namespaces survive unrelated legacy/manual UI changes;
+- exact readback failure is fail-closed with rollback where possible;
+- the legacy first-fill and LIVE lifecycle matchers explicitly skip `origin = V24_HANDOFF`;
+- legacy/manual V2.3 execution semantics otherwise remain unchanged.
 
-Expanded focused command:
+Operator acceptance evidence:
 
 ```text
-npm run v24:store-authority-test
+v24:store-authority-test   15/15 PASS
+v24:v23-install-test       16/16 PASS
+v24:retirement-test        14/14 PASS
+v24:activation-test        20/20 PASS
+v24:live-lifecycle-test    15/15 PASS
+v24:v23-compat-test        13/13 PASS
+production build           PASS
 ```
 
-Expected count: **15 tests**:
-
-```text
-8 canonical repository tests
-4 V2.3 projection-authority tests
-3 React/LIVE-lifecycle routing tests
-```
-
-The focused suite verifies no direct React full-store writer, explicit V2.4 exclusion from legacy matchers, canonical lifecycle persistence, namespace preservation, latest-durable transactions, same-context subscription, and forward-compatible field retention.
-
-### Acceptance gate
-
-Run:
-
-```text
-npm run v24:store-authority-test
-npm run v24:v23-install-test
-npm run v24:retirement-test
-npm run v24:activation-test
-npm run v24:live-lifecycle-test
-npm run v24:v23-compat-test
-npm run build
-```
-
-No live V2.4 receiver routing is enabled in this slice.
+The focused store-authority suite proves canonical latest-durable mutation, namespace preservation, same-context publication, no direct React full-store writer, explicit V2.4 exclusion from legacy matchers, and canonical LIVE-lifecycle persistence.
 
 ---
 
-## 7. Current boundary
+## 5. Current boundary
 
 The branch still does **not**:
 
-- mount the Decision-17 receiver loop into live React;
-- promote a real V2.4 first fill into the visible LIVE board;
-- route visible V2.4 LIVE/EXIT/History projection through Decision 18;
+- mount the Decision-17 receiver loop into the running app;
+- expose V2.4 PREPARED/LISTENING ownership in the operator UI;
+- atomically transfer V2.4 symbol ownership from LISTENING authorization to first-fill LIVE lifecycle;
+- promote a real exact-account V2.4 first fill into the visible LIVE board;
+- project Decision-18 lifecycle updates into LIVE / EXIT / History;
 - implement fast Revise → Re-arm;
 - place, modify, cancel, reduce, or flatten broker orders.
 
-Once the second Decision-19 slice is accepted, the stale-snapshot persistence race is closed and live receiver integration can proceed on top of one durable authority.
+---
+
+## 6. Next design focus
+
+Freeze the live runtime-router ownership-transfer contract before enabling it.
+
+The top-level app already owns continuously refreshed broker and pretrade state. The next router must serialize handoff activation, preserve one proposed Decision-17 listening boundary while broker proof catches up, resolve retirement before first-fill promotion, route first-fill ownership only through the exact-account journal matcher, and atomically transfer symbol reservation from authorization-listener state to the durable V2.4 LIVE lifecycle/UI projection.
+
+A completed V2.4 trade must eventually release symbol ownership without deleting immutable handoff/installation/lifecycle provenance.
 
 ---
 
-## 8. Documentation rule
+## 7. Documentation rule
 
-`USER-GUIDE.md` remains intentionally unchanged because there is still no accepted end-to-end operator workflow. Approved dated design records remain immutable; this status record tracks current implementation behavior.
+`USER-GUIDE.md` remains intentionally unchanged because there is still no accepted end-to-end operator workflow. Approved dated design records remain immutable; this status record tracks current accepted implementation behavior.
