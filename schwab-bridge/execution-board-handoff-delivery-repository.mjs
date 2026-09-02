@@ -192,12 +192,13 @@ export class ExecutionBoardHandoffDeliveryRepository {
 
   #persistMutation({ rollback, errorCode, errorMessage }) {
     const previousUpdatedAt = this.state.updatedAt;
-    this.state.updatedAt = this.#nowIso("EXECUTION_BOARD_HANDOFF_DELIVERY_CLOCK_INVALID");
     try {
+      this.state.updatedAt = this.#nowIso("EXECUTION_BOARD_HANDOFF_DELIVERY_CLOCK_INVALID");
       this.save();
     } catch (error) {
       rollback();
       this.state.updatedAt = previousUpdatedAt;
+      if (error?.code === "EXECUTION_BOARD_HANDOFF_DELIVERY_CLOCK_INVALID") throw error;
       throw repositoryError(errorMessage, errorCode);
     }
   }
