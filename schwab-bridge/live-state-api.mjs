@@ -4,7 +4,9 @@ import {
   validateBrokerExecutionCoverage,
 } from "./broker-execution-provenance.mjs";
 import {
+  advanceBrokerExecutionActivity,
   createBrokerExecutionActivity,
+  establishBrokerExecutionActivity,
   validateBrokerExecutionActivity,
 } from "./broker-execution-activity.mjs";
 
@@ -25,6 +27,15 @@ function positionKey(position) {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function executionTimeRequired(execution) {
+  const parsed = Date.parse(String(execution?.executionTime || ""));
+  if (!Number.isFinite(parsed)) {
+    const error = new Error("authoritative Schwab executionTime is required");
+    error.code = "BROKER_EXECUTION_TIME_REQUIRED";
+    throw error;
+  }
 }
 
 export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
@@ -70,7 +81,30 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
       error.code = "INVALID_BROKER_EXECUTION_COVERAGE";
       throw error;
     }
+
+    let nextActivity;
+    if (coverage.status !== "CONTIGUOUS") {
+      // Decision 13: activity completeness never survives a coverage gap.
+      nextActivity = createBrokerExecutionActivity();
+    } else if (
+      !state.executionActivity?.coverageStartedAt
+      || state.executionActivity.coverageStartedAt !== coverage.coverageStartedAt
+    ) {
+      // Baseline establishment or successful recovery begins a new proof interval.
+      nextActivity = establishBrokerExecutionActivity(createBrokerExecutionActivity(), {
+        coverageStartedAt: coverage.coverageStartedAt,
+        currentThrough: coverage.currentThrough,
+      });
+    } else {
+      // A successful poll advances both proofs through the same observation point.
+      nextActivity = advanceBrokerExecutionActivity(state.executionActivity, {
+        observedThrough: coverage.currentThrough,
+        executions: [],
+      });
+    }
+
     state.executionCoverage = clone(coverage);
+    state.executionActivity = clone(nextActivity);
     touch();
   }
 
@@ -108,6 +142,20 @@ export function createLiveStateApi({ port = 8787, host = DEFAULT_HOST } = {}) {
   }
 
   function recordExecution(execution) {
+    // Validate event-time authority before publishing the execution anywhere. If this
+    // throws, the monitor's existing catch path marks coverage GAP and the watermark
+    // is reset by setExecutionCoverage().
+    executionTimeRequired(execution);
+
+    if (state.executionActivity?.coverageStartedAt && state.executionActivity?.currentThrough) {
+      state.executionActivity = clone(advanceBrokerExecutionActivity(state.executionActivity, {
+        // Keep the activity proof's interval endpoint aligned with executionCoverage.
+        // The successful poll will advance both together after all fill processing.
+        observedThrough: state.executionActivity.currentThrough,
+        executions: [execution],
+      }));
+    }
+
     state.executions = [clone(execution), ...state.executions].slice(0, MAX_EXECUTIONS);
     state.lastError = null;
     touch();
