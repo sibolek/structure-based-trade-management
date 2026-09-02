@@ -3,8 +3,8 @@
 
 **Branch:** `v24-execution-board-handoff`  
 **Design authority:** `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`  
-**Approved addenda:** Decisions 10–13 in addenda v0.1–v0.3  
-**Overall status:** **IN PROGRESS — HANDOFF CONTRACT/DELIVERY, BROKER PROVENANCE, PURE ADMISSION GATE, AND V2.3 COMPATIBILITY/PROVENANCE ACCEPTED; DURABLE V2.3 INSTALLATION / ACK / BROKER-FILL OWNERSHIP NOT YET ENABLED**
+**Approved addenda:** Decisions 10–14 in addenda v0.1–v0.4  
+**Overall status:** **IN PROGRESS — HANDOFF CONTRACT/DELIVERY, BROKER PROVENANCE, PURE ADMISSION GATE, V2.3 COMPATIBILITY/PROVENANCE, STABLE RECEIVER IDENTITY, AND DORMANT LOCAL INSTALLATION FOUNDATION ACCEPTED; LIVE V2.4 FILL OWNERSHIP NOT YET ENABLED**
 
 ---
 
@@ -26,8 +26,9 @@ Broker order placement, modification, cancellation, stop replacement, or automat
 | Increment 4 — Server-side handoff transport API | **ACCEPTED / ISOLATED RUNTIME-PROVEN** |
 | Sequence item 6 — execution-activity provenance + pure pre-install admission gate | **ACCEPTED / LIVE-PROVEN** |
 | Sequence item 5 — V2.3 compatibility helpers / provenance model | **ACCEPTED** |
+| Sequence item 7 foundation — stable receiver identity + dormant PREPARED/LISTENING local persistence | **ACCEPTED** |
 
-The pure sequence-item-6 gate was implemented ahead of item 5 because its broker-provenance dependency was safely isolatable. The approved sequence numbering has not changed.
+The sequence-item-7 foundation is deliberately dormant: it is not yet wired into the live React candidate array or legacy fill matcher.
 
 ---
 
@@ -37,20 +38,15 @@ The pure sequence-item-6 gate was implemented ahead of item 5 because its broker
 - **Decision 11 — Universal pre-fill discard/disarm:** every pre-fill `ARMED` / `LISTENING` trade may be discarded regardless of origin; discard ends fill eligibility, releases symbol ownership, preserves audit history, and does not cancel broker orders.
 - **Decision 12 — Symbol-global broker cleanliness:** exact Phase 4 account determines which account may own the trade, while current-position and intervening-execution cleanliness is checked across all observable connected accounts.
 - **Decision 13 — Authoritative execution timing:** Schwab `executionTime` governs admission and future fill ownership; `detectedAt` is audit-only. Safety uses a lossless account+symbol execution-activity watermark, not the bounded recent-execution UI list.
+- **Decision 14 — Stable Execution Board receiver identity:** each browser/profile owns one stable opaque receiver ID persisted independently of trade state. Losing that storage creates a new receiver; sticky claims are never silently migrated or stolen.
 
 ---
 
-## 4. Accepted execution-activity provenance + pure admission gate
+## 4. Accepted broker provenance + pure admission gate
 
-Accepted runtime:
+Accepted runtime includes `broker-execution-activity.mjs`, `execution-board-handoff-admission.mjs`, and aligned live-state coverage/activity provenance.
 
-- `schwab-bridge/broker-execution-activity.mjs`
-- `schwab-bridge/execution-board-handoff-admission.mjs`
-- upgraded `schwab-bridge/live-state-api.mjs`
-
-Accepted behavior includes exact-account availability, healthy broker-state proof, aligned coverage/activity intervals, symbol-global current-position blocking, symbol-global intervening-execution blocking, local V2.3 symbol-ownership blocking, authoritative `executionTime`, and caller-supplied final-install `requiredThrough` revalidation.
-
-Acceptance evidence:
+Accepted evidence:
 
 ```text
 v24:broker-provenance-test  24/24 PASS
@@ -61,43 +57,23 @@ schwab:state-test            10/10 PASS
 production build            PASS
 ```
 
-Live Schwab proof confirmed `status = ARMED`, `readOnly = true`, `lastError = null`, and exact alignment of `executionCoverage` and `executionActivity` start/current-through timestamps.
+Live Schwab proof confirmed aligned `executionCoverage` / `executionActivity`, `status = ARMED`, `readOnly = true`, and `lastError = null`.
 
 ---
 
-## 5. Accepted sequence item 5 — V2.3 compatibility helpers / provenance model
+## 5. Accepted V2.3 compatibility / provenance
 
-**Status:** **IMPLEMENTED / ACCEPTED**
+Runtime: `src/execution/execution-v23-compat.js`.
 
-Runtime:
-
-- `src/execution/execution-v23-compat.js`
-
-Tests:
-
-- `tests/execution-v23-compat.test.mjs`
-
-Accepted capabilities:
-
-- explicit execution origin classification: `LEGACY_MANUAL_V23` vs `V24_HANDOFF`;
-- immutable V2.4 compatibility envelope carrying exact handoff, candidate/version/hash, DSS/risk, selected quantity, exact authorized account, receiver, authorization-time, stop, expected-entry, and management provenance;
-- V2.4 structural invalidation remains distinct from Phase 3 `effectiveStop`;
-- canonical execution-stop compatibility:
+Key accepted rule:
 
 ```text
 executionStop(trade)
-  V2.4-origin  → effectiveStop
+  V2.4-origin   → effectiveStop
   legacy/manual → originalPlan.structuralStop
 ```
 
-- V2.4 planned risk uses `currentExpectedEntry`, `effectiveStop`, and `selectedQuantity`;
-- legacy/manual planned-risk behavior remains unchanged;
-- `executionListeningAt` is initially null and can be bound exactly once after successful verified downstream installation;
-- `executionListeningAt` may never precede `authorizedAt`;
-- authorization-bearing provenance mutation fails closed with `V24_AUTHORIZATION_IMMUTABLE`;
-- legacy/manual records are not subjected to the V2.4 immutability guard;
-- invalid V2.4 geometry is rejected rather than normalized;
-- stable receiver identity is required by the compatibility envelope.
+The layer preserves structural invalidation separately, selected quantity, exact account, candidate/version/hash, DSS/risk IDs, handoff/receiver provenance, authorization time, and one-time `executionListeningAt`. V2.4 authorization mutation fails with `V24_AUTHORIZATION_IMMUTABLE`; manual/legacy behavior remains compatible.
 
 Focused acceptance:
 
@@ -109,71 +85,76 @@ schwab:state-test            10/10 PASS
 production build            PASS
 ```
 
-This acceptance does **not** install a V2.4 handoff into V2.3 and does **not** begin broker-fill ownership.
+---
+
+## 6. Accepted sequence-item-7 foundation
+
+Runtime:
+
+- `src/execution/execution-board-receiver.js`
+- `src/execution/execution-v24-local-installation.js`
+
+Accepted behavior:
+
+- dedicated stable `executionBoardReceiverId`, separate from `execution-v23-store`;
+- storage/readback failures fail closed;
+- exact durable `PREPARED` installation without fill ownership;
+- same-handoff retry is idempotent;
+- mismatched same `handoffId` fails with `HANDOFF_ID_CONTENT_CONFLICT`;
+- same-symbol local ownership blocks duplicate installation;
+- nonterminal ownership adapter includes manual candidate, LIVE/EXIT ownership, Edit working state, PREPARED, and LISTENING records;
+- one-time durable `PREPARED → LISTENING` transition freezes `executionListeningAt`;
+- LISTENING installation can construct a V2.3-shaped candidate without losing Phase 3 `effectiveStop` authority;
+- the V2.4 record is intentionally **not inserted into the live V2.3 candidate array yet**, preventing the legacy symbol-only / `detectedAt` matcher from claiming it.
+
+User acceptance: all focused installation/receiver tests and requested regressions reported green on 2026-09-02.
+
+This is **not full sequence-item-7 completion** yet. Final broker revalidation, activation into the live V2.3 store, and transport ACK remain to be wired after safe exact-account ownership matching exists.
 
 ---
 
-## 6. Current safety invariants
+## 7. Newly identified fill-ownership completeness issue
 
-> **One ARM risk authorization → at most one immutable handoff.**
+The public `executions` array remains intentionally bounded for UI use. That means it cannot safely serve as the only durable source for first-fill ownership after a browser reload or temporary receiver outage: an eligible execution could be evicted before the receiver processes it.
 
-> **One handoff → one permanent claiming receiver.**
+A new design decision is therefore required before sequence item 8 is activated: preserve exact broker execution events needed for V2.4 ownership independently of the bounded UI list, with the same fail-closed coverage discipline used by admission provenance.
 
-> **Claiming does not start broker-fill ownership.**
-
-> **Structural invalidation and Phase 3 effective stop remain distinct.**
-
-> **V2.4 execution-risk authority uses the Phase 3 effective stop.**
-
-> **Selected quantity and exact Phase 4 account provenance cannot be rewritten downstream.**
-
-> **Execution coverage never bridges a monitor polling gap.**
-
-> **Schwab `executionTime` is authoritative for broker event timing.**
-
-> **V2.4 authorization cannot be edited in place after installation.**
-
-> **Every pre-fill armed/listening trade remains user-discardable.**
+No live matcher has been enabled pending that decision.
 
 ---
 
-## 7. Current boundary — not yet end-to-end
+## 8. Current boundary — not yet end-to-end
 
 The branch still does **not**:
 
-- durably install a V2.4 handoff as a V2.3 listening candidate;
-- establish a real `executionListeningAt` through installation/read-back verification;
-- ACK a real successful local installation;
-- bind broker fills through the V2.4-origin path;
-- implement full discard/retirement anti-resurrection synchronization;
+- activate a V2.4 LISTENING installation into the live V2.3 candidate array;
+- ACK a real completed local installation;
+- bind a real broker fill through the V2.4-origin path;
+- implement exact-account V2.4 fill matching;
+- implement partial/fragmented entry lifecycle and authorized-quantity variance;
+- implement universal discard retirement / anti-resurrection synchronization;
 - implement fast Revise → Re-arm;
 - place, modify, cancel, or flatten broker orders.
 
-Therefore a V2.4 internal `ARMED`, handoff `PENDING`/`CLAIMED`, or pure `ADMITTED` result still does not create V2.3 broker-fill ownership.
+Therefore a V2.4 internal `ARMED`, handoff `PENDING`/`CLAIMED`, pure `ADMITTED`, `PREPARED`, or dormant `LISTENING` record does not yet create live V2.3 broker-fill ownership.
 
 ---
 
-## 8. Next implementation focus
+## 9. Next implementation focus
 
-The next major work is approved sequence item 7:
-
-> **idempotent local V2.3 installation + final admission revalidation + durable `executionListeningAt` + ACK**
-
-Before wiring that path, the receiver must have a stable opaque `executionBoardReceiverId`, and the local install protocol must preserve Decision 8/9 idempotency and sticky receiver semantics.
-
-After item 7, sequence item 8 is exact-account fill matching using:
+Freeze the execution-event retention rule required for safe sequence-item-8 matching, then implement a pure initial-fill matcher using:
 
 ```text
-accountId
-+ symbol
-+ direction
-+ executionTime >= executionListeningAt
+exact authorized account
++ exact symbol
++ correct opening direction
++ authoritative executionTime >= executionListeningAt
 ```
 
-Only after items 7 and 8 are accepted will a true V2.4 → V2.3 → real broker-fill end-to-end live test be appropriate.
+Only after that matcher is accepted will sequence item 7 be wired live through final admission revalidation, durable listening activation, and ACK.
 
 ---
 
-## 9. Documentation rule
+## 10. Documentation rule
 
 `USER-GUIDE.md` remains intentionally unchanged because there is still no accepted end-to-end operator workflow. Approved dated design records remain immutable; this status record tracks current accepted implementation behavior.
