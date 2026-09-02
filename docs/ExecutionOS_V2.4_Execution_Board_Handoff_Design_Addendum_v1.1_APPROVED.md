@@ -33,7 +33,7 @@ The missing information was not lost in transport. The full specification alread
    - symbol;
    - direction;
    - current authorization/listener status;
-   - setup;
+   - **Trade Setup as a first-class, explicitly labeled body field**;
    - timeframe;
    - authorized execution account display;
    - trade thesis;
@@ -46,6 +46,8 @@ The missing information was not lost in transport. The full specification alread
    - all targets;
    - management plan;
    - authorization, execution-listening, and handoff-created timestamps.
+
+   The setup may also appear in header/subtitle chrome for context, but that does **not** satisfy this requirement by itself. The body of the inspector must contain a clearly labeled `Trade Setup` field so the setup cannot be visually lost or mistaken for incidental header text.
 
 4. **Technical provenance is preserved but visually secondary.**
    A collapsed `Technical / API Provenance` section exposes the immutable audit fields, including:
