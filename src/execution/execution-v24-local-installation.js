@@ -1,10 +1,15 @@
 import {
+  EXECUTION_BOARD_STORE_KEY,
+  readExecutionBoardStore,
+  transactExecutionBoardStore,
+} from "./execution-board-store-repository.js";
+import {
   bindV24ExecutionListeningAt,
   buildV24ExecutionCompatibilityEnvelope,
   executionStop,
 } from "./execution-v23-compat.js";
 
-export const EXECUTION_V23_STORE_KEY = "execution-v23-store";
+export const EXECUTION_V23_STORE_KEY = EXECUTION_BOARD_STORE_KEY;
 export const V24_LOCAL_INSTALLATION_SCHEMA_VERSION = 1;
 export const V24_LOCAL_INSTALLATION_STATUSES = Object.freeze(["PREPARED", "LISTENING"]);
 
@@ -40,50 +45,6 @@ function installError(message, code) {
   return error;
 }
 
-function requireStorage(storage) {
-  if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") {
-    throw installError("durable local execution storage is unavailable", "LOCAL_EXECUTION_PERSISTENCE_FAILED");
-  }
-  return storage;
-}
-
-function emptyStore() {
-  return { draft: null, candidates: [], liveTrades: [], history: [], v24Installations: [] };
-}
-
-function parseStore(storage, storeKey) {
-  const durableStorage = requireStorage(storage);
-  try {
-    const raw = durableStorage.getItem(storeKey);
-    if (!raw) return emptyStore();
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("store root must be an object");
-    return {
-      ...parsed,
-      candidates: Array.isArray(parsed.candidates) ? parsed.candidates : [],
-      liveTrades: Array.isArray(parsed.liveTrades) ? parsed.liveTrades : [],
-      history: Array.isArray(parsed.history) ? parsed.history : [],
-      v24Installations: Array.isArray(parsed.v24Installations) ? parsed.v24Installations : [],
-    };
-  } catch (error) {
-    throw installError(`local execution store could not be read: ${error.message}`, "LOCAL_EXECUTION_PERSISTENCE_FAILED");
-  }
-}
-
-function writeAndReadBack(storage, storeKey, nextStore) {
-  const durableStorage = requireStorage(storage);
-  const serialized = JSON.stringify(nextStore);
-  try {
-    durableStorage.setItem(storeKey, serialized);
-    const readBack = durableStorage.getItem(storeKey);
-    if (readBack !== serialized) throw new Error("exact store readback mismatch");
-    return parseStore(durableStorage, storeKey);
-  } catch (error) {
-    if (error?.code === "LOCAL_EXECUTION_PERSISTENCE_FAILED") throw error;
-    throw installError(`local execution store could not be persisted exactly: ${error.message}`, "LOCAL_EXECUTION_PERSISTENCE_FAILED");
-  }
-}
-
 function immutableIdentity(record) {
   return JSON.stringify({
     schemaVersion: record?.schemaVersion,
@@ -95,7 +56,8 @@ function immutableIdentity(record) {
 }
 
 function installationById(store, handoffId) {
-  return store.v24Installations.find((item) => text(item?.handoffId) === text(handoffId)) || null;
+  return (Array.isArray(store?.v24Installations) ? store.v24Installations : [])
+    .find((item) => text(item?.handoffId) === text(handoffId)) || null;
 }
 
 function verifyReadBack(store, expected) {
@@ -137,26 +99,32 @@ export function persistPreparedV24LocalInstallation({
     throw installError("PREPARED V2.4 installation is required", "INVALID_LOCAL_EXECUTION_INSTALLATION");
   }
 
-  const store = parseStore(storage, storeKey);
-  const existing = installationById(store, installation.handoffId);
-  if (existing) {
-    if (immutableIdentity(existing) !== immutableIdentity(installation)) {
-      throw installError("handoffId already exists with different local content", "HANDOFF_ID_CONTENT_CONFLICT");
-    }
-    return immutable(existing);
-  }
-
-  const sameSymbol = store.v24Installations.find((item) => upper(item?.symbol) === upper(installation.symbol));
-  if (sameSymbol) {
-    throw installError("another V2.4 installation already owns this symbol locally", "EXECUTION_SYMBOL_OWNERSHIP_CONFLICT");
-  }
-
   const expected = structuredClone(installation);
-  const nextStore = {
-    ...store,
-    v24Installations: [...store.v24Installations, expected],
-  };
-  return verifyReadBack(writeAndReadBack(storage, storeKey, nextStore), expected);
+  const committed = transactExecutionBoardStore({
+    storage,
+    storeKey,
+    mutate: (store) => {
+      const existing = installationById(store, installation.handoffId);
+      if (existing) {
+        if (immutableIdentity(existing) !== immutableIdentity(installation)) {
+          throw installError("handoffId already exists with different local content", "HANDOFF_ID_CONTENT_CONFLICT");
+        }
+        return store;
+      }
+
+      const sameSymbol = store.v24Installations.find((item) => upper(item?.symbol) === upper(installation.symbol));
+      if (sameSymbol) {
+        throw installError("another V2.4 installation already owns this symbol locally", "EXECUTION_SYMBOL_OWNERSHIP_CONFLICT");
+      }
+
+      return {
+        ...store,
+        v24Installations: [...store.v24Installations, expected],
+      };
+    },
+  });
+
+  return verifyReadBack(committed, expected);
 }
 
 export function bindAndPersistV24ExecutionListeningAt({
@@ -165,43 +133,50 @@ export function bindAndPersistV24ExecutionListeningAt({
   handoffId,
   executionListeningAt,
 } = {}) {
-  const store = parseStore(storage, storeKey);
-  const existing = installationById(store, handoffId);
-  if (!existing) {
-    throw installError("prepared V2.4 installation was not found", "LOCAL_EXECUTION_INSTALLATION_NOT_FOUND");
-  }
-
   const listeningAt = isoTimestamp(executionListeningAt);
   if (!listeningAt) {
     throw installError("executionListeningAt is invalid", "V24_EXECUTION_LISTENING_AT_INVALID");
   }
 
-  if (existing.status === "LISTENING") {
-    if (existing.executionListeningAt !== listeningAt) {
-      throw installError("existing local listening boundary conflicts with retry", "HANDOFF_ID_CONTENT_CONFLICT");
-    }
-    return immutable(existing);
-  }
-  if (existing.status !== "PREPARED") {
-    throw installError("local V2.4 installation is not PREPARED", "INVALID_LOCAL_EXECUTION_INSTALLATION");
-  }
+  let expected = null;
+  const committed = transactExecutionBoardStore({
+    storage,
+    storeKey,
+    mutate: (store) => {
+      const existing = installationById(store, handoffId);
+      if (!existing) {
+        throw installError("prepared V2.4 installation was not found", "LOCAL_EXECUTION_INSTALLATION_NOT_FOUND");
+      }
 
-  const compatibility = bindV24ExecutionListeningAt(existing.compatibility, listeningAt);
-  const expected = {
-    ...structuredClone(existing),
-    status: "LISTENING",
-    executionListeningAt: listeningAt,
-    compatibility,
-  };
+      if (existing.status === "LISTENING") {
+        if (existing.executionListeningAt !== listeningAt) {
+          throw installError("existing local listening boundary conflicts with retry", "HANDOFF_ID_CONTENT_CONFLICT");
+        }
+        expected = structuredClone(existing);
+        return store;
+      }
+      if (existing.status !== "PREPARED") {
+        throw installError("local V2.4 installation is not PREPARED", "INVALID_LOCAL_EXECUTION_INSTALLATION");
+      }
 
-  const nextStore = {
-    ...store,
-    v24Installations: store.v24Installations.map((item) => (
-      text(item.handoffId) === text(handoffId) ? expected : item
-    )),
-  };
+      const compatibility = bindV24ExecutionListeningAt(existing.compatibility, listeningAt);
+      expected = {
+        ...structuredClone(existing),
+        status: "LISTENING",
+        executionListeningAt: listeningAt,
+        compatibility,
+      };
 
-  return verifyReadBack(writeAndReadBack(storage, storeKey, nextStore), expected);
+      return {
+        ...store,
+        v24Installations: store.v24Installations.map((item) => (
+          text(item.handoffId) === text(handoffId) ? expected : item
+        )),
+      };
+    },
+  });
+
+  return verifyReadBack(committed, expected);
 }
 
 export function readV24LocalInstallation({
@@ -209,7 +184,7 @@ export function readV24LocalInstallation({
   storeKey = EXECUTION_V23_STORE_KEY,
   handoffId,
 } = {}) {
-  const found = installationById(parseStore(storage, storeKey), handoffId);
+  const found = installationById(readExecutionBoardStore({ storage, storeKey }), handoffId);
   return found ? immutable(found) : null;
 }
 
