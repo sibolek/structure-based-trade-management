@@ -363,9 +363,6 @@ export async function runV24ExecutionRouterCycle({
   now = () => new Date().toISOString(),
   dependencies = {},
 } = {}) {
-  if (!transport || typeof transport.discover !== "function") {
-    throw routerError("V2.4 runtime router requires handoff transport", "V24_HANDOFF_TRANSPORT_REQUIRED");
-  }
   const receiver = text(receiverId);
   if (!receiver) throw routerError("V2.4 runtime router requires receiverId", "EXECUTION_BOARD_RECEIVER_ID_REQUIRED");
   if (!brokerState) throw routerError("V2.4 runtime router requires brokerState", "BROKER_STATE_UNAVAILABLE");
@@ -378,27 +375,50 @@ export async function runV24ExecutionRouterCycle({
   const readStore = dependencies.readStore || readExecutionBoardStore;
 
   const results = [];
-  const envelopes = await transport.discover(receiver);
+  let envelopes = [];
 
-  // Decision 20: activation envelopes are always processed serially in server order.
-  for (const envelope of envelopes) {
-    const handoffId = text(envelope?.handoff?.handoffId);
-    if (!handoffId) continue;
-    const activation = await activate({
-      envelope,
-      brokerState,
-      receiverId: receiver,
-      storage,
-      storeKey,
-      proposedExecutionListeningAt: proposedBoundaryFor(proposedBoundaries, handoffId),
-      transport,
-      now,
-    });
-    results.push(routerResult("ACTIVATION", handoffId, activation.status, activation));
-    if (activation.status === "WAITING_FOR_BROKER_PROOF" && activation.proposedExecutionListeningAt) {
-      setProposedBoundary(proposedBoundaries, handoffId, activation.proposedExecutionListeningAt);
-    } else if (["DELIVERED", "BLOCKED", "RETIREMENT_ACTIVE", "RECONCILIATION_REQUIRED"].includes(activation.status)) {
-      clearProposedBoundary(proposedBoundaries, handoffId);
+  // Decision 22C: transport/activation availability is independent from
+  // already-durable broker-ownership work. Missing or failing pretrade
+  // discovery must not prevent retirement, first-fill, or lifecycle processing.
+  if (!transport || typeof transport.discover !== "function") {
+    results.push(routerResult(
+      "TRANSPORT",
+      "",
+      "WAITING_FOR_PRETRADE",
+      { reason: "V24_HANDOFF_TRANSPORT_UNAVAILABLE" },
+    ));
+  } else {
+    try {
+      envelopes = await transport.discover(receiver);
+
+      // Decision 20: activation envelopes are always processed serially in server order.
+      for (const envelope of envelopes) {
+        const handoffId = text(envelope?.handoff?.handoffId);
+        if (!handoffId) continue;
+        const activation = await activate({
+          envelope,
+          brokerState,
+          receiverId: receiver,
+          storage,
+          storeKey,
+          proposedExecutionListeningAt: proposedBoundaryFor(proposedBoundaries, handoffId),
+          transport,
+          now,
+        });
+        results.push(routerResult("ACTIVATION", handoffId, activation.status, activation));
+        if (activation.status === "WAITING_FOR_BROKER_PROOF" && activation.proposedExecutionListeningAt) {
+          setProposedBoundary(proposedBoundaries, handoffId, activation.proposedExecutionListeningAt);
+        } else if (["DELIVERED", "BLOCKED", "RETIREMENT_ACTIVE", "RECONCILIATION_REQUIRED"].includes(activation.status)) {
+          clearProposedBoundary(proposedBoundaries, handoffId);
+        }
+      }
+    } catch (error) {
+      results.push(routerResult(
+        "TRANSPORT",
+        "",
+        "ERROR",
+        { reason: error?.code || error?.message || String(error) },
+      ));
     }
   }
 

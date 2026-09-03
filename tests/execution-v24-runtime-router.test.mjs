@@ -308,3 +308,68 @@ test("LIVE lifecycle advancement runs independently of transport discovery", asy
   assert.equal(calls, 1);
   assert.ok(result.results.some((item) => item.stage === "LIFECYCLE" && item.handoffId === "h-live"));
 });
+
+
+test("durable ownership continues when pretrade transport is unavailable", async () => {
+  const inst = installation("h-no-pretrade");
+  let matched = 0;
+
+  const result = await runV24ExecutionRouterCycle({
+    transport: null,
+    receiverId: "receiver-A",
+    brokerState: {},
+    dependencies: {
+      readStore: () => baseStore({ v24Installations: [inst] }),
+      evaluateInitialFill: () => {
+        matched += 1;
+        return { status: "WAITING", reason: null };
+      },
+    },
+  });
+
+  assert.equal(matched, 1);
+  assert.ok(result.results.some(
+    (item) => item.stage === "TRANSPORT" && item.status === "WAITING_FOR_PRETRADE"
+  ));
+  assert.ok(result.results.some(
+    (item) => item.stage === "FIRST_FILL"
+      && item.handoffId === "h-no-pretrade"
+      && item.status === "WAITING"
+  ));
+});
+
+test("pretrade discovery failure does not block durable ownership processing", async () => {
+  const inst = installation("h-pretrade-error");
+  let matched = 0;
+
+  const result = await runV24ExecutionRouterCycle({
+    transport: {
+      discover: async () => {
+        const error = new Error("pretrade unavailable");
+        error.code = "PRETRADE_DISCOVERY_FAILED";
+        throw error;
+      },
+    },
+    receiverId: "receiver-A",
+    brokerState: {},
+    dependencies: {
+      readStore: () => baseStore({ v24Installations: [inst] }),
+      evaluateInitialFill: () => {
+        matched += 1;
+        return { status: "WAITING", reason: null };
+      },
+    },
+  });
+
+  assert.equal(matched, 1);
+  assert.ok(result.results.some(
+    (item) => item.stage === "TRANSPORT"
+      && item.status === "ERROR"
+      && item.reason === "PRETRADE_DISCOVERY_FAILED"
+  ));
+  assert.ok(result.results.some(
+    (item) => item.stage === "FIRST_FILL"
+      && item.handoffId === "h-pretrade-error"
+      && item.status === "WAITING"
+  ));
+});
