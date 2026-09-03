@@ -181,6 +181,69 @@ test("PREPARED holds one proposed boundary while broker coverage catches up", as
   assert.equal(second.proposedExecutionListeningAt, "2026-09-02T18:00:03.000Z");
 });
 
+
+test("restart while PREPARED abandons transient proposal and chooses a fresh boundary", async () => {
+  const storage = memoryStorage();
+  const transport = transportMock();
+
+  // Epoch 1 creates durable PREPARED, but T1 itself remains transient.
+  const firstEpoch = await advanceV24HandoffActivation({
+    envelope: envelope(),
+    brokerState: brokerState({
+      currentThrough: "2026-09-02T18:00:02.500Z",
+    }),
+    receiverId: "receiver-A",
+    storage,
+    transport,
+    now: () => "2026-09-02T18:00:03.000Z",
+  });
+
+  assert.equal(firstEpoch.status, "WAITING_FOR_BROKER_PROOF");
+  assert.equal(
+    firstEpoch.proposedExecutionListeningAt,
+    "2026-09-02T18:00:03.000Z",
+  );
+
+  const afterFirstEpoch = readV24LocalInstallation({
+    storage,
+    handoffId: "handoff-001",
+  });
+
+  assert.equal(afterFirstEpoch.status, "PREPARED");
+  assert.equal(afterFirstEpoch.executionListeningAt ?? null, null);
+
+  // Epoch 2 intentionally supplies no old proposed T. The durable PREPARED
+  // installation survives, but the abandoned T1 does not.
+  const secondEpoch = await advanceV24HandoffActivation({
+    envelope: envelope(),
+    brokerState: brokerState({
+      currentThrough: "2026-09-02T18:00:03.500Z",
+    }),
+    receiverId: "receiver-A",
+    storage,
+    transport,
+    now: () => "2026-09-02T18:00:04.000Z",
+  });
+
+  assert.equal(secondEpoch.status, "WAITING_FOR_BROKER_PROOF");
+  assert.equal(
+    secondEpoch.proposedExecutionListeningAt,
+    "2026-09-02T18:00:04.000Z",
+  );
+  assert.notEqual(
+    secondEpoch.proposedExecutionListeningAt,
+    firstEpoch.proposedExecutionListeningAt,
+  );
+
+  const afterRestart = readV24LocalInstallation({
+    storage,
+    handoffId: "handoff-001",
+  });
+
+  assert.equal(afterRestart.status, "PREPARED");
+  assert.equal(afterRestart.executionListeningAt ?? null, null);
+});
+
 test("final proof through exact T persists LISTENING before ACK and delivers exact T", async () => {
   const storage = memoryStorage();
   const transport = transportMock();
