@@ -465,8 +465,8 @@ export default function ExecutionV23({ broker }) {
     listener: setStoreProjection,
   }), []);
 
-  const setStore = (updater) => {
-    const committed = transactV23ExecutionProjection({
+  const setStore = async (updater) => {
+    const committed = await transactV23ExecutionProjection({
       project: normalizeStore,
       updater,
     });

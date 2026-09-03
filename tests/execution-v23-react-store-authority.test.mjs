@@ -25,6 +25,8 @@ test("ExecutionV23 has no direct full-store localStorage writer", () => {
   assert.equal(source.includes("localStorage.setItem"), false);
   assert.equal(source.includes("transactV23ExecutionProjection"), true);
   assert.equal(source.includes("subscribeV23ExecutionProjection"), true);
+  assert.equal(source.includes("const setStore = async"), true);
+  assert.equal(source.includes("await transactV23ExecutionProjection"), true);
 });
 
 test("ExecutionV23 explicitly excludes V2.4 origin from legacy fill and lifecycle matchers", () => {

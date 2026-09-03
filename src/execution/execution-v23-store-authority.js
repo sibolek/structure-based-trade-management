@@ -2,7 +2,7 @@ import {
   EXECUTION_BOARD_STORE_KEY,
   readExecutionBoardStore,
   subscribeExecutionBoardStore,
-  transactExecutionBoardStore,
+  transactExecutionBoardStoreSerialized,
 } from "./execution-board-store-repository.js";
 
 export const V23_EXECUTION_PROJECTION_FIELDS = Object.freeze([
@@ -83,20 +83,22 @@ export function readV23ExecutionProjection({
   return requireProjection(projector(legacyProjectionSource(canonical)));
 }
 
-export function transactV23ExecutionProjection({
+export async function transactV23ExecutionProjection({
   storage = globalThis?.localStorage,
   storeKey = EXECUTION_BOARD_STORE_KEY,
   project = defaultProject,
   updater,
+  lockManager = globalThis?.navigator?.locks,
 } = {}) {
   const projector = requireProject(project);
   if (typeof updater !== "function" && (!updater || typeof updater !== "object" || Array.isArray(updater))) {
     throw authorityError("V2.3 projection update requires an updater function or object");
   }
 
-  const committed = transactExecutionBoardStore({
+  const committed = await transactExecutionBoardStoreSerialized({
     storage,
     storeKey,
+    lockManager,
     mutate: (latest) => {
       const currentProjection = requireProjection(projector(legacyProjectionSource(latest)));
       const proposed = typeof updater === "function" ? updater(currentProjection) : updater;
