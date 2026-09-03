@@ -68,33 +68,58 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
         const brokerReady = Boolean(current?.broker?.connected && current?.broker?.state);
         const pretradeReady = Boolean(current?.pretrade?.connected && current?.pretrade?.pretradeUrl);
 
-        if (!brokerReady || !pretradeReady) {
+        // Decision 22C: Schwab evidence is required for broker-ownership
+        // conclusions, but pretrade transport is not required once durable
+        // ownership already exists.
+        if (!brokerReady) {
           setState((prior) => ({
             ...prior,
-            status: "WAITING_FOR_SERVICES",
+            status: "WAITING_FOR_SCHWAB",
             leader: true,
-            error: current?.broker?.error || current?.pretrade?.error || "",
+            error: current?.broker?.error || "",
           }));
           await delay(LOOP_DELAY_MS);
           continue;
         }
 
         try {
-          const transport = createV24HandoffTransport({ pretradeUrl: current.pretrade.pretradeUrl });
+          const transport = pretradeReady
+            ? createV24HandoffTransport({ pretradeUrl: current.pretrade.pretradeUrl })
+            : null;
+
           const result = await runV24ExecutionRouterCycle({
             transport,
             receiverId,
             brokerState: current.broker.state,
             proposedBoundaries: proposedBoundaries.current,
           });
+
+          const transportFailure = result.results.find(
+            (item) => item.stage === "TRANSPORT" && item.status === "ERROR",
+          );
+          const transportWaiting = result.results.find(
+            (item) => item.stage === "TRANSPORT" && item.status === "WAITING_FOR_PRETRADE",
+          );
+
+          let status = "RUNNING";
+          let stateError = "";
+
+          if (transportFailure) {
+            status = "ERROR";
+            stateError = transportFailure.reason || current?.pretrade?.error || "PRETRADE_TRANSPORT_ERROR";
+          } else if (!pretradeReady || transportWaiting) {
+            status = "WAITING_FOR_PRETRADE";
+            stateError = current?.pretrade?.error || transportWaiting?.reason || "";
+          }
+
           if (!cancelled) {
             setState({
-              status: "RUNNING",
+              status,
               receiverId,
               leader: true,
               lastCycleAt: result.processedAt,
               lastResult: result,
-              error: "",
+              error: stateError,
               brokerWriteAuthority: false,
               enabled: true,
             });

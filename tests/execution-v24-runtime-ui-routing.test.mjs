@@ -122,3 +122,22 @@ test("V2.4 pre-fill board exposes DISCARD but no authorization EDIT action", () 
   assert.doesNotMatch(board, />EDIT</);
   assert.match(board, /Broker orders, if any, are unchanged/);
 });
+
+
+test("runtime hook uses stage-specific service waiting instead of an all-or-nothing gate", () => {
+  const hook = source("src/hooks/useV24ExecutionRouter.js");
+
+  assert.match(hook, /WAITING_FOR_SCHWAB/);
+  assert.match(hook, /WAITING_FOR_PRETRADE/);
+  assert.doesNotMatch(hook, /WAITING_FOR_SERVICES/);
+
+  assert.match(
+    hook,
+    /const transport = pretradeReady\s*\?\s*createV24HandoffTransport[\s\S]*?: null;/,
+  );
+
+  assert.match(
+    hook,
+    /if \(!brokerReady\)[\s\S]*?continue;/,
+  );
+});
