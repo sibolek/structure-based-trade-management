@@ -364,6 +364,26 @@ export function bindAndPersistV24ExecutionListeningAtGuarded(options = {}) {
   return bindAndPersistV24ExecutionListeningAt(options);
 }
 
+export async function persistPreparedV24LocalInstallationGuardedSerialized({
+  lockManager = globalThis?.navigator?.locks,
+  ...options
+} = {}) {
+  return withExecutionBoardStoreWriterLock({
+    lockManager,
+    operation: () => persistPreparedV24LocalInstallationGuarded(options),
+  });
+}
+
+export async function bindAndPersistV24ExecutionListeningAtGuardedSerialized({
+  lockManager = globalThis?.navigator?.locks,
+  ...options
+} = {}) {
+  return withExecutionBoardStoreWriterLock({
+    lockManager,
+    operation: () => bindAndPersistV24ExecutionListeningAtGuarded(options),
+  });
+}
+
 export function buildV23CandidateFromActiveListeningInstallation({ installation, retirement = null } = {}) {
   if (retirement) {
     const code = retirement.status === "RETIRED" ? "V24_HANDOFF_RETIRED" : "V24_HANDOFF_RETIREMENT_ACTIVE";

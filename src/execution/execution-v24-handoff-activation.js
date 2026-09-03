@@ -7,11 +7,10 @@ import {
   readV24LocalInstallation,
 } from "./execution-v24-local-installation.js";
 import {
-  assertV24HandoffRetirementAllowsActivation,
-  bindAndPersistV24ExecutionListeningAtGuarded,
-  persistPreparedV24LocalInstallationGuarded,
+  bindAndPersistV24ExecutionListeningAtGuardedSerialized,
+  persistPreparedV24LocalInstallationGuardedSerialized,
   readV24Retirement,
-  requestV24Retirement,
+  requestV24RetirementSerialized,
 } from "./execution-v24-retirement.js";
 
 export const V24_HANDOFF_ACTIVATION_STATUSES = Object.freeze([
@@ -119,6 +118,7 @@ export async function advanceV24HandoffActivation({
   proposedExecutionListeningAt = null,
   transport,
   now = () => new Date().toISOString(),
+  lockManager = globalThis?.navigator?.locks,
 } = {}) {
   const receiver = text(receiverId);
   if (!receiver) throw activationError("receiverId is required", "EXECUTION_BOARD_RECEIVER_ID_REQUIRED");
@@ -213,10 +213,10 @@ export async function advanceV24HandoffActivation({
       });
     }
 
-    assertV24HandoffRetirementAllowsActivation({ storage, storeKey, handoffId });
-    prepared = persistPreparedV24LocalInstallationGuarded({
+    prepared = await persistPreparedV24LocalInstallationGuardedSerialized({
       storage,
       storeKey,
+      lockManager,
       installation: buildPreparedV24LocalInstallation({
         handoff,
         receiverId: receiver,
@@ -248,9 +248,10 @@ export async function advanceV24HandoffActivation({
   });
 
   if (!finalAdmission.admitted) {
-    requestV24Retirement({
+    await requestV24RetirementSerialized({
       storage,
       storeKey,
+      lockManager,
       handoffId,
       receiverId: receiver,
       requestedAt: proposed,
@@ -264,9 +265,10 @@ export async function advanceV24HandoffActivation({
     });
   }
 
-  const listening = bindAndPersistV24ExecutionListeningAtGuarded({
+  const listening = await bindAndPersistV24ExecutionListeningAtGuardedSerialized({
     storage,
     storeKey,
+    lockManager,
     handoffId,
     executionListeningAt: proposed,
   });

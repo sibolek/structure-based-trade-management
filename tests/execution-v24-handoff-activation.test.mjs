@@ -93,6 +93,21 @@ function brokerState({
   };
 }
 
+function writerLockManager() {
+  return {
+    async request(name, options, callback) {
+      return callback({ name, mode: options?.mode });
+    },
+  };
+}
+
+function activate(options = {}) {
+  return advanceV24HandoffActivation({
+    lockManager: writerLockManager(),
+    ...options,
+  });
+}
+
 function memoryStorage(initial = null) {
   const values = new Map();
   if (initial) values.set(STORE_KEY, JSON.stringify(initial));
@@ -148,7 +163,7 @@ const envelope = () => ({ handoff: handoff(), delivery: delivery("CLAIMED") });
 test("PENDING delivery is claimed before any local installation is prepared", async () => {
   const storage = memoryStorage();
   const transport = transportMock();
-  const result = await advanceV24HandoffActivation({
+  const result = await activate({
     envelope: { handoff: handoff(), delivery: delivery("PENDING") },
     brokerState: brokerState(),
     receiverId: "receiver-A",
@@ -166,11 +181,11 @@ test("PENDING delivery is claimed before any local installation is prepared", as
 test("PREPARED holds one proposed boundary while broker coverage catches up", async () => {
   const storage = memoryStorage();
   const transport = transportMock();
-  const first = await advanceV24HandoffActivation({
+  const first = await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport,
     now: () => "2026-09-02T18:00:03.000Z",
   });
-  const second = await advanceV24HandoffActivation({
+  const second = await activate({
     envelope: envelope(), brokerState: brokerState({ currentThrough: "2026-09-02T18:00:02.900Z" }),
     receiverId: "receiver-A", storage, transport,
     proposedExecutionListeningAt: first.proposedExecutionListeningAt,
@@ -187,7 +202,7 @@ test("restart while PREPARED abandons transient proposal and chooses a fresh bou
   const transport = transportMock();
 
   // Epoch 1 creates durable PREPARED, but T1 itself remains transient.
-  const firstEpoch = await advanceV24HandoffActivation({
+  const firstEpoch = await activate({
     envelope: envelope(),
     brokerState: brokerState({
       currentThrough: "2026-09-02T18:00:02.500Z",
@@ -214,7 +229,7 @@ test("restart while PREPARED abandons transient proposal and chooses a fresh bou
 
   // Epoch 2 intentionally supplies no old proposed T. The durable PREPARED
   // installation survives, but the abandoned T1 does not.
-  const secondEpoch = await advanceV24HandoffActivation({
+  const secondEpoch = await activate({
     envelope: envelope(),
     brokerState: brokerState({
       currentThrough: "2026-09-02T18:00:03.500Z",
@@ -247,12 +262,12 @@ test("restart while PREPARED abandons transient proposal and chooses a fresh bou
 test("final proof through exact T persists LISTENING before ACK and delivers exact T", async () => {
   const storage = memoryStorage();
   const transport = transportMock();
-  await advanceV24HandoffActivation({
+  await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport,
     now: () => "2026-09-02T18:00:03.000Z",
   });
 
-  const result = await advanceV24HandoffActivation({
+  const result = await activate({
     envelope: envelope(), brokerState: brokerState({ currentThrough: "2026-09-02T18:00:03.500Z" }),
     receiverId: "receiver-A", storage, transport,
     proposedExecutionListeningAt: "2026-09-02T18:00:03.000Z",
@@ -268,13 +283,13 @@ test("final proof through exact T persists LISTENING before ACK and delivers exa
 test("ACK outage leaves durable LISTENING authoritative and reports retryable ACK pending", async () => {
   const storage = memoryStorage();
   const setupTransport = transportMock();
-  await advanceV24HandoffActivation({
+  await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport: setupTransport,
     now: () => "2026-09-02T18:00:03.000Z",
   });
 
   const transport = transportMock({ ackFails: true });
-  const result = await advanceV24HandoffActivation({
+  const result = await activate({
     envelope: envelope(), brokerState: brokerState({ currentThrough: "2026-09-02T18:00:03.500Z" }),
     receiverId: "receiver-A", storage, transport,
     proposedExecutionListeningAt: "2026-09-02T18:00:03.000Z",
@@ -287,18 +302,18 @@ test("ACK outage leaves durable LISTENING authoritative and reports retryable AC
 test("restart with local LISTENING retries ACK using original T and never creates a replacement boundary", async () => {
   const storage = memoryStorage();
   const firstTransport = transportMock({ ackFails: true });
-  await advanceV24HandoffActivation({
+  await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport: firstTransport,
     now: () => "2026-09-02T18:00:03.000Z",
   });
-  await advanceV24HandoffActivation({
+  await activate({
     envelope: envelope(), brokerState: brokerState({ currentThrough: "2026-09-02T18:00:03.500Z" }),
     receiverId: "receiver-A", storage, transport: firstTransport,
     proposedExecutionListeningAt: "2026-09-02T18:00:03.000Z",
   });
 
   const retryTransport = transportMock();
-  const retry = await advanceV24HandoffActivation({
+  const retry = await activate({
     envelope: envelope(), brokerState: brokerState({ currentThrough: "2026-09-02T18:00:10.000Z" }),
     receiverId: "receiver-A", storage, transport: retryTransport,
     now: () => "2026-09-02T18:00:09.000Z",
@@ -311,14 +326,14 @@ test("restart with local LISTENING retries ACK using original T and never create
 test("LISTENING persistence failure leaves PREPARED authoritative and proposed T ineffective", async () => {
   const storage = memoryStorage();
   const transport = transportMock();
-  await advanceV24HandoffActivation({
+  await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport,
     now: () => "2026-09-02T18:00:03.000Z",
   });
   storage.failWrites = true;
 
   await assert.rejects(
-    () => advanceV24HandoffActivation({
+    () => activate({
       envelope: envelope(), brokerState: brokerState({ currentThrough: "2026-09-02T18:00:03.500Z" }),
       receiverId: "receiver-A", storage, transport,
       proposedExecutionListeningAt: "2026-09-02T18:00:03.000Z",
@@ -332,12 +347,12 @@ test("LISTENING persistence failure leaves PREPARED authoritative and proposed T
 test("final intervening broker activity retires PREPARED reservation and blocks delivery", async () => {
   const storage = memoryStorage();
   const transport = transportMock();
-  await advanceV24HandoffActivation({
+  await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport,
     now: () => "2026-09-02T18:00:03.000Z",
   });
 
-  const result = await advanceV24HandoffActivation({
+  const result = await activate({
     envelope: envelope(),
     brokerState: brokerState({
       currentThrough: "2026-09-02T18:00:03.500Z",
@@ -360,7 +375,7 @@ test("final intervening broker activity retires PREPARED reservation and blocks 
 test("existing broker position blocks before PREPARED is created", async () => {
   const storage = memoryStorage();
   const transport = transportMock();
-  const result = await advanceV24HandoffActivation({
+  const result = await activate({
     envelope: envelope(),
     brokerState: brokerState({ positions: [{ accountId: "opaque-account-A", symbol: "NVDA", quantity: 1 }] }),
     receiverId: "receiver-A", storage, transport,
@@ -376,7 +391,7 @@ test("existing local symbol owner blocks before PREPARED is created", async () =
     candidates: [{ originalPlan: { symbol: "NVDA" } }],
     liveTrades: [], history: [], v24Installations: [], v24Retirements: [],
   });
-  const result = await advanceV24HandoffActivation({
+  const result = await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport: transportMock(),
   });
 
@@ -385,7 +400,7 @@ test("existing local symbol owner blocks before PREPARED is created", async () =
 });
 
 test("server DELIVERED with missing local LISTENING fails into explicit reconciliation", async () => {
-  const result = await advanceV24HandoffActivation({
+  const result = await activate({
     envelope: { handoff: handoff(), delivery: delivery("DELIVERED") },
     brokerState: brokerState(), receiverId: "receiver-A", storage: memoryStorage(), transport: transportMock(),
   });
@@ -396,18 +411,18 @@ test("server DELIVERED with missing local LISTENING fails into explicit reconcil
 test("server DELIVERED with conflicting local boundary fails closed", async () => {
   const storage = memoryStorage();
   const transport = transportMock({ ackFails: true });
-  await advanceV24HandoffActivation({
+  await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport,
     now: () => "2026-09-02T18:00:03.000Z",
   });
-  await advanceV24HandoffActivation({
+  await activate({
     envelope: envelope(), brokerState: brokerState({ currentThrough: "2026-09-02T18:00:03.500Z" }),
     receiverId: "receiver-A", storage, transport,
     proposedExecutionListeningAt: "2026-09-02T18:00:03.000Z",
   });
 
   await assert.rejects(
-    () => advanceV24HandoffActivation({
+    () => activate({
       envelope: { handoff: handoff(), delivery: delivery("DELIVERED", { executionListeningAt: "2026-09-02T18:00:04.000Z" }) },
       brokerState: brokerState(), receiverId: "receiver-A", storage, transport: transportMock(),
     }),
@@ -418,13 +433,13 @@ test("server DELIVERED with conflicting local boundary fails closed", async () =
 test("PREPARED restart may choose a fresh proposal because no earlier proposal became authoritative", async () => {
   const storage = memoryStorage();
   const transport = transportMock();
-  const first = await advanceV24HandoffActivation({
+  const first = await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport,
     now: () => "2026-09-02T18:00:03.000Z",
   });
   assert.equal(first.proposedExecutionListeningAt, "2026-09-02T18:00:03.000Z");
 
-  const restarted = await advanceV24HandoffActivation({
+  const restarted = await activate({
     envelope: envelope(), brokerState: brokerState({ currentThrough: "2026-09-02T18:00:03.500Z" }),
     receiverId: "receiver-A", storage, transport,
     now: () => "2026-09-02T18:00:04.000Z",
@@ -436,7 +451,7 @@ test("PREPARED restart may choose a fresh proposal because no earlier proposal b
 test("proposed listening boundary may never precede sticky claim time", async () => {
   const storage = memoryStorage();
   await assert.rejects(
-    () => advanceV24HandoffActivation({
+    () => activate({
       envelope: envelope(), brokerState: brokerState({ currentThrough: "2026-09-02T18:00:05.000Z" }),
       receiverId: "receiver-A", storage, transport: transportMock(),
       proposedExecutionListeningAt: "2026-09-02T18:00:01.500Z",
@@ -448,7 +463,7 @@ test("proposed listening boundary may never precede sticky claim time", async ()
 test("retired local handoff cannot reactivate and is driven to server BLOCKED", async () => {
   const storage = memoryStorage();
   const transport = transportMock();
-  const prepared = await advanceV24HandoffActivation({
+  const prepared = await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport,
     now: () => "2026-09-02T18:00:03.000Z",
   });
@@ -462,7 +477,7 @@ test("retired local handoff cannot reactivate and is driven to server BLOCKED", 
     requestedAt: "2026-09-02T18:00:03.100Z",
   });
 
-  const retry = await advanceV24HandoffActivation({
+  const retry = await activate({
     envelope: envelope(), brokerState: brokerState(), receiverId: "receiver-A", storage, transport,
   });
   assert.equal(retry.status, "BLOCKED");

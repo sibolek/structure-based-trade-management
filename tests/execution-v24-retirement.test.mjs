@@ -10,6 +10,7 @@ import {
 import {
   assertV24HandoffRetirementAllowsActivation,
   bindAndPersistV24ExecutionListeningAtGuarded,
+  bindAndPersistV24ExecutionListeningAtGuardedSerialized,
   buildV23CandidateFromActiveListeningInstallation,
   executionOwnedSymbolsFromV23StoreWithRetirement,
   persistPreparedV24LocalInstallationGuarded,
@@ -232,6 +233,47 @@ test("concurrent serialized DISCARD requests preserve the first frozen cutoff", 
   assert.deepEqual(second, first);
   assert.equal(stored(storage).v24Retirements[0].cutoffAt, "2026-09-02T18:00:04.000Z");
   assert.equal(lockManager.calls.length, 2);
+});
+
+test("serialized DISCARD cannot race past guarded LISTENING activation", async () => {
+  const storage = memoryStorage();
+  const prepared = persistPreparedV24LocalInstallation({
+    storage,
+    installation: buildPreparedV24LocalInstallation({
+      handoff: handoff(),
+      receiverId: "receiver-A",
+      preparedAt: "2026-09-02T18:00:02.000Z",
+    }),
+  });
+  const lockManager = serialWriterLockManager();
+
+  const discardPromise = requestV24RetirementSerialized({
+    storage,
+    lockManager,
+    handoffId: prepared.handoffId,
+    receiverId: "receiver-A",
+    requestedAt: "2026-09-02T18:00:02.500Z",
+  });
+
+  const listeningPromise = bindAndPersistV24ExecutionListeningAtGuardedSerialized({
+    storage,
+    lockManager,
+    handoffId: prepared.handoffId,
+    executionListeningAt: "2026-09-02T18:00:03.000Z",
+  });
+
+  const discarded = await discardPromise;
+  assert.equal(discarded.status, "RETIRED");
+
+  await assert.rejects(
+    () => listeningPromise,
+    (error) => error.code === "V24_HANDOFF_RETIRED",
+  );
+
+  const durable = stored(storage);
+  assert.equal(durable.v24Installations[0].status, "PREPARED");
+  assert.equal(durable.v24Installations[0].executionListeningAt, null);
+  assert.equal(durable.v24Retirements[0].status, "RETIRED");
 });
 
 test("eligible fill executed before discard wins even when detected after discard", () => {
