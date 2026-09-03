@@ -377,3 +377,41 @@ test("retirement persistence failure is fail-closed", () => {
     (error) => error.code === "LOCAL_EXECUTION_PERSISTENCE_FAILED",
   );
 });
+
+
+test("contiguous broker coverage still behind retirement cutoff remains REQUESTED", () => {
+  const storage = memoryStorage();
+  const listening = installListening(storage);
+
+  requestV24Retirement({
+    storage,
+    handoffId: listening.handoffId,
+    requestedAt: "2026-09-02T18:00:04.000Z",
+  });
+
+  const resolved = resolveV24Retirement({
+    storage,
+    handoffId: listening.handoffId,
+    brokerState: brokerState({
+      currentThrough: "2026-09-02T18:00:03.750Z",
+    }),
+    finalizedAt: "2026-09-02T18:00:05.000Z",
+  });
+
+  assert.equal(resolved.status, "REQUESTED");
+  assert.equal(resolved.cutoffAt, "2026-09-02T18:00:04.000Z");
+  assert.equal(resolved.finalizedAt, null);
+
+  const durable = readV24Retirement({
+    storage,
+    handoffId: listening.handoffId,
+  });
+
+  assert.equal(durable.status, "REQUESTED");
+  assert.equal(durable.cutoffAt, "2026-09-02T18:00:04.000Z");
+  assert.equal(durable.finalizedAt, null);
+  assert.deepEqual(
+    executionOwnedSymbolsFromV23StoreWithRetirement(stored(storage)),
+    ["NVDA"],
+  );
+});

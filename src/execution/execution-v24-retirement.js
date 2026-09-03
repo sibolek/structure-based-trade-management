@@ -229,7 +229,7 @@ export function resolveV24Retirement({
         throw retirementError("LISTENING installation is required to resolve discard", "V24_LISTENING_INSTALLATION_REQUIRED");
       }
 
-      let nextStatus = "RECONCILIATION_REQUIRED";
+      let nextStatus = "REQUESTED";
       let priorFill = null;
       const coverage = brokerState?.executionCoverage;
       const journal = brokerState?.executionOwnershipJournal;
@@ -240,35 +240,72 @@ export function resolveV24Retirement({
       const accountPresent = (Array.isArray(brokerState?.accounts) ? brokerState.accounts : [])
         .some((account) => text(account?.accountId) === accountId);
 
-      const complete = Boolean(
-        brokerUsable(brokerState)
-        && accountId
-        && accountPresent
-        && upper(coverage?.status) === "CONTIGUOUS"
-        && journalContract.valid
-        && coverage?.coverageStartedAt === journal?.coverageStartedAt
-        && coverage?.currentThrough === journal?.currentThrough
-        && isoTimestamp(coverage?.coverageStartedAt)
-        && isoTimestamp(coverage?.currentThrough)
-        && Date.parse(coverage.coverageStartedAt) <= Date.parse(listeningAt)
-        && Date.parse(coverage.currentThrough) >= Date.parse(cutoffAt),
+      const coverageStartedAt = isoTimestamp(coverage?.coverageStartedAt);
+      const coverageCurrentThrough = isoTimestamp(coverage?.currentThrough);
+      const journalStartedAt = isoTimestamp(journal?.coverageStartedAt);
+      const journalCurrentThrough = isoTimestamp(journal?.currentThrough);
+
+      const reconciliationRequired = Boolean(
+        upper(coverage?.status) === "GAP"
+        || (journal && !journalContract.valid)
+        || (
+          coverageStartedAt
+          && journalStartedAt
+          && coverageStartedAt !== journalStartedAt
+        )
+        || (
+          coverageCurrentThrough
+          && journalCurrentThrough
+          && coverageCurrentThrough !== journalCurrentThrough
+        )
+        || (
+          coverageStartedAt
+          && Date.parse(coverageStartedAt) > Date.parse(listeningAt)
+        )
       );
 
-      if (complete) {
-        const ownership = evaluateV24InitialFillOwnership({
-          installation,
-          brokerState: resolutionBrokerState(brokerState, cutoffAt),
-        });
+      if (reconciliationRequired) {
+        nextStatus = "RECONCILIATION_REQUIRED";
+      } else {
+        const complete = Boolean(
+          brokerUsable(brokerState)
+          && accountId
+          && accountPresent
+          && upper(coverage?.status) === "CONTIGUOUS"
+          && journalContract.valid
+          && coverageStartedAt
+          && coverageCurrentThrough
+          && journalStartedAt
+          && journalCurrentThrough
+          && coverageStartedAt === journalStartedAt
+          && coverageCurrentThrough === journalCurrentThrough
+          && Date.parse(coverageStartedAt) <= Date.parse(listeningAt)
+          && Date.parse(coverageCurrentThrough) >= Date.parse(cutoffAt)
+        );
 
-        if (ownership.status === "MATCHED") {
-          nextStatus = "SUPERSEDED_BY_PRIOR_FILL";
-          priorFill = structuredClone(ownership.matchedExecution);
-        } else if (
-          ownership.status === "WAITING"
-          || ["WRONG_ACCOUNT_EXECUTION_OBSERVED", "UNEXPECTED_AUTHORIZED_ACCOUNT_EXECUTION"].includes(ownership.reason)
-        ) {
-          nextStatus = "RETIRED";
+        if (complete) {
+          const ownership = evaluateV24InitialFillOwnership({
+            installation,
+            brokerState: resolutionBrokerState(brokerState, cutoffAt),
+          });
+
+          if (ownership.status === "MATCHED") {
+            nextStatus = "SUPERSEDED_BY_PRIOR_FILL";
+            priorFill = structuredClone(ownership.matchedExecution);
+          } else if (
+            ownership.status === "WAITING"
+            || ["WRONG_ACCOUNT_EXECUTION_OBSERVED", "UNEXPECTED_AUTHORIZED_ACCOUNT_EXECUTION"].includes(ownership.reason)
+          ) {
+            nextStatus = "RETIRED";
+          } else {
+            nextStatus = "RECONCILIATION_REQUIRED";
+          }
         }
+      }
+
+      if (nextStatus === "REQUESTED") {
+        resolved = structuredClone(retirement);
+        return store;
       }
 
       resolved = {
