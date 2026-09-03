@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { getOrCreateExecutionBoardReceiverId } from "../execution/execution-board-receiver.js";
 import { createV24HandoffTransport } from "../execution/execution-v24-handoff-transport.js";
 import { runV24ExecutionRouterCycle } from "../execution/execution-v24-runtime-router.js";
+import {
+  V24_ROUTER_LOOP_DELAY_MS,
+  deriveV24RouterHealthStatus,
+} from "../execution/execution-v24-router-health.js";
 
 const ROUTER_LOCK_NAME = "executionos-v24-runtime-router";
-const LOOP_DELAY_MS = 500;
 const ROUTER_ENABLED = String(import.meta.env.VITE_EXECUTIONOS_V24_ROUTER_ENABLED || "false").toLowerCase() === "true";
 
 function delay(ms, signal = null) {
@@ -41,7 +44,9 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
     status: ROUTER_ENABLED ? "STARTING" : "DISABLED_PENDING_ACCEPTANCE",
     receiverId: null,
     leader: false,
-    lastCycleAt: null,
+    lastHeartbeatAt: null,
+    lastSuccessfulCycleAt: null,
+    lastFailedCycleAt: null,
     lastResult: null,
     error: "",
     brokerWriteAuthority: false,
@@ -84,9 +89,41 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
       { mode: "exclusive", signal: epochAbort.signal },
       async () => {
       if (cancelled) return;
-      setState((current) => ({ ...current, status: "RUNNING", leader: true, error: "" }));
 
+      const leaderHeartbeatAt = new Date().toISOString();
+      setState((current) => ({
+        ...current,
+        status: "RUNNING",
+        leader: true,
+        error: "",
+        lastHeartbeatAt: leaderHeartbeatAt,
+      }));
+
+      const staleWatchdog = window.setInterval(() => {
+        setState((current) => {
+          const status = deriveV24RouterHealthStatus({
+            leader: current.leader,
+            status: current.status,
+            lastHeartbeatAt: current.lastHeartbeatAt,
+            now: Date.now(),
+          });
+
+          return status === current.status
+            ? current
+            : { ...current, status };
+        });
+      }, V24_ROUTER_LOOP_DELAY_MS);
+
+      try {
       while (!cancelled) {
+        const heartbeatAt = new Date().toISOString();
+        setState((prior) => ({
+          ...prior,
+          leader: true,
+          lastHeartbeatAt: heartbeatAt,
+          status: prior.status === "STALE" ? "RUNNING" : prior.status,
+        }));
+
         const current = latest.current;
         const brokerReady = Boolean(current?.broker?.connected && current?.broker?.state);
         const pretradeReady = Boolean(current?.pretrade?.connected && current?.pretrade?.pretradeUrl);
@@ -101,7 +138,7 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
             leader: true,
             error: current?.broker?.error || "",
           }));
-          await delay(LOOP_DELAY_MS, epochAbort.signal);
+          await delay(V24_ROUTER_LOOP_DELAY_MS, epochAbort.signal);
           continue;
         }
 
@@ -136,30 +173,43 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
           }
 
           if (!cancelled) {
-            setState({
+            const cycleAt = result.processedAt || new Date().toISOString();
+            setState((prior) => ({
+              ...prior,
               status,
               receiverId,
               leader: true,
-              lastCycleAt: result.processedAt,
+              lastHeartbeatAt: cycleAt,
+              lastSuccessfulCycleAt: transportFailure
+                ? prior.lastSuccessfulCycleAt
+                : cycleAt,
+              lastFailedCycleAt: transportFailure
+                ? cycleAt
+                : prior.lastFailedCycleAt,
               lastResult: result,
               error: stateError,
               brokerWriteAuthority: false,
               enabled: true,
-            });
+            }));
           }
         } catch (error) {
           if (!cancelled) {
+            const failedAt = new Date().toISOString();
             setState((prior) => ({
               ...prior,
               status: "ERROR",
               leader: true,
               error: errorText(error),
-              lastCycleAt: new Date().toISOString(),
+              lastHeartbeatAt: failedAt,
+              lastFailedCycleAt: failedAt,
             }));
           }
         }
 
-        await delay(LOOP_DELAY_MS, epochAbort.signal);
+        await delay(V24_ROUTER_LOOP_DELAY_MS, epochAbort.signal);
+      }
+      } finally {
+        window.clearInterval(staleWatchdog);
       }
       },
     );

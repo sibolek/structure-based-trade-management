@@ -160,7 +160,7 @@ test("runtime router epoch cleanup aborts pending leadership and preserves in-fl
   );
   assert.match(
     hook,
-    /await delay\(LOOP_DELAY_MS, epochAbort\.signal\)/,
+    /await delay\(V24_ROUTER_LOOP_DELAY_MS, epochAbort\.signal\)/,
   );
   assert.match(
     hook,
@@ -170,4 +170,19 @@ test("runtime router epoch cleanup aborts pending leadership and preserves in-fl
     hook,
     /epochAbort\.abort\(\);[\s\S]*?runV24ExecutionRouterCycle/,
   );
+});
+
+test("runtime hook exposes distinct Decision 22H heartbeat and cycle clocks", () => {
+  const hook = source("src/hooks/useV24ExecutionRouter.js");
+
+  assert.match(hook, /lastHeartbeatAt/);
+  assert.match(hook, /lastSuccessfulCycleAt/);
+  assert.match(hook, /lastFailedCycleAt/);
+  assert.doesNotMatch(hook, /lastCycleAt/);
+
+  assert.match(hook, /deriveV24RouterHealthStatus/);
+  assert.match(hook, /V24_ROUTER_LOOP_DELAY_MS/);
+  assert.match(hook, /window\.setInterval/);
+  assert.match(hook, /status: prior\.status === "STALE" \? "RUNNING" : prior\.status/);
+  assert.match(hook, /window\.clearInterval\(staleWatchdog\)/);
 });
