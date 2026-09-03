@@ -1,7 +1,7 @@
 import {
   EXECUTION_BOARD_STORE_KEY,
   readExecutionBoardStore,
-  transactExecutionBoardStore,
+  transactExecutionBoardStoreSerialized,
 } from "./execution-board-store-repository.js";
 import { advanceV24HandoffActivation } from "./execution-v24-handoff-activation.js";
 import { evaluateV24InitialFillOwnership } from "./execution-v24-initial-fill-matcher.js";
@@ -181,12 +181,13 @@ export function projectV24LifecycleToExecutionTrade({
   });
 }
 
-export function promoteV24FirstFillAtomically({
+export async function promoteV24FirstFillAtomically({
   storage = globalThis?.localStorage,
   storeKey = EXECUTION_BOARD_STORE_KEY,
   handoffId,
   matchedExecution,
   brokerState,
+  lockManager = globalThis?.navigator?.locks,
 } = {}) {
   const id = text(handoffId);
   if (!id) throw routerError("handoffId is required for V2.4 first-fill promotion", "INVALID_V24_RUNTIME_ROUTER_INPUT");
@@ -203,9 +204,10 @@ export function promoteV24FirstFillAtomically({
 
   let promotedLifecycle = null;
   let promotedTrade = null;
-  const committed = transactExecutionBoardStore({
+  const committed = await transactExecutionBoardStoreSerialized({
     storage,
     storeKey,
+    lockManager,
     mutate: (store) => {
       const installation = installationByHandoff(store, id);
       if (!installation || upper(installation.status) !== "LISTENING") {
@@ -254,11 +256,12 @@ export function promoteV24FirstFillAtomically({
   });
 }
 
-export function advanceV24OwnedLifecycleAtomically({
+export async function advanceV24OwnedLifecycleAtomically({
   storage = globalThis?.localStorage,
   storeKey = EXECUTION_BOARD_STORE_KEY,
   handoffId,
   brokerState,
+  lockManager = globalThis?.navigator?.locks,
 } = {}) {
   const id = text(handoffId);
   const before = readExecutionBoardStore({ storage, storeKey });
@@ -294,9 +297,10 @@ export function advanceV24OwnedLifecycleAtomically({
 
   let advanced = null;
   let projected = null;
-  const committed = transactExecutionBoardStore({
+  const committed = await transactExecutionBoardStoreSerialized({
     storage,
     storeKey,
+    lockManager,
     mutate: (store) => {
       const latestLifecycle = lifecycleByHandoff(store, id);
       const latestInstallation = installationByHandoff(store, id);
@@ -361,6 +365,7 @@ export async function runV24ExecutionRouterCycle({
   storeKey = EXECUTION_BOARD_STORE_KEY,
   proposedBoundaries = new Map(),
   now = () => new Date().toISOString(),
+  lockManager = globalThis?.navigator?.locks,
   dependencies = {},
 } = {}) {
   const receiver = text(receiverId);
@@ -404,6 +409,7 @@ export async function runV24ExecutionRouterCycle({
           proposedExecutionListeningAt: proposedBoundaryFor(proposedBoundaries, handoffId),
           transport,
           now,
+          lockManager,
         });
         results.push(routerResult("ACTIVATION", handoffId, activation.status, activation));
         if (activation.status === "WAITING_FOR_BROKER_PROOF" && activation.proposedExecutionListeningAt) {
@@ -438,12 +444,13 @@ export async function runV24ExecutionRouterCycle({
     let lifecycle = lifecycleByHandoff(store, handoffId);
 
     if (retirement && upper(retirement.status) === "REQUESTED") {
-      retirement = resolveRetirement({
+      retirement = await resolveRetirement({
         storage,
         storeKey,
         handoffId,
         brokerState,
         finalizedAt: now(),
+        lockManager,
       });
       results.push(routerResult("RETIREMENT", handoffId, retirement.status));
       store = readStore({ storage, storeKey });
@@ -465,12 +472,13 @@ export async function runV24ExecutionRouterCycle({
 
       if (ownership.status === "MATCHED") {
         try {
-          const promoted = promote({
+          const promoted = await promote({
             storage,
             storeKey,
             handoffId,
             matchedExecution: ownership.matchedExecution,
             brokerState,
+            lockManager,
           });
           results.push(routerResult("FIRST_FILL", handoffId, promoted.status));
         } catch (error) {
@@ -492,7 +500,13 @@ export async function runV24ExecutionRouterCycle({
   for (const lifecycle of lifecycles) {
     const handoffId = text(lifecycle?.handoffId);
     if (!handoffId) continue;
-    const advanced = advanceLifecycle({ storage, storeKey, handoffId, brokerState });
+    const advanced = await advanceLifecycle({
+      storage,
+      storeKey,
+      handoffId,
+      brokerState,
+      lockManager,
+    });
     results.push(routerResult("LIFECYCLE", handoffId, advanced.status, {
       reason: advanced.reason || advanced.lifecycle?.reconciliationReason || null,
     }));

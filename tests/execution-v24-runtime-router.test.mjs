@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { readExecutionBoardStore } from "../src/execution/execution-board-store-repository.js";
+import {
+  EXECUTION_BOARD_STORE_WRITER_LOCK_NAME,
+  readExecutionBoardStore,
+} from "../src/execution/execution-board-store-repository.js";
 import {
   executionOwnedSymbolsForHandoffAdmission,
   isV24InstallationReservationActive,
@@ -15,6 +18,17 @@ import {
 const ACCOUNT = "opaque-account-A";
 const START = "2026-09-02T20:00:00.000Z";
 const LISTENING = "2026-09-02T20:00:01.000Z";
+
+function writerLockManager() {
+  const calls = [];
+  return {
+    calls,
+    async request(name, options, callback) {
+      calls.push({ name, options: structuredClone(options) });
+      return callback({ name, mode: options?.mode });
+    },
+  };
+}
 
 function memoryStorage(initial = null) {
   let value = initial;
@@ -165,15 +179,17 @@ test("EXIT lifecycle remains owned until V2.4 History exists", () => {
   assert.deepEqual(executionOwnedSymbolsForHandoffAdmission(completed), []);
 });
 
-test("atomic first-fill promotion creates lifecycle and visible V24 LIVE trade in one revision", () => {
+test("atomic first-fill promotion creates lifecycle and visible V24 LIVE trade in one serialized revision", async () => {
   const inst = installation();
   const storage = memoryStorage(JSON.stringify(baseStore({ v24Installations: [inst] })));
   const fill = firstFill();
-  const result = promoteV24FirstFillAtomically({
+  const lockManager = writerLockManager();
+  const result = await promoteV24FirstFillAtomically({
     storage,
     handoffId: inst.handoffId,
     matchedExecution: fill,
     brokerState: broker([fill]),
+    lockManager,
   });
   assert.equal(result.status, "PROMOTED_LIVE");
   assert.equal(result.lifecycle.status, "LIVE");
@@ -181,6 +197,10 @@ test("atomic first-fill promotion creates lifecycle and visible V24 LIVE trade i
   assert.equal(result.trade.phase, "LIVE");
   assert.equal(result.trade.broker.accountId, ACCOUNT);
   assert.equal(result.trade.broker.lifecycleStatus, "LIVE");
+  assert.deepEqual(lockManager.calls, [{
+    name: EXECUTION_BOARD_STORE_WRITER_LOCK_NAME,
+    options: { mode: "exclusive" },
+  }]);
 
   const durable = readExecutionBoardStore({ storage });
   assert.equal(durable.storeRevision, 2);
@@ -191,13 +211,26 @@ test("atomic first-fill promotion creates lifecycle and visible V24 LIVE trade i
   assert.equal(isV24InstallationReservationActive(durable, durable.v24Installations[0]), false);
 });
 
-test("identical first-fill promotion retry is idempotent", () => {
+test("identical first-fill promotion retry is idempotent", async () => {
   const inst = installation();
   const storage = memoryStorage(JSON.stringify(baseStore({ v24Installations: [inst] })));
   const fill = firstFill();
-  promoteV24FirstFillAtomically({ storage, handoffId: inst.handoffId, matchedExecution: fill, brokerState: broker([fill]) });
+  const lockManager = writerLockManager();
+  await promoteV24FirstFillAtomically({
+    storage,
+    handoffId: inst.handoffId,
+    matchedExecution: fill,
+    brokerState: broker([fill]),
+    lockManager,
+  });
   const before = readExecutionBoardStore({ storage }).storeRevision;
-  const retry = promoteV24FirstFillAtomically({ storage, handoffId: inst.handoffId, matchedExecution: fill, brokerState: broker([fill]) });
+  const retry = await promoteV24FirstFillAtomically({
+    storage,
+    handoffId: inst.handoffId,
+    matchedExecution: fill,
+    brokerState: broker([fill]),
+    lockManager,
+  });
   assert.equal(retry.status, "ALREADY_PROMOTED");
   assert.equal(readExecutionBoardStore({ storage }).storeRevision, before);
 });
