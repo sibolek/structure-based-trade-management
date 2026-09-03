@@ -87,6 +87,7 @@ test("legacy V2.3 mutations cannot erase canonical V2.4 LIVE or History records"
 test("App mounts one top-level V2.4 router plus separate authorization and LIVE boards", () => {
   const app = source("src/App.jsx");
   assert.match(app, /useV24ExecutionRouter\(\{ broker, pretrade \}\)/);
+  assert.match(app, /<V24RouterHealthPanel router=\{v24Router\} \/>/);
   assert.match(app, /<V24AuthorizedTradesBoard broker=\{broker\} v24Router=\{v24Router\} \/>/);
   assert.match(app, /<V24LiveExecutionBoard \/>/);
 });
@@ -185,4 +186,30 @@ test("runtime hook exposes distinct Decision 22H heartbeat and cycle clocks", ()
   assert.match(hook, /window\.setInterval/);
   assert.match(hook, /status: prior\.status === "STALE" \? "RUNNING" : prior\.status/);
   assert.match(hook, /window\.clearInterval\(staleWatchdog\)/);
+});
+
+test("Decision 22H router health remains independently operator-visible", () => {
+  const panel = source("src/components/V24RouterHealthPanel.jsx");
+
+  for (const status of [
+    "RUNNING",
+    "WAITING_FOR_SCHWAB",
+    "WAITING_FOR_PRETRADE",
+    "WAITING_FOR_ROUTER_LOCK",
+    "PAUSED",
+    "STALE",
+    "BLOCKED",
+    "ERROR",
+  ]) {
+    assert.match(panel, new RegExp(status));
+  }
+
+  assert.match(panel, /lastHeartbeatAt/);
+  assert.match(panel, /lastSuccessfulCycleAt/);
+  assert.match(panel, /lastFailedCycleAt/);
+  assert.match(panel, /Health is observational only/);
+  assert.match(panel, /broker write authority: NONE/);
+  assert.match(panel, /Durable execution ownership remains authoritative/);
+  assert.doesNotMatch(panel, /transactExecutionBoardStore/);
+  assert.doesNotMatch(panel, /localStorage\\.setItem/);
 });
