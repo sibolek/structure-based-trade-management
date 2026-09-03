@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 import {
   EXECUTION_BOARD_STORE_KEY,
@@ -258,5 +259,93 @@ test("invalid durable JSON fails closed instead of inventing a replacement store
   assert.throws(
     () => readExecutionBoardStore({ storage }),
     (error) => error.code === "LOCAL_EXECUTION_PERSISTENCE_FAILED",
+  );
+});
+
+test("raw canonical transaction is confined to approved internal store cores", () => {
+  const root = new URL("../src/", import.meta.url);
+  const approved = new Set([
+    "execution/execution-board-store-repository.js",
+    "execution/execution-v24-local-installation.js",
+    "execution/execution-v24-retirement.js",
+  ]);
+
+  const violations = [];
+
+  function walk(directoryUrl, relative = "") {
+    for (const entry of fs.readdirSync(directoryUrl, { withFileTypes: true })) {
+      const nextRelative = relative ? `${relative}/${entry.name}` : entry.name;
+      const nextUrl = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, directoryUrl);
+
+      if (entry.isDirectory()) {
+        walk(nextUrl, nextRelative);
+        continue;
+      }
+
+      if (!/\.(js|jsx|mjs)$/.test(entry.name)) continue;
+
+      const source = fs.readFileSync(nextUrl, "utf8");
+      if (
+        source.includes("transactExecutionBoardStore({")
+        && !approved.has(nextRelative)
+      ) {
+        violations.push(nextRelative);
+      }
+    }
+  }
+
+  walk(root);
+
+  assert.deepEqual(
+    violations,
+    [],
+    `raw canonical writers escaped approved internal cores: ${violations.join(", ")}`,
+  );
+});
+
+test("approved raw V2.4 mutation cores have no external production call sites", () => {
+  const root = new URL("../src/", import.meta.url);
+
+  const forbiddenExternalCalls = [
+    "persistPreparedV24LocalInstallation(",
+    "bindAndPersistV24ExecutionListeningAt(",
+    "requestV24Retirement(",
+    "resolveV24Retirement(",
+  ];
+
+  const allowedFiles = new Set([
+    "execution/execution-v24-local-installation.js",
+    "execution/execution-v24-retirement.js",
+  ]);
+
+  const violations = [];
+
+  function walk(directoryUrl, relative = "") {
+    for (const entry of fs.readdirSync(directoryUrl, { withFileTypes: true })) {
+      const nextRelative = relative ? `${relative}/${entry.name}` : entry.name;
+      const nextUrl = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, directoryUrl);
+
+      if (entry.isDirectory()) {
+        walk(nextUrl, nextRelative);
+        continue;
+      }
+
+      if (!/\.(js|jsx|mjs)$/.test(entry.name) || allowedFiles.has(nextRelative)) continue;
+
+      const source = fs.readFileSync(nextUrl, "utf8");
+      for (const call of forbiddenExternalCalls) {
+        if (source.includes(call)) {
+          violations.push(`${nextRelative}: ${call}`);
+        }
+      }
+    }
+  }
+
+  walk(root);
+
+  assert.deepEqual(
+    violations,
+    [],
+    `unserialized V2.4 mutation core acquired an external production caller: ${violations.join(", ")}`,
   );
 });
