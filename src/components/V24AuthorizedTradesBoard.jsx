@@ -6,7 +6,7 @@ import {
 } from "../execution/execution-board-store-repository.js";
 import { isV24InstallationReservationActive } from "../execution/execution-v24-active-ownership.js";
 import { evaluateV24InitialFillOwnership } from "../execution/execution-v24-initial-fill-matcher.js";
-import { requestV24Retirement } from "../execution/execution-v24-retirement.js";
+import { requestV24RetirementSerialized } from "../execution/execution-v24-retirement.js";
 import V24TradeSpecificationModal from "./V24TradeSpecificationModal.jsx";
 
 function text(value) {
@@ -89,10 +89,10 @@ export default function V24AuthorizedTradesBoard({ broker, v24Router } = {}) {
 
   if (!installations.length && !routerProblem && !error) return null;
 
-  const discard = (installation) => {
+  const discard = async (installation) => {
     if (!window.confirm("Discard this V2.4 pre-fill listener? ExecutionOS will stop future fill eligibility after the approved cutoff protocol. Broker orders, if any, are unchanged.")) return;
     try {
-      requestV24Retirement({
+      await requestV24RetirementSerialized({
         handoffId: installation.handoffId,
         receiverId: installation.receiverId,
         requestedAt: Date.now(),

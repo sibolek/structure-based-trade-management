@@ -10,7 +10,7 @@ import {
   advanceV24LiveLifecycle,
   createV24LiveLifecycle,
 } from "./execution-v24-live-lifecycle.js";
-import { resolveV24Retirement } from "./execution-v24-retirement.js";
+import { resolveV24RetirementSerialized } from "./execution-v24-retirement.js";
 
 export const V24_RUNTIME_ROUTER_SCHEMA_VERSION = 1;
 
@@ -374,7 +374,7 @@ export async function runV24ExecutionRouterCycle({
 
   const activate = dependencies.advanceActivation || advanceV24HandoffActivation;
   const matchFill = dependencies.evaluateInitialFill || evaluateV24InitialFillOwnership;
-  const resolveRetirement = dependencies.resolveRetirement || resolveV24Retirement;
+  const resolveRetirement = dependencies.resolveRetirement || resolveV24RetirementSerialized;
   const promote = dependencies.promoteFirstFill || promoteV24FirstFillAtomically;
   const advanceLifecycle = dependencies.advanceLifecycle || advanceV24OwnedLifecycleAtomically;
   const readStore = dependencies.readStore || readExecutionBoardStore;

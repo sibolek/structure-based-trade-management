@@ -176,6 +176,25 @@ function requireWriterLockManager(lockManager) {
   return lockManager;
 }
 
+export async function withExecutionBoardStoreWriterLock({
+  lockManager = globalThis?.navigator?.locks,
+  operation,
+} = {}) {
+  if (typeof operation !== "function") {
+    throw storeError(
+      "Execution Board writer lock requires an operation",
+      "INVALID_EXECUTION_BOARD_STORE_TRANSACTION",
+    );
+  }
+
+  const manager = requireWriterLockManager(lockManager);
+  return manager.request(
+    EXECUTION_BOARD_STORE_WRITER_LOCK_NAME,
+    { mode: "exclusive" },
+    operation,
+  );
+}
+
 export async function transactExecutionBoardStoreSerialized({
   storage = globalThis?.localStorage,
   storeKey = EXECUTION_BOARD_STORE_KEY,
@@ -189,19 +208,16 @@ export async function transactExecutionBoardStoreSerialized({
     );
   }
 
-  const manager = requireWriterLockManager(lockManager);
-
   // Decision 22F: the lock encloses only the canonical local read-modify-write
   // transaction. No broker or pretrade network operation belongs inside it.
-  return manager.request(
-    EXECUTION_BOARD_STORE_WRITER_LOCK_NAME,
-    { mode: "exclusive" },
-    () => transactExecutionBoardStore({
+  return withExecutionBoardStoreWriterLock({
+    lockManager,
+    operation: () => transactExecutionBoardStore({
       storage,
       storeKey,
       mutate,
     }),
-  );
+  });
 }
 
 export function executionBoardStoreRevision({

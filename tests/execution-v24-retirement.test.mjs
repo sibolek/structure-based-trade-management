@@ -15,8 +15,27 @@ import {
   persistPreparedV24LocalInstallationGuarded,
   readV24Retirement,
   requestV24Retirement,
+  requestV24RetirementSerialized,
   resolveV24Retirement,
 } from "../src/execution/execution-v24-retirement.js";
+
+function serialWriterLockManager() {
+  let tail = Promise.resolve();
+  const calls = [];
+
+  return {
+    calls,
+    request(name, options, callback) {
+      calls.push({ name, options: structuredClone(options) });
+      const run = tail.then(() => callback({ name, mode: options?.mode }));
+      tail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    },
+  };
+}
 
 function handoff(overrides = {}) {
   return {
@@ -183,6 +202,36 @@ test("LISTENING discard freezes one immutable REQUESTED cutoff", () => {
   assert.equal(first.status, "REQUESTED");
   assert.equal(first.cutoffAt, "2026-09-02T18:00:04.000Z");
   assert.deepEqual(retry, first);
+});
+
+test("concurrent serialized DISCARD requests preserve the first frozen cutoff", async () => {
+  const storage = memoryStorage();
+  const listening = installListening(storage);
+  const lockManager = serialWriterLockManager();
+
+  const firstPromise = requestV24RetirementSerialized({
+    storage,
+    lockManager,
+    handoffId: listening.handoffId,
+    receiverId: "receiver-A",
+    requestedAt: "2026-09-02T18:00:04.000Z",
+  });
+
+  const secondPromise = requestV24RetirementSerialized({
+    storage,
+    lockManager,
+    handoffId: listening.handoffId,
+    receiverId: "receiver-A",
+    requestedAt: "2026-09-02T18:00:04.900Z",
+  });
+
+  const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+  assert.equal(first.status, "REQUESTED");
+  assert.equal(first.cutoffAt, "2026-09-02T18:00:04.000Z");
+  assert.deepEqual(second, first);
+  assert.equal(stored(storage).v24Retirements[0].cutoffAt, "2026-09-02T18:00:04.000Z");
+  assert.equal(lockManager.calls.length, 2);
 });
 
 test("eligible fill executed before discard wins even when detected after discard", () => {

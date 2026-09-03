@@ -2,6 +2,7 @@ import { validateBrokerExecutionOwnershipJournal } from "../../schwab-bridge/bro
 import {
   readExecutionBoardStore,
   transactExecutionBoardStore,
+  withExecutionBoardStoreWriterLock,
 } from "./execution-board-store-repository.js";
 import { executionOwnedSymbolsForHandoffAdmission } from "./execution-v24-active-ownership.js";
 import {
@@ -194,6 +195,16 @@ export function requestV24Retirement({
   return verifyRetirement(committed, record);
 }
 
+export async function requestV24RetirementSerialized({
+  lockManager = globalThis?.navigator?.locks,
+  ...options
+} = {}) {
+  return withExecutionBoardStoreWriterLock({
+    lockManager,
+    operation: () => requestV24Retirement(options),
+  });
+}
+
 export function resolveV24Retirement({
   storage = globalThis?.localStorage,
   storeKey = EXECUTION_V23_STORE_KEY,
@@ -319,6 +330,16 @@ export function resolveV24Retirement({
   });
 
   return verifyRetirement(committed, resolved);
+}
+
+export async function resolveV24RetirementSerialized({
+  lockManager = globalThis?.navigator?.locks,
+  ...options
+} = {}) {
+  return withExecutionBoardStoreWriterLock({
+    lockManager,
+    operation: () => resolveV24Retirement(options),
+  });
 }
 
 export function assertV24HandoffRetirementAllowsActivation({
