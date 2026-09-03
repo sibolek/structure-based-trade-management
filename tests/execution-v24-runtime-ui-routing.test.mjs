@@ -213,3 +213,16 @@ test("Decision 22H router health remains independently operator-visible", () => 
   assert.doesNotMatch(panel, /transactExecutionBoardStore/);
   assert.doesNotMatch(panel, /localStorage\\.setItem/);
 });
+
+test("runtime hook separates active Decision 22I error telemetry from last failure history", () => {
+  const hook = source("src/hooks/useV24ExecutionRouter.js");
+
+  assert.match(hook, /activeError: null/);
+  assert.match(hook, /lastFailure: null/);
+  assert.match(hook, /failuresFromV24RouterCycleResult/);
+  assert.match(hook, /createV24RouterFailure/);
+  assert.match(hook, /activeError,/);
+  assert.match(hook, /lastFailure: activeError \|\| prior\.lastFailure/);
+  assert.match(hook, /activeError: failure/);
+  assert.match(hook, /lastFailure: failure/);
+});

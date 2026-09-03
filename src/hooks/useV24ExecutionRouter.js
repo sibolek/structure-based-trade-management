@@ -6,6 +6,10 @@ import {
   V24_ROUTER_LOOP_DELAY_MS,
   deriveV24RouterHealthStatus,
 } from "../execution/execution-v24-router-health.js";
+import {
+  createV24RouterFailure,
+  failuresFromV24RouterCycleResult,
+} from "../execution/execution-v24-router-telemetry.js";
 
 const ROUTER_LOCK_NAME = "executionos-v24-runtime-router";
 const ROUTER_ENABLED = String(import.meta.env.VITE_EXECUTIONOS_V24_ROUTER_ENABLED || "false").toLowerCase() === "true";
@@ -48,6 +52,8 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
     lastSuccessfulCycleAt: null,
     lastFailedCycleAt: null,
     lastResult: null,
+    activeError: null,
+    lastFailure: null,
     error: "",
     brokerWriteAuthority: false,
     enabled: ROUTER_ENABLED,
@@ -154,9 +160,8 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
             proposedBoundaries: proposedBoundaries.current,
           });
 
-          const transportFailure = result.results.find(
-            (item) => item.stage === "TRANSPORT" && item.status === "ERROR",
-          );
+          const failures = failuresFromV24RouterCycleResult(result);
+          const activeError = failures[0] || null;
           const transportWaiting = result.results.find(
             (item) => item.stage === "TRANSPORT" && item.status === "WAITING_FOR_PRETRADE",
           );
@@ -164,9 +169,9 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
           let status = "RUNNING";
           let stateError = "";
 
-          if (transportFailure) {
+          if (activeError) {
             status = "ERROR";
-            stateError = transportFailure.reason || current?.pretrade?.error || "PRETRADE_TRANSPORT_ERROR";
+            stateError = activeError.code || activeError.message;
           } else if (!pretradeReady || transportWaiting) {
             status = "WAITING_FOR_PRETRADE";
             stateError = current?.pretrade?.error || transportWaiting?.reason || "";
@@ -180,13 +185,15 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
               receiverId,
               leader: true,
               lastHeartbeatAt: cycleAt,
-              lastSuccessfulCycleAt: transportFailure
+              lastSuccessfulCycleAt: activeError
                 ? prior.lastSuccessfulCycleAt
                 : cycleAt,
-              lastFailedCycleAt: transportFailure
+              lastFailedCycleAt: activeError
                 ? cycleAt
                 : prior.lastFailedCycleAt,
               lastResult: result,
+              activeError,
+              lastFailure: activeError || prior.lastFailure,
               error: stateError,
               brokerWriteAuthority: false,
               enabled: true,
@@ -195,11 +202,19 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
         } catch (error) {
           if (!cancelled) {
             const failedAt = new Date().toISOString();
+            const failure = createV24RouterFailure({
+              occurredAt: failedAt,
+              stage: "ROUTER_SERVICE",
+              error,
+            });
+
             setState((prior) => ({
               ...prior,
               status: "ERROR",
               leader: true,
-              error: errorText(error),
+              activeError: failure,
+              lastFailure: failure,
+              error: failure.code || errorText(error),
               lastHeartbeatAt: failedAt,
               lastFailedCycleAt: failedAt,
             }));
