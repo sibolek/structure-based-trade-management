@@ -12,6 +12,25 @@ import {
   transactExecutionBoardStoreSerialized,
 } from "../src/execution/execution-board-store-repository.js";
 
+function storageEventTarget() {
+  const listeners = new Set();
+
+  return {
+    addEventListener(type, listener) {
+      if (type === "storage") listeners.add(listener);
+    },
+    removeEventListener(type, listener) {
+      if (type === "storage") listeners.delete(listener);
+    },
+    dispatchStorage(event) {
+      for (const listener of [...listeners]) listener(event);
+    },
+    listenerCount() {
+      return listeners.size;
+    },
+  };
+}
+
 function memoryStorage(initial = {}) {
   const data = new Map(Object.entries(initial));
   return {
@@ -204,6 +223,84 @@ test("repository publishes the exact committed snapshot to same-context subscrib
     assert.equal(observed.length, 1);
     assert.equal(observed[0].storeRevision, committed.storeRevision);
     assert.equal(observed[0].notice, "published");
+  } finally {
+    unsubscribe();
+  }
+});
+
+test("cross-tab storage notification rereads canonical durable state instead of trusting event payload", () => {
+  const storage = memoryStorage();
+  const eventTarget = storageEventTarget();
+  const seen = [];
+
+  const unsubscribe = subscribeExecutionBoardStore({
+    storage,
+    eventTarget,
+    listener: (snapshot) => seen.push(snapshot),
+  });
+
+  try {
+    assert.equal(eventTarget.listenerCount(), 1);
+
+    storage.setItem(EXECUTION_BOARD_STORE_KEY, JSON.stringify({
+      storeRevision: 7,
+      notice: "durable-cross-tab-state",
+      v24Installations: [{ handoffId: "h-cross-tab", status: "LISTENING" }],
+    }));
+
+    eventTarget.dispatchStorage({
+      key: EXECUTION_BOARD_STORE_KEY,
+      storageArea: storage,
+      newValue: JSON.stringify({
+        storeRevision: 999,
+        notice: "UNTRUSTED_EVENT_PAYLOAD",
+      }),
+    });
+
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].storeRevision, 7);
+    assert.equal(seen[0].notice, "durable-cross-tab-state");
+    assert.deepEqual(seen[0].v24Installations, [
+      { handoffId: "h-cross-tab", status: "LISTENING" },
+    ]);
+  } finally {
+    unsubscribe();
+  }
+
+  assert.equal(eventTarget.listenerCount(), 0);
+});
+
+test("cross-tab store subscriber ignores unrelated keys and storage areas", () => {
+  const storage = memoryStorage();
+  const otherStorage = memoryStorage();
+  const eventTarget = storageEventTarget();
+  const seen = [];
+
+  const unsubscribe = subscribeExecutionBoardStore({
+    storage,
+    eventTarget,
+    listener: (snapshot) => seen.push(snapshot),
+  });
+
+  try {
+    storage.setItem(EXECUTION_BOARD_STORE_KEY, JSON.stringify({
+      storeRevision: 2,
+      notice: "canonical",
+    }));
+
+    eventTarget.dispatchStorage({
+      key: "some-other-key",
+      storageArea: storage,
+      newValue: "{}",
+    });
+
+    eventTarget.dispatchStorage({
+      key: EXECUTION_BOARD_STORE_KEY,
+      storageArea: otherStorage,
+      newValue: "{}",
+    });
+
+    assert.deepEqual(seen, []);
   } finally {
     unsubscribe();
   }

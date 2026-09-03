@@ -98,15 +98,44 @@ function publish(storeKey, snapshot) {
 }
 
 export function subscribeExecutionBoardStore({
+  storage = globalThis?.localStorage,
   storeKey = EXECUTION_BOARD_STORE_KEY,
   listener,
+  eventTarget = globalThis,
 } = {}) {
   if (typeof listener !== "function") {
     throw storeError("Execution Board store subscriber must be a function", "INVALID_EXECUTION_BOARD_STORE_SUBSCRIBER");
   }
-  const listeners = listenersFor(storeKey);
+
+  const key = text(storeKey) || EXECUTION_BOARD_STORE_KEY;
+  const listeners = listenersFor(key);
   listeners.add(listener);
-  return () => listeners.delete(listener);
+
+  // Decision 22F: a storage event is notification only. Never trust or
+  // project event.newValue as canonical execution state; reread durable
+  // storage and publish that exact canonical snapshot instead.
+  const onStorage = (event) => {
+    if (event?.key !== key) return;
+    if (event?.storageArea && storage && event.storageArea !== storage) return;
+
+    try {
+      const snapshot = readExecutionBoardStore({ storage, storeKey: key });
+      publish(key, snapshot);
+    } catch {
+      // A cross-tab read failure cannot invent replacement execution state.
+      // The next durable notification or ordinary application read may recover.
+    }
+  };
+
+  const canObserveStorage = eventTarget && typeof eventTarget.addEventListener === "function";
+  if (canObserveStorage) eventTarget.addEventListener("storage", onStorage);
+
+  return () => {
+    listeners.delete(listener);
+    if (canObserveStorage && typeof eventTarget.removeEventListener === "function") {
+      eventTarget.removeEventListener("storage", onStorage);
+    }
+  };
 }
 
 export function transactExecutionBoardStore({
