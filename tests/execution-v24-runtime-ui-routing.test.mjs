@@ -94,7 +94,10 @@ test("App mounts one top-level V2.4 router plus separate authorization and LIVE 
 test("runtime hook uses an exclusive Web Lock so StrictMode or another tab cannot run concurrent routers", () => {
   const hook = source("src/hooks/useV24ExecutionRouter.js");
   assert.match(hook, /executionos-v24-runtime-router/);
-  assert.match(hook, /lockManager\.request\(ROUTER_LOCK_NAME, \{ mode: "exclusive" \}/);
+  assert.match(
+    hook,
+    /lockManager\.request\([\s\S]*?ROUTER_LOCK_NAME,[\s\S]*?\{ mode: "exclusive", signal: epochAbort\.signal \}/,
+  );
   assert.match(hook, /proposedBoundaries = useRef\(new Map\(\)\)/);
 });
 
@@ -139,5 +142,32 @@ test("runtime hook uses stage-specific service waiting instead of an all-or-noth
   assert.match(
     hook,
     /if \(!brokerReady\)[\s\S]*?continue;/,
+  );
+});
+
+
+test("runtime router epoch cleanup aborts pending leadership and preserves in-flight lock ownership", () => {
+  const hook = source("src/hooks/useV24ExecutionRouter.js");
+
+  assert.match(hook, /const epochAbort = new AbortController\(\)/);
+  assert.match(
+    hook,
+    /\{ mode: "exclusive", signal: epochAbort\.signal \}/,
+  );
+  assert.match(
+    hook,
+    /const result = await runV24ExecutionRouterCycle\([\s\S]*?\);/,
+  );
+  assert.match(
+    hook,
+    /await delay\(LOOP_DELAY_MS, epochAbort\.signal\)/,
+  );
+  assert.match(
+    hook,
+    /cancelled = true;\s*epochAbort\.abort\(\);/,
+  );
+  assert.doesNotMatch(
+    hook,
+    /epochAbort\.abort\(\);[\s\S]*?runV24ExecutionRouterCycle/,
   );
 });

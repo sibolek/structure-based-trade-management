@@ -7,8 +7,27 @@ const ROUTER_LOCK_NAME = "executionos-v24-runtime-router";
 const LOOP_DELAY_MS = 500;
 const ROUTER_ENABLED = String(import.meta.env.VITE_EXECUTIONOS_V24_ROUTER_ENABLED || "false").toLowerCase() === "true";
 
-function delay(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+function delay(ms, signal = null) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+
+    let settled = false;
+    let timer = null;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) window.clearTimeout(timer);
+      signal?.removeEventListener?.("abort", finish);
+      resolve();
+    };
+
+    timer = window.setTimeout(finish, ms);
+    signal?.addEventListener?.("abort", finish, { once: true });
+  });
 }
 
 function errorText(error) {
@@ -35,6 +54,7 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
     if (!ROUTER_ENABLED) return undefined;
 
     let cancelled = false;
+    const epochAbort = new AbortController();
     const lockManager = globalThis?.navigator?.locks;
     if (!lockManager || typeof lockManager.request !== "function") {
       setState((current) => ({
@@ -59,7 +79,10 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
       return undefined;
     }
 
-    const leaderPromise = lockManager.request(ROUTER_LOCK_NAME, { mode: "exclusive" }, async () => {
+    const leaderPromise = lockManager.request(
+      ROUTER_LOCK_NAME,
+      { mode: "exclusive", signal: epochAbort.signal },
+      async () => {
       if (cancelled) return;
       setState((current) => ({ ...current, status: "RUNNING", leader: true, error: "" }));
 
@@ -78,7 +101,7 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
             leader: true,
             error: current?.broker?.error || "",
           }));
-          await delay(LOOP_DELAY_MS);
+          await delay(LOOP_DELAY_MS, epochAbort.signal);
           continue;
         }
 
@@ -136,9 +159,10 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
           }
         }
 
-        await delay(LOOP_DELAY_MS);
+        await delay(LOOP_DELAY_MS, epochAbort.signal);
       }
-    });
+      },
+    );
 
     leaderPromise.catch((error) => {
       if (cancelled) return;
@@ -151,7 +175,12 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
     });
 
     return () => {
+      // Decision 22E: stop this epoch from beginning new work immediately.
+      // If its router cycle is already in flight, that cycle remains inside
+      // this lock callback until it settles; abort only releases pending
+      // lock acquisition or interruptible loop delay.
       cancelled = true;
+      epochAbort.abort();
     };
   }, []);
 
