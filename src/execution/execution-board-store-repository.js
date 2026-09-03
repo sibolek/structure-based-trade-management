@@ -1,5 +1,6 @@
 export const EXECUTION_BOARD_STORE_KEY = "execution-v23-store";
 export const EXECUTION_BOARD_STORE_SCHEMA_VERSION = 1;
+export const EXECUTION_BOARD_STORE_WRITER_LOCK_NAME = "executionos-execution-board-store-writer";
 
 const listenersByKey = new Map();
 
@@ -162,6 +163,45 @@ export function transactExecutionBoardStore({
     if (error?.code === "LOCAL_EXECUTION_PERSISTENCE_FAILED") throw error;
     throw storeError(`local execution store could not be persisted exactly: ${error.message}`);
   }
+}
+
+
+function requireWriterLockManager(lockManager) {
+  if (!lockManager || typeof lockManager.request !== "function") {
+    throw storeError(
+      "browser-wide Execution Board writer lock is unavailable",
+      "EXECUTION_BOARD_STORE_WRITER_LOCK_UNAVAILABLE",
+    );
+  }
+  return lockManager;
+}
+
+export async function transactExecutionBoardStoreSerialized({
+  storage = globalThis?.localStorage,
+  storeKey = EXECUTION_BOARD_STORE_KEY,
+  mutate,
+  lockManager = globalThis?.navigator?.locks,
+} = {}) {
+  if (typeof mutate !== "function") {
+    throw storeError(
+      "Execution Board store transaction requires a mutate function",
+      "INVALID_EXECUTION_BOARD_STORE_TRANSACTION",
+    );
+  }
+
+  const manager = requireWriterLockManager(lockManager);
+
+  // Decision 22F: the lock encloses only the canonical local read-modify-write
+  // transaction. No broker or pretrade network operation belongs inside it.
+  return manager.request(
+    EXECUTION_BOARD_STORE_WRITER_LOCK_NAME,
+    { mode: "exclusive" },
+    () => transactExecutionBoardStore({
+      storage,
+      storeKey,
+      mutate,
+    }),
+  );
 }
 
 export function executionBoardStoreRevision({
