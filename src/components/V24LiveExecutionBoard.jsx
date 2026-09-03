@@ -3,7 +3,7 @@ import V24LiveTradeCard from "./V24LiveTradeCard.jsx";
 import {
   readExecutionBoardStore,
   subscribeExecutionBoardStore,
-  transactExecutionBoardStore,
+  transactExecutionBoardStoreSerialized,
 } from "../execution/execution-board-store-repository.js";
 
 function nowIso() {
@@ -41,8 +41,8 @@ export default function V24LiveExecutionBoard() {
   const v24Trades = (Array.isArray(store.liveTrades) ? store.liveTrades : []).filter(isV24);
   const v24History = (Array.isArray(store.history) ? store.history : []).filter(isV24);
 
-  const updateState = (id, state) => {
-    transactExecutionBoardStore({
+  const updateState = async (id, state) => {
+    await transactExecutionBoardStoreSerialized({
       mutate: (latest) => ({
         ...latest,
         liveTrades: latest.liveTrades.map((trade) => {
@@ -65,8 +65,8 @@ export default function V24LiveExecutionBoard() {
     });
   };
 
-  const classifyExit = (id, reason, classification) => {
-    transactExecutionBoardStore({
+  const classifyExit = async (id, reason, classification) => {
+    await transactExecutionBoardStoreSerialized({
       mutate: (latest) => {
         const trade = latest.liveTrades.find((item) => item.id === id && isV24(item));
         if (!trade || trade.phase !== "EXIT") return latest;

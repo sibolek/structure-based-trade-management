@@ -3,7 +3,7 @@ import { applyExecution, createSymbolState } from "../../schwab-bridge/trade-sta
 import {
   EXECUTION_BOARD_STORE_KEY,
   readExecutionBoardStore,
-  transactExecutionBoardStore,
+  transactExecutionBoardStoreSerialized,
 } from "./execution-board-store-repository.js";
 
 export const V24_LIVE_LIFECYCLE_SCHEMA_VERSION = 1;
@@ -336,15 +336,17 @@ function validateLifecycle(lifecycle) {
   return lifecycle;
 }
 
-export function persistV24LiveLifecycle({
+export async function persistV24LiveLifecycle({
   storage = globalThis?.localStorage,
   storeKey = EXECUTION_BOARD_STORE_KEY,
   lifecycle,
+  lockManager = globalThis?.navigator?.locks,
 } = {}) {
   validateLifecycle(lifecycle);
-  const committed = transactExecutionBoardStore({
+  const committed = await transactExecutionBoardStoreSerialized({
     storage,
     storeKey,
+    lockManager,
     mutate: (store) => ({
       ...store,
       v24Lifecycles: [

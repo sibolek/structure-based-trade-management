@@ -11,6 +11,14 @@ import {
   readV24LiveLifecycle,
 } from "../src/execution/execution-v24-live-lifecycle.js";
 
+function writerLockManager() {
+  return {
+    async request(name, options, callback) {
+      return callback({ name, mode: options?.mode });
+    },
+  };
+}
+
 function memoryStorage(initial = {}) {
   const values = new Map(Object.entries(initial));
   return {
@@ -29,13 +37,22 @@ test("ExecutionV23 has no direct full-store localStorage writer", () => {
   assert.equal(source.includes("await transactV23ExecutionProjection"), true);
 });
 
+test("V24LiveExecutionBoard routes UI mutations through serialized canonical writer authority", () => {
+  const source = fs.readFileSync(new URL("../src/components/V24LiveExecutionBoard.jsx", import.meta.url), "utf8");
+  assert.equal(source.includes("transactExecutionBoardStoreSerialized"), true);
+  assert.equal(source.includes("transactExecutionBoardStore({"), false);
+  assert.equal(source.includes("const updateState = async"), true);
+  assert.equal(source.includes("const classifyExit = async"), true);
+  assert.equal(source.includes("await transactExecutionBoardStoreSerialized"), true);
+});
+
 test("ExecutionV23 explicitly excludes V2.4 origin from legacy fill and lifecycle matchers", () => {
   const source = fs.readFileSync(new URL("../src/pages/ExecutionV23.jsx", import.meta.url), "utf8");
   assert.equal(source.includes('candidate?.origin === "V24_HANDOFF"'), true);
   assert.equal(source.includes('trade?.origin === "V24_HANDOFF"'), true);
 });
 
-test("V2.4 LIVE lifecycle persistence increments canonical revision and preserves other namespaces", () => {
+test("V2.4 LIVE lifecycle persistence increments canonical revision and preserves other namespaces", async () => {
   const storage = memoryStorage();
   transactExecutionBoardStore({ storage, mutate: (store) => ({
     ...store,
@@ -53,7 +70,11 @@ test("V2.4 LIVE lifecycle persistence increments canonical revision and preserve
     symbol: "NVDA",
     entryOrderId: "12345",
   };
-  const persisted = persistV24LiveLifecycle({ storage, lifecycle });
+  const persisted = await persistV24LiveLifecycle({
+    storage,
+    lifecycle,
+    lockManager: writerLockManager(),
+  });
 
   assert.equal(persisted.handoffId, "h1");
   const after = readExecutionBoardStore({ storage });

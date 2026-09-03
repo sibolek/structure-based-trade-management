@@ -122,6 +122,14 @@ function initialLifecycle(options = {}) {
   };
 }
 
+function writerLockManager() {
+  return {
+    async request(name, options, callback) {
+      return callback({ name, mode: options?.mode });
+    },
+  };
+}
+
 function memoryStorage(initial = null) {
   let value = initial;
   return {
@@ -372,7 +380,7 @@ test("actual exposure above selected quantity and frozen risk budget produces wa
   assert.equal(inst.compatibility.v24.effectiveStop, 99);
 });
 
-test("durable lifecycle cursor survives reload and prevents duplicate event processing", () => {
+test("durable lifecycle cursor survives reload and prevents duplicate event processing", async () => {
   const { lifecycle, installation: inst, first } = initialLifecycle();
   const fragment = evt({
     sequence: 3,
@@ -389,7 +397,11 @@ test("durable lifecycle cursor survives reload and prevents duplicate event proc
   });
   const advanced = advanceV24LiveLifecycle({ lifecycle, installation: inst, brokerState: broker([first, fragment]) });
   const storage = memoryStorage();
-  persistV24LiveLifecycle({ storage, lifecycle: advanced });
+  await persistV24LiveLifecycle({
+    storage,
+    lifecycle: advanced,
+    lockManager: writerLockManager(),
+  });
   const loaded = readV24LiveLifecycle({ storage, handoffId: advanced.handoffId });
   const replay = advanceV24LiveLifecycle({ lifecycle: loaded, installation: inst, brokerState: broker([first, fragment]) });
   assert.equal(replay.lastProcessedSequence, 3);
