@@ -25,6 +25,7 @@
     "v24:live-lifecycle-test": "node --test tests/execution-v24-live-lifecycle.test.mjs",
     "v24:store-authority-test": "node --test tests/execution-board-store-repository.test.mjs tests/execution-v23-store-authority.test.mjs tests/execution-v23-react-store-authority.test.mjs",
     "v24:runtime-router-test": "node --test tests/execution-v24-runtime-router.test.mjs tests/execution-v24-router-health.test.mjs tests/execution-v24-router-telemetry.test.mjs tests/execution-v24-runtime-ui-routing.test.mjs tests/execution-v24-installation-ownership-transfer.test.mjs",
+    "v24:router-hardening-test": "node --test tests/execution-v24-router-recovery-e2e.test.mjs",
     "v24:router-browser-test": "playwright test",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
