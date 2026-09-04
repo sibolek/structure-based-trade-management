@@ -10,10 +10,6 @@ const INTENTIONAL_NONSTALE_STATES = new Set([
   "PAUSED",
   "BLOCKED",
   "ERROR",
-
-  // Temporary acceptance-only state. Decision 22A removes this when
-  // the final default-on/negative-kill-switch transition is accepted.
-  "DISABLED_PENDING_ACCEPTANCE",
 ]);
 
 function timestampMs(value) {

@@ -98,15 +98,6 @@ function presentation(status) {
         Icon: ShieldAlert,
       };
 
-    case "DISABLED_PENDING_ACCEPTANCE":
-      return {
-        label: "DISABLED PENDING ACCEPTANCE",
-        detail: "Acceptance-only positive router gate remains off until Decision 22 is fully accepted.",
-        tone: "zinc",
-        attention: false,
-        Icon: Radio,
-      };
-
     default:
       return {
         label: text(status).toUpperCase() || "STARTING",

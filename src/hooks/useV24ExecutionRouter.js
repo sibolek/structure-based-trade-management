@@ -10,9 +10,14 @@ import {
   createV24RouterFailure,
   failuresFromV24RouterCycleResult,
 } from "../execution/execution-v24-router-telemetry.js";
+import {
+  interpretV24RouterDisableConfig,
+} from "../execution/execution-v24-router-config.js";
 
 const ROUTER_LOCK_NAME = "executionos-v24-runtime-router";
-const ROUTER_ENABLED = String(import.meta.env.VITE_EXECUTIONOS_V24_ROUTER_ENABLED || "false").toLowerCase() === "true";
+const ROUTER_CONFIG = interpretV24RouterDisableConfig(
+  import.meta.env.VITE_EXECUTIONOS_V24_ROUTER_DISABLED,
+);
 
 function delay(ms, signal = null) {
   return new Promise((resolve) => {
@@ -45,7 +50,7 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
   const latest = useRef({ broker, pretrade });
   const proposedBoundaries = useRef(new Map());
   const [state, setState] = useState(() => ({
-    status: ROUTER_ENABLED ? "STARTING" : "DISABLED_PENDING_ACCEPTANCE",
+    status: ROUTER_CONFIG.status,
     receiverId: null,
     leader: false,
     lastHeartbeatAt: null,
@@ -54,15 +59,15 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
     lastResult: null,
     activeError: null,
     lastFailure: null,
-    error: "",
+    error: ROUTER_CONFIG.error,
     brokerWriteAuthority: false,
-    enabled: ROUTER_ENABLED,
+    enabled: ROUTER_CONFIG.enabled,
   }));
 
   latest.current = { broker, pretrade };
 
   useEffect(() => {
-    if (!ROUTER_ENABLED) return undefined;
+    if (!ROUTER_CONFIG.enabled) return undefined;
 
     let cancelled = false;
     const epochAbort = new AbortController();

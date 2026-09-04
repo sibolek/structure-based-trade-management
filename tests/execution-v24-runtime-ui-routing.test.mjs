@@ -102,12 +102,13 @@ test("runtime hook uses an exclusive Web Lock so StrictMode or another tab canno
   assert.match(hook, /proposedBoundaries = useRef\(new Map\(\)\)/);
 });
 
-test("runtime router feature gate defaults disabled when enable flag is unset", () => {
+test("Decision 22A runtime router uses only the default-on negative emergency switch", () => {
   const hook = source("src/hooks/useV24ExecutionRouter.js");
-  assert.match(hook, /VITE_EXECUTIONOS_V24_ROUTER_ENABLED/);
-  assert.match(hook, /\|\| "false"/);
-  assert.match(hook, /DISABLED_PENDING_ACCEPTANCE/);
-  assert.match(hook, /if \(!ROUTER_ENABLED\) return undefined/);
+  assert.match(hook, /VITE_EXECUTIONOS_V24_ROUTER_DISABLED/);
+  assert.match(hook, /interpretV24RouterDisableConfig/);
+  assert.match(hook, /if \(!ROUTER_CONFIG\.enabled\) return undefined/);
+  assert.doesNotMatch(hook, /VITE_EXECUTIONOS_V24_ROUTER_ENABLED/);
+  assert.doesNotMatch(hook, /DISABLED_PENDING_ACCEPTANCE/);
 });
 
 test("V2.4 live card uses effective-stop authority and frozen ARM-time max risk", () => {
