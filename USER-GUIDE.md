@@ -1,15 +1,15 @@
 # ExecutionOS User Guide
 
-**Version:** 1.3<br>
-**Date:** 4 September 2026<br>
-**Status:** Living operator guide for the accepted integrated ExecutionOS baseline — frozen V2.3 downstream execution plus V2.4 authorization, Execution Board handoff, runtime routing, and recovery hardening<br>
+**Version:** 1.4  
+**Date:** 4 September 2026  
+**Status:** Living operator guide for the accepted ExecutionOS V2.4 Execution Board handoff branch  
 **Repository:** `sibolek/structure-based-trade-management`  
-**Current product baseline:** V2.4 Execution Board Handoff integration<br>
+**Current accepted integration branch:** `v24-execution-board-handoff`  
 **Frozen downstream execution release:** `v2.3.0`
 
 > **Operating principle:** Structure decides. P&L emotion does not.
 >
-> ExecutionOS preserves pre-entry intent and constrains risk/management decisions. It does not currently place, replace, cancel, or flatten broker orders.
+> ExecutionOS preserves pre-entry intent, enforces deterministic risk/ownership boundaries, observes broker reality, and creates an auditable execution record. It does not currently place, replace, cancel, reduce, or flatten broker orders.
 
 ---
 
@@ -18,13 +18,13 @@
 1. [Purpose](#1-purpose)
 2. [Current system status](#2-current-system-status)
 3. [What ExecutionOS is and is not](#3-what-executionos-is-and-is-not)
-4. [Architecture: V2.4 PRE-TRADE vs V2.3 EXECUTION](#4-architecture-v24-pre-trade-vs-v23-execution)
+4. [Architecture: V2.4 authorization → handoff → V2.3 execution](#4-architecture-v24-authorization--handoff--v23-execution)
 5. [Risk model](#5-risk-model)
 6. [Installation and startup](#6-installation-and-startup)
 7. [Schwab authorization and account checks](#7-schwab-authorization-and-account-checks)
 8. [Creating and managing trade candidates](#8-creating-and-managing-trade-candidates)
 9. [Phase 3 DSS and Phase 4 risk sizing](#9-phase-3-dss-and-phase-4-risk-sizing)
-10. [Arming and broker execution](#10-arming-and-broker-execution)
+10. [Arming, handoff, and broker execution](#10-arming-handoff-and-broker-execution)
 11. [Live trade management](#11-live-trade-management)
 12. [Persistence and local state](#12-persistence-and-local-state)
 13. [End-of-Day reporting](#13-end-of-day-reporting)
@@ -42,13 +42,13 @@
 
 # 1. Purpose
 
-This is the practical, living guide for operating the accepted integrated ExecutionOS baseline.
+This is the practical, living guide for operating ExecutionOS as it actually exists on the accepted V2.4 Execution Board handoff branch.
 
 It answers:
 
-> **How do I use the system correctly today, and what parts of the newer V2.4 architecture are implemented versus still intentionally gated?**
+> **How do I operate the system correctly today, what is implemented and accepted, and what remains intentionally unavailable in the current operator surface?**
 
-Use this guide for normal operation. Use the approved design baselines for architecture decisions and the phase closeouts for implementation/acceptance evidence.
+Use this guide for normal operation on the accepted integration branch. Use approved design baselines/addenda for architecture authority and closeout/status records for implementation evidence.
 
 ---
 
@@ -56,69 +56,83 @@ Use this guide for normal operation. Use the approved design baselines for archi
 
 ## 2.1 Frozen downstream execution baseline
 
-The broker-aware execution layer remains frozen under:
+The trusted downstream execution reference remains:
 
 ```text
 v2.3.0
-```
-
-Tag target:
-
-```text
 baabb75f36050599f20e6c89e8db2f1f7d7769a1
 ```
 
-V2.3 remains the trusted downstream reference for:
+Legacy/manual V2.3 behavior remains the reference for:
 
-- armed-candidate ownership;
-- matching Schwab fill binding;
-- `ARMED → LIVE` transition in the existing Execution Board;
-- broker position reconstruction;
-- `ENTRY / ADD / PARTIAL / FLAT / REVERSAL` semantics;
+- legacy armed-candidate workflow;
+- legacy Schwab fill binding;
+- deterministic `ENTRY / ADD / PARTIAL / FLAT / REVERSAL` state semantics;
 - `VALID / THREATENED / INVALID` live management;
 - History and execution review.
 
-## 2.2 V2.4 Phases 1–4 are now merged
+V2.4 reuses trusted downstream lifecycle concepts, but V2.4-origin trades do **not** use the legacy symbol-only / `detectedAt` ownership path. They use the exact-account, authoritative-`executionTime`, lossless-journal path described below.
 
-Current `main` contains:
+## 2.2 V2.4 Phases 1–4
+
+Phases 1–4 are merged to `main`:
 
 1. **Phase 1 — Candidate Ingestion**;
 2. **Phase 2 — MarketDataProvider**;
 3. **Phase 3 — DSS / Micro-Volatility Buffer**;
 4. **Phase 4 — Effective-Stop Risk Sizing**.
 
-Phase 4 was merged through PR #14 at:
+Phase 4 merge commit:
 
 ```text
 0a976fb8bc68f64fd479d48322a011c9d419b2c2
 ```
 
-Final Phase 4 acceptance gate:
+The accepted risk hierarchy is:
 
 ```text
-v24:risk-sizing-test  170/170 PASS
-v24:dss-test           91/91 PASS
-analytics:test        293/293 PASS
-schwab:state-test      10/10 PASS
-production build      PASS
+STRUCTURAL INVALIDATION
+        ↓
+PHASE 3 EFFECTIVE STOP
+        ↓
+CURRENT EXPECTED ENTRY
+        ↓
+0.5% RISK BUDGET
+        ↓
+POSITION SIZE
 ```
 
-## 2.3 V2.4 Execution Board handoff is implemented and accepted
+## 2.3 V2.4 Execution Board handoff runtime
 
-The explicit V2.4 authorization → V2.3 execution handoff is now implemented.
+The V2.4 authorization → Execution Board handoff receiver, local installation, exact-account first-fill ownership, LIVE lifecycle, retirement, canonical store authority, cross-tab serialization, runtime router, recovery hardening, health/telemetry, and full trade-specification inspector are implemented and accepted on:
+
+```text
+v24-execution-board-handoff
+```
+
+Governing invariant:
 
 > **V2.4 authorizes; the handoff transfers; V2.3 owns execution.**
 
-After a valid V2.4 ARM authorization, V2.4 freezes the exact authorized candidate, DSS, effective stop, risk evaluation, quantity, account, and provenance; the handoff transfers that authorization into the downstream execution boundary; the runtime router establishes and maintains broker-listening ownership; and an eligible exact-account Schwab opening fill may promote the trade into LIVE execution ownership.
+The runtime router is a normal **default-on** service on this branch. No positive enable flag is required.
 
-The handoff creates **no broker-write authority**. ExecutionOS still does not place, replace, cancel, modify stops, automatically reduce, flatten, or otherwise mutate Schwab orders or positions.
+The handoff/runtime path creates **no broker-write authority**. Schwab remains an observational/read-only evidence source.
 
-Schwab remains a read-only evidence source.
+## 2.4 Important current operator-surface boundary
 
-The V2.4 runtime router is now a normal **default-on** service. No positive enable flag is required.
+The accepted downstream handoff/runtime is real, but the complete upstream browser/API operator path is **not yet exposed as one normal end-to-end workflow**.
 
+Current facts:
 
-## 2.4 V3 status
+- the PRE-TRADE browser board displays imported `WAITING` candidates;
+- Phase 3 DSS, Phase 4 sizing, ARM authorization, and handoff-construction services exist internally and are tested;
+- the normal pretrade HTTP service exposes candidate import plus handoff transport/discovery/claim/ACK/block operations;
+- the current browser PRE-TRADE board does **not** expose the complete `WAITING → permission → READY/CAUTION → ARM → create handoff` workflow;
+- therefore an imported WAITING candidate does not automatically become a new production handoff merely because the router is running.
+
+This distinction is important: **the receiver/router/ownership path is implemented and accepted; the full upstream operator orchestration into that receiver is not yet a normal product workflow.**
+
+## 2.5 V3 status
 
 V3 Management Governor has **not started** and requires separate explicit authorization.
 
@@ -126,27 +140,28 @@ V3 Management Governor has **not started** and requires separate explicit author
 
 # 3. What ExecutionOS is and is not
 
-ExecutionOS is a **local, broker-aware execution operating system** designed to preserve a trader's pre-entry plan and enforce deterministic risk/ownership boundaries.
+ExecutionOS is a **local, broker-aware execution operating system** designed to preserve pre-entry intent and enforce deterministic risk/ownership boundaries.
 
 It separates:
 
 - **READ** — market analysis and setup selection;
 - **PLAN** — thesis, trigger, invalidation, target, management intent;
-- **PRE-TRADE PERMISSION** — fresh structural/risk checks;
-- **EXECUTION** — broker fill ownership and live state;
+- **PRE-TRADE PERMISSION** — fresh structural/risk evaluation;
+- **AUTHORIZATION / HANDOFF** — immutable execution authorization and transfer;
+- **EXECUTION** — broker fill ownership and live lifecycle;
 - **REVIEW** — execution quality independent of P/L.
 
 It is **not** currently:
 
 - a stock scanner;
 - a market-news terminal;
-- a signal generator;
+- a general signal generator;
 - a fully automated trading system;
 - a broker replacement;
 - a live order-entry panel;
-- an AI that decides whether a setup is good;
 - an automatic NinjaTrader binding layer;
-- a broker-write Governor.
+- a broker-write Governor;
+- a complete browser workflow for every internal V2.4 permission/ARM service.
 
 Equity orders still belong in thinkorswim/Schwab. The Schwab integration remains read-only.
 
@@ -154,9 +169,7 @@ Equity orders still belong in thinkorswim/Schwab. The Schwab integration remains
 
 # 4. Architecture: V2.4 authorization → handoff → V2.3 execution
 
-The accepted authority boundary is:
-
-> **V2.4 authorizes; the handoff transfers; V2.3 owns execution.**
+The accepted conceptual chain is:
 
 ```text
 Candidate
@@ -188,37 +201,74 @@ EXIT
 History
 ```
 
+The downstream portion from an existing handoff through recovery/ownership is implemented on the accepted handoff branch. The entire upstream portion is not yet exposed as one normal browser operator flow.
+
 ## 4.1 Authorization is not broker execution
 
-A V2.4 `ARMED` authorization proves the pre-trade contract passed authorization and that execution provenance was frozen. It does not prove order submission, broker acceptance, fill, or broker-write authority.
+A V2.4 `ARMED` authorization freezes pre-trade provenance. It does not prove:
+
+- broker order submission;
+- broker acceptance;
+- a broker fill;
+- broker-write authority.
 
 Actual equity order entry remains manual in thinkorswim/Schwab.
 
 ## 4.2 PREPARED and LISTENING
 
-`PREPARED` is a durable local reservation before broker-fill ownership begins.
+`PREPARED` is a durable local pre-fill reservation before broker-fill listening authority begins.
 
-`LISTENING` begins only after final admission proof and freezes one immutable `executionListeningAt`. A transient proposed listening time while PREPARED is not ownership authority.
+`LISTENING` begins only after final admission proof and freezes one immutable:
+
+```text
+executionListeningAt
+```
+
+A transient proposed listening boundary while PREPARED is epoch-local and is not canonical ownership authority.
 
 ## 4.3 Runtime router and recovery
 
-The router serializes activation → retirement → first-fill promotion → LIVE lifecycle advancement.
+The router serializes:
 
-One browser-wide Web Lock owns automated router leadership. A separate browser-wide writer lock serializes canonical Execution Board mutations across V2.3 and V2.4.
+```text
+activation
+→ retirement
+→ first-fill ownership/promotion
+→ LIVE lifecycle advancement
+```
 
-After LISTENING becomes durable, pretrade loss does not suspend retirement, first-fill ownership, LIVE promotion, or lifecycle processing. Schwab loss freezes broker-sensitive conclusions. Recovery resumes automatically from durable state plus fresh authoritative evidence without requiring browser refresh.
+One browser-wide Web Lock owns automated router leadership. A separate browser-wide writer lock serializes canonical Execution Board writes across legacy V2.3 and V2.4.
 
-## 4.4 Read-only broker boundary
+After LISTENING becomes durable:
+
+- pretrade-service loss does not suspend durable retirement/first-fill/LIVE lifecycle work;
+- Schwab loss freezes broker-sensitive conclusions;
+- service recovery does not require browser refresh;
+- reload/HMR/remount/takeover creates a fresh router epoch but rereads the same durable canonical ownership state;
+- one stable receiver identity survives on the same browser origin.
+
+## 4.4 Exact-account V2.4 ownership
+
+V2.4 ownership uses:
+
+- exact authorized execution account;
+- authoritative Schwab `executionTime`;
+- lossless execution ownership journal;
+- continuous coverage interval;
+- broker order provenance for entry-fragment vs ADD classification.
+
+`detectedAt` is audit information only and does not move the ownership boundary.
+
+## 4.5 Read-only broker boundary
 
 ```text
 readOnly === true
 brokerWriteAuthority === false
 ```
 
-No router, health, handoff, or recovery state creates broker-write authority.
+No router, health, handoff, retirement, lifecycle, reconciliation, or recovery state creates broker-write authority.
 
 ---
-
 
 # 5. Risk model
 
@@ -226,7 +276,7 @@ The permanent project rule is:
 
 > **Maximum planned price risk per trade = 0.5% of the exact relevant trading-account equity.**
 
-The required hierarchy is:
+Required hierarchy:
 
 ```text
 STRUCTURE
@@ -246,18 +296,34 @@ Never choose size first and tighten the stop until the dollars fit.
 
 Phase 3 converts structural invalidation into a volatility-protected `effectiveStop`.
 
-The accepted policy uses:
+Accepted V1 policy includes:
 
 - 2-minute Wilder ATR(14);
 - RTH-only reconstruction;
 - `ATR × 0.30` volatility buffer;
 - directionally protective price-increment rounding.
 
-Phase 3 answers **where the protected thesis invalidation belongs**.
+Phase 3 answers **where the protected execution stop belongs**.
+
+### Equity price-increment transition boundary
+
+The current pre-variable-MPI Reg NMS Rule 612 fallback has a hard cutoff:
+
+```text
+2026-11-02
+```
+
+On and after that date, absent an authoritative symbol-specific minimum-price-increment source, Phase 3 fails closed with:
+
+```text
+VARIABLE_MPI_SOURCE_REQUIRED
+```
+
+Do not bypass that boundary by assuming `$0.01`.
 
 ## 5.2 Phase 4 owns affordability
 
-Phase 4 answers **how much size can be afforded against that exact stop**.
+Phase 4 answers **how much size can be afforded against the exact effective stop**.
 
 It may reduce quantity or reject affordability. It may never alter structural invalidation or `effectiveStop`.
 
@@ -275,16 +341,26 @@ cd structure-based-trade-management
 npm install
 ```
 
-For normal use, work from current `main` unless a specific development session says otherwise.
+### Branch rule during current integration state
+
+The accepted Decision 22 / handoff runtime is currently on:
+
+```text
+v24-execution-board-handoff
+```
+
+Until that branch is explicitly merged to `main`, normal operation of the accepted handoff/runtime must use the handoff branch:
 
 ```bash
-git checkout main
+git checkout v24-execution-board-handoff
 git pull --ff-only
 ```
 
-## 6.2 Normal equity session
+Do **not** switch to `main` expecting Decision 22 runtime behavior until the handoff branch has actually been merged.
 
-Use two terminals.
+## 6.2 Normal V2.4 equity session
+
+Use **three terminals** for the full current V2.4 runtime surface.
 
 ### Terminal 1 — Schwab monitor
 
@@ -292,9 +368,23 @@ Use two terminals.
 npm run schwab:monitor
 ```
 
-Wait until the monitor is ready.
+Wait for healthy read-only broker state.
 
-### Terminal 2 — UI
+### Terminal 2 — V2.4 pretrade/handoff service
+
+```bash
+npm run v24:pretrade
+```
+
+Default bind:
+
+```text
+http://127.0.0.1:8788
+```
+
+This service provides candidate import/state plus the server-side handoff transport. It does not place broker orders.
+
+### Terminal 3 — UI
 
 ```bash
 npm run dev
@@ -306,7 +396,11 @@ Open the Vite URL shown in the terminal, normally:
 http://localhost:5173
 ```
 
-Confirm the broker status is online before relying on automatic Schwab execution observation.
+Confirm:
+
+- broker state is online;
+- pretrade service is connected when transport/new handoff work is needed;
+- router health is appropriate for the tab.
 
 ## 6.3 V2.4 runtime router startup
 
@@ -327,9 +421,15 @@ true   -> PAUSED
 other nonempty value -> BLOCKED / fail closed
 ```
 
-The retired positive flag `VITE_EXECUTIONOS_V24_ROUTER_ENABLED` must not be used.
+The retired positive flag:
 
-PAUSED stops orchestration only. It does not discard, retire, release symbol ownership, change `executionListeningAt`, alter a retirement cutoff, erase PREPARED/LISTENING, destroy LIVE ownership, or move EXIT to History.
+```text
+VITE_EXECUTIONOS_V24_ROUTER_ENABLED
+```
+
+must not be used.
+
+PAUSED stops router orchestration only. It does not discard, retire, release, rewrite, or otherwise change durable execution ownership.
 
 > **Router disabled does not mean execution ownership disabled.**
 
@@ -348,16 +448,25 @@ BLOCKED
 ERROR
 ```
 
-`RECONCILIATION_REQUIRED` is an ownership condition, not router health.
+`RECONCILIATION_REQUIRED` and `LIVE_RECONCILIATION_REQUIRED` are ownership/trade conditions, not router-health states.
 
-## 6.5 Optional local broker health checks
+## 6.5 Health checks
+
+Broker:
 
 ```bash
 curl http://127.0.0.1:8787/health
 curl http://127.0.0.1:8787/api/state
 ```
 
-The broker boundary remains read-only.
+V2.4 pretrade/handoff service:
+
+```bash
+curl http://127.0.0.1:8788/health
+curl http://127.0.0.1:8788/api/candidates
+```
+
+Both service boundaries remain non-broker-writing.
 
 ---
 
@@ -401,11 +510,9 @@ Complete authentication on Schwab's site. If the callback page does not load loc
 npm run schwab:account
 ```
 
-A healthy account check should resolve the intended account and show current account information without using live P/L as a management cue.
-
 ### Phase 4 account-equity rule
 
-For Phase 4 production risk sizing, the authoritative Schwab field is:
+For Phase 4 risk sizing, the authoritative Schwab field is:
 
 ```text
 currentBalances.liquidationValue
@@ -427,9 +534,9 @@ The exact execution account is required.
 
 # 8. Creating and managing trade candidates
 
-A candidate is a **pre-entry contract**, not a broker position.
+A candidate is a **pre-entry contract proposal**, not a broker position.
 
-The plan should state at minimum:
+A complete definition should state at minimum:
 
 - symbol;
 - direction;
@@ -438,53 +545,40 @@ The plan should state at minimum:
 - thesis;
 - trigger;
 - structural invalidation;
-- target/framework;
+- targets;
 - management intent.
 
-## 8.1 Thesis
+## 8.1 Current PRE-TRADE browser behavior
 
-Use structurally testable language.
+The current V2.4 PRE-TRADE board displays imported candidates in `WAITING` state. It is intentionally a proposal board; WAITING candidates are not ARMED and are not eligible to own broker fills.
 
-Good:
+The current browser board does **not** expose the full internal permission/ARM workflow. Do not interpret visibility on the WAITING board as downstream execution authorization.
 
-```text
-Bull-channel pullback is holding prior breakout structure; continuation remains valid only while that structure remains intact.
-```
+## 8.2 Candidate import
 
-Weak:
+The V2.4 pretrade service accepts canonical candidate bundles through:
 
 ```text
-Looks strong and should go higher.
+POST /api/candidates/import
 ```
 
-## 8.2 Trigger
+Default service:
 
-The trigger should be concrete enough to answer yes/no in real time, such as:
+```text
+127.0.0.1:8788
+```
 
-- breakout and hold;
-- H2 / second-entry long;
-- failed breakdown and reclaim;
-- breakout/retest;
-- signal-bar break from defined structure.
+Candidate source adapters must not bypass canonical validation, persistence, versioning, WAITING state, or authorization rules.
 
-## 8.3 Invalidation
+## 8.3 Candidate identity
 
-Invalidation is what proves the thesis wrong. It is not synonymous with:
-
-- temporary red P/L;
-- discomfort;
-- a normal pullback;
-- desire to protect open profit.
-
-## 8.4 Candidate identity
-
-V2.4 candidate persistence/versioning is exact. Structural changes require a new candidate version rather than silent mutation of a previously evaluated candidate.
+V2.4 candidate identity/versioning is exact. Structural changes require a new candidate version rather than silent mutation of a previously evaluated candidate.
 
 ---
 
 # 9. Phase 3 DSS and Phase 4 risk sizing
 
-This section describes the **merged internal pre-trade engine**. Not every internal field is necessarily exposed in the current operator UI.
+This section describes the **implemented internal pre-trade engine**. Not every internal function is currently exposed as a normal browser action.
 
 ## 9.1 Phase 3 DSS
 
@@ -492,16 +586,14 @@ Phase 3 accepts an already-resolved structural invalidation and produces an immu
 
 Important behavior:
 
-- no continuous DSS calculations while merely `WAITING`;
-- fresh `VALID` DSS may be reused during permission activity;
-- a newer completed 2-minute bar can stale the current DSS evaluation;
-- the next permission cycle refreshes it;
+- no continuous DSS recalculation while merely `WAITING`;
+- fresh `VALID` DSS may be reused during active permission evaluation;
+- a newer completed 2-minute bar can stale the current evaluation;
+- the next permission cycle may create a new immutable evaluation;
 - after authorization, the exact DSS identity is frozen;
 - Phase 3 never sizes the trade.
 
 ## 9.2 Phase 4 expected entry
-
-Supported V2.4 modes:
 
 ### `MARKETABLE_NOW`
 
@@ -519,13 +611,13 @@ SHORT = min(triggerPrice, bid)
 
 No fallback to last/mark/candle close is allowed.
 
-Quote rules include:
+Quote requirements include:
 
 - positive bid and ask;
-- bid <= ask;
+- `bid <= ask`;
 - locked market allowed;
 - crossed market blocked;
-- maximum quote age 5 seconds.
+- quote age ≤5 seconds.
 
 ## 9.3 Risk geometry
 
@@ -534,7 +626,7 @@ LONG riskDistance  = currentExpectedEntry - effectiveStop
 SHORT riskDistance = effectiveStop - currentExpectedEntry
 ```
 
-Directional geometry must be valid; the implementation does not use an absolute-value shortcut to legitimize crossed invalidation.
+Directional geometry must be valid.
 
 ## 9.4 Risk budget
 
@@ -547,8 +639,6 @@ Budget rounding never rounds upward.
 
 ## 9.5 Equity sizing
 
-For whole-share equities:
-
 ```text
 riskPerShare = riskDistance
 rawQuantity = maxDollarRisk / riskPerShare
@@ -559,12 +649,12 @@ Odd lots are allowed. Fractional shares are not assumed.
 
 ## 9.6 Futures sizing
 
-Phase 4 futures metadata uses trusted:
+Trusted futures metadata includes:
 
 ```text
 tickSize
 tickValue
-pointValue?   // optional cross-check
+pointValue?   // optional consistency check
 minimumQuantity
 quantityIncrement
 currency
@@ -577,11 +667,9 @@ riskTicks = ceil(riskDistance / tickSize)
 riskPerContract = riskTicks × tickValue
 ```
 
-The protective tick ceiling prevents underestimating risk when distance does not land exactly on a tick.
-
 ## 9.7 Affordability outcomes
 
-Phase 4 statuses:
+Phase 4 statuses are:
 
 ```text
 VALID
@@ -590,7 +678,7 @@ BLOCKED
 ERROR
 ```
 
-`NO_AFFORDABLE_SIZE` means the inputs are valid but the minimum permitted quantity cannot fit the 0.5% risk budget.
+`NO_AFFORDABLE_SIZE` means minimum valid size cannot fit the 0.5% risk budget.
 
 Downstream consequence:
 
@@ -598,11 +686,9 @@ Downstream consequence:
 PASS — STOP_RISK_CONFLICT
 ```
 
-Do not solve this conflict by tightening the stop.
+Do not solve this by tightening the stop.
 
 ## 9.8 Maximum affordable quantity is a ceiling
-
-The calculated quantity is the **maximum risk-affordable quantity**, not a required size.
 
 If:
 
@@ -610,23 +696,16 @@ If:
 maxAffordableQuantity = 90
 ```
 
-then:
-
-```text
-90 = allowed
-50 = allowed
-91 = prohibited
-```
-
-The selected quantity must also satisfy the instrument minimum/increment.
+then quantities up to 90 may be valid, subject to instrument minimum/increment and all other checks. 91 is prohibited by that risk evaluation.
 
 ## 9.9 Every ARM attempt gets fresh risk
 
-Every ARM attempt from `READY` / `CAUTION` creates a **new Phase 4 evaluation** from fresh inputs.
+Every ARM attempt from `READY` / `CAUTION` requires a **new Phase 4 evaluation** from fresh inputs.
 
-A previous risk evaluation is never considered “recent enough” simply because little time has passed.
+At final authorization:
 
-At final authorization, quote freshness (≤5s) and account freshness (≤15s) are rechecked.
+- quote freshness ≤5 seconds;
+- account snapshot freshness ≤15 seconds.
 
 ---
 
@@ -634,27 +713,39 @@ At final authorization, quote freshness (≤5s) and account freshness (≤15s) a
 
 ## 10.1 V2.4 `ARMED` authorization
 
-Final V2.4 authorization freezes the exact candidate/DSS/risk/quantity provenance. The authorization card and full trade-specification inspector are read-only.
+Internal V2.4 authorization freezes the exact candidate/DSS/risk/quantity/account provenance.
 
-## 10.2 Automatic Execution Board handoff
+The downstream authorization card and full trade-specification inspector are read-only.
 
-After authorization, the handoff transfers the frozen V2.4 contract into the downstream execution boundary:
+### Current UI limitation
+
+The complete upstream action that takes a WAITING browser candidate through permission, fresh ARM risk evaluation, final ARM authorization, and creation/registration of a new production handoff is **not yet exposed as one normal browser workflow**.
+
+Therefore do not document or assume “click ARM on the WAITING board” behavior that does not exist.
+
+## 10.2 Automatic downstream handoff processing
+
+Once a valid handoff exists in the server-side handoff/delivery repositories, the default-on runtime router may discover and process it through:
 
 ```text
+PENDING / CLAIMED
+  ↓
 PREPARED
   ↓
 LISTENING
+  ↓
+DELIVERED
 ```
 
-`PREPARED` reserves the symbol. `LISTENING` freezes authoritative `executionListeningAt` and starts the broker-fill ownership interval.
+`PREPARED` reserves the symbol while no lifecycle exists. `LISTENING` freezes authoritative `executionListeningAt`.
 
 ## 10.3 DISCARD before fill
 
-PREPARED discard can retire before listening begins.
+PREPARED may retire before listening begins.
 
-LISTENING discard creates one durable `REQUESTED` retirement with an immutable cutoff. It remains waiting while authoritative Schwab evidence catches up.
+LISTENING discard creates one durable `REQUESTED` retirement with immutable cutoff.
 
-Possible outcomes:
+Possible states/outcomes include:
 
 ```text
 REQUESTED / WAITING
@@ -663,24 +754,79 @@ SUPERSEDED_BY_PRIOR_FILL
 RECONCILIATION_REQUIRED
 ```
 
-Only `RETIRED` releases the pre-fill reservation. If an eligible fill executed before the cutoff, `SUPERSEDED_BY_PRIOR_FILL` wins.
+Rules:
+
+- healthy CONTIGUOUS evidence that is merely behind the cutoff remains REQUESTED/WAITING;
+- no timeout converts healthy catch-up into reconciliation;
+- `RETIRED` releases the pre-fill reservation;
+- eligible fill in `[executionListeningAt, cutoffAt)` produces `SUPERSEDED_BY_PRIOR_FILL`;
+- unprovable interval produces reconciliation.
 
 ## 10.4 First-fill ownership and LIVE promotion
 
-Ownership requires the exact authorized account, authoritative Schwab `executionTime`, valid lossless journal, continuous coverage, matching direction semantics, and required order provenance.
+Ownership requires:
 
-An eligible partial opening fill is sufficient to establish ownership. Promotion atomically creates the durable lifecycle and visible LIVE trade.
+- exact authorized account;
+- authoritative Schwab `executionTime`;
+- matching symbol/direction/opening semantics;
+- continuous broker execution coverage;
+- valid lossless ownership journal;
+- required broker-order provenance.
 
-## 10.5 Actual order entry
+A qualifying partial first fill establishes LIVE immediately.
 
-Equity orders remain manual in thinkorswim/Schwab. ExecutionOS does not send, replace, cancel, modify stops, automatically reduce, or flatten broker orders/positions.
+Promotion atomically creates:
+
+1. the durable V2.4 lifecycle; and
+2. the visible V2.4-origin LIVE Execution Board projection.
+
+After that atomic transfer, the immutable installation remains provenance-only and does not separately reserve the symbol.
+
+## 10.5 LIVE lifecycle
+
+Subsequent exact-account events use lossless journal sequence and authoritative `executionTime`:
+
+```text
+ENTRY_FRAGMENT
+ADD
+PARTIAL
+FLAT
+REVERSAL
+```
+
+Same-entry-order fragments remain entry fragments; a different broker opening order that increases the position is an ADD.
+
+## 10.6 Reconciliation boundary
+
+Coverage/provenance discontinuity after ownership does **not** release the trade.
+
+Possible states include:
+
+```text
+RECONCILIATION_REQUIRED
+LIVE_RECONCILIATION_REQUIRED
+```
+
+Current operator surface displays reconciliation-required conditions and preserves ownership fail-closed, but it does **not yet provide a complete explicit reconciliation-resolution workflow**. Do not clear or rewrite durable state manually to force release.
+
+## 10.7 Actual order entry
+
+Equity orders remain manual in thinkorswim/Schwab.
+
+ExecutionOS does not:
+
+- place orders;
+- replace orders;
+- cancel orders;
+- modify stops;
+- automatically reduce oversized exposure;
+- flatten positions.
 
 ---
 
-
 # 11. Live trade management
 
-Once an eligible handoff fill is promoted into downstream execution ownership, the live execution framework remains:
+Once an eligible V2.4 first fill is promoted into execution ownership, the structural management framework remains:
 
 ```text
 VALID
@@ -692,11 +838,11 @@ These labels describe structure, not profitability.
 
 ## VALID
 
-The thesis remains intact. A VALID trade may be red, green, slow, or uncomfortable.
+The thesis remains intact.
 
 ## THREATENED
 
-New adverse structure materially weakens the thesis but has not yet met the declared invalidation condition.
+New adverse structure materially weakens the thesis but has not yet met declared invalidation.
 
 ## INVALID
 
@@ -712,55 +858,81 @@ Before a discretionary exit, ask:
 
 > **If I could not see my P/L, would I still exit this chart right now?**
 
-Do not use open P/L as a substitute for chart evidence.
+## 11.2 Quantity/risk warnings
 
-## 11.2 Scaling
+For V2.4 LIVE trades:
 
-Before an add, know:
-
-- current quantity;
-- add quantity;
-- new total quantity;
-- structural/effective stop context;
-- total planned risk.
-
-Do not improvise size because the trade is winning or losing.
+- `selectedQuantity` remains immutable authorization provenance;
+- actual owned quantity may differ because of fills/adds;
+- exposure above the authorized initial quantity remains owned and is warned, not automatically reduced;
+- actual stop risk uses the V2.4 `effectiveStop`;
+- the comparison budget is the frozen ARM-time authorized max-dollar-risk;
+- no warning authorizes stop tightening or broker writes.
 
 ---
 
 # 12. Persistence and local state
 
-The canonical browser Execution Board store is persisted in `localStorage` under:
+ExecutionOS currently has **two persistence domains** relevant to V2.4.
+
+## 12.1 Server-side V2.4 pretrade/handoff files
+
+Default local files include:
+
+```text
+.executionos-v24-state.json
+.executionos-v24-execution-board-handoffs.json
+.executionos-v24-execution-board-handoff-deliveries.json
+```
+
+They contain durable pretrade candidate state and immutable handoff/delivery state used by the local V2.4 service.
+
+These files and their temporary write files are Git-ignored and must remain private/local.
+
+## 12.2 Browser canonical Execution Board store
+
+The canonical browser Execution Board store is persisted in localStorage under:
 
 ```text
 execution-v23-store
 ```
 
-Despite the historical key name, it preserves both V2.3 and V2.4 namespaces under one canonical durable authority.
+Despite the historical key name, it now carries both legacy V2.3 and V2.4 downstream namespaces, including installation/retirement/lifecycle provenance.
 
-All production mutations are serialized through the canonical writer boundary. One tab may hold automated router leadership, and one canonical read-modify-write transaction may execute at a time across tabs.
+All production browser-side mutations are serialized through the canonical writer boundary.
 
-Cross-tab notifications trigger a reread of canonical durable state; notification payloads are never execution authority.
+Cross-tab notifications trigger a reread of canonical durable state; event payloads are never authority.
 
-Stable receiver identity and durable handoff/lifecycle state survive ordinary reloads, remounts, HMR, leader takeover, and browser restart on the same persisted origin.
+Stable receiver identity is persisted separately on the same browser origin.
 
-Browser storage is not a database backup. Do not manually edit persisted state to bypass identity, ownership, freshness, retirement, or append-only rules.
+## 12.3 Recovery rules
 
-For long-term review, retain intended exports/reports deliberately.
+Ordinary reload/remount/HMR/takeover must not require reconstruction from visual UI state.
+
+After leadership acquisition the router rereads:
+
+- latest canonical browser store;
+- latest broker state;
+- currently available handoff transport.
+
+PREPARED proposed boundaries are ephemeral until LISTENING. Once LISTENING is durable, its exact boundary is immutable.
+
+Do not manually edit localStorage or server JSON to bypass ownership, retirement, identity, or reconciliation rules.
 
 ---
 
 # 13. End-of-Day reporting
 
-The EOD reporter combines **two independent data sources**.
+The EOD reporter combines two independent sources:
 
-An accurate enriched report requires understanding both.
+1. Schwab broker execution history;
+2. ExecutionOS browser History export.
 
-## 13.1 Source 1 — Schwab execution history
+## 13.1 Schwab execution history
 
 Schwab is broker-authoritative for fills and position changes.
 
-The reporter reconstructs complete flat-to-flat cycles and broker-derived metrics such as:
+The reporter reconstructs complete-context broker cycles and metrics such as:
 
 - direction;
 - entry/exit VWAP;
@@ -770,87 +942,55 @@ The reporter reconstructs complete flat-to-flat cycles and broker-derived metric
 - average winner/loser;
 - profit factors.
 
-## 13.2 Source 2 — ExecutionOS History export
+## 13.2 ExecutionOS History export
 
-The enriched report needs the completed Trade Contracts stored in browser History.
-
-The export supplies information Schwab does not know, including:
+The browser export supplies setup/process context Schwab does not know, including:
 
 - setup/timeframe;
 - thesis/trigger/invalidation;
-- structural stop;
+- structural invalidation/legacy structural stop;
+- V2.4 effective stop when applicable;
 - target/management plan;
 - expected entry/intended size;
 - planned risk;
 - realized R;
-- execution-state/process information;
-- ExecutionOS ownership.
+- ExecutionOS ownership and process state.
 
-> **Critical operating rule:** Download the ExecutionOS History export before generating the enriched report.
+## 13.3 Planned-risk semantics
 
-Without it, broker reconstruction can remain valid for complete-context Schwab cycles, but ExecutionOS-specific enrichment cannot be considered complete.
-
-## 13.3 Step-by-step enriched EOD procedure
-
-### Step 1 — confirm trades are in History
-
-Before export, confirm every trade that should be enriched has completed into **ExecutionOS History**.
-
-A trade not in History cannot be enriched from the browser export.
-
-### Step 2 — keep Vite running
-
-Do **not** stop the Vite server before exporting.
-
-Browser local storage is origin-specific.
-
-If the live UI is running at:
+EOD risk enrichment is origin-aware:
 
 ```text
-http://localhost:5173
+V2.4-origin trade -> v24.effectiveStop is execution/risk stop authority
+legacy/manual V2.3 -> originalPlan.structuralStop is stop authority
 ```
 
-open the helper at:
+For V2.4, structural invalidation remains separate audit/context information. Planned risk and actual-entry stop risk are not calculated from structural invalidation when an authoritative V2.4 effective stop exists.
+
+## 13.4 Enriched EOD procedure
+
+1. Confirm the intended trades have completed into ExecutionOS History.
+2. Keep Vite running.
+3. Use the same browser profile/origin used during the session.
+4. Open:
 
 ```text
 http://localhost:5173/eod-export.html
 ```
 
-Use the **same browser profile and origin** used during the trading session.
-
-Do not casually switch between:
-
-- `localhost` and `127.0.0.1`;
-- different ports;
-- different browser profiles.
-
-Those can have different local-storage namespaces.
-
-### Step 3 — download ExecutionOS EOD History
-
-Choose:
+5. Choose:
 
 ```text
 DOWNLOAD EXECUTIONOS EOD HISTORY
 ```
 
-The downloaded file is named like:
-
-```text
-executionos-eod-history-YYYY-MM-DD.json
-```
-
-This export reads browser History only. It does not contact Schwab or modify History.
-
-### Step 4 — generate the report
-
-Basic:
+6. Run:
 
 ```bash
 npm run schwab:eod -- --date=YYYY-MM-DD
 ```
 
-Preferred explicit form when multiple exports may exist:
+Preferred explicit export path:
 
 ```bash
 npm run schwab:eod -- --date=YYYY-MM-DD --executionos=~/Downloads/executionos-eod-history-YYYY-MM-DD.json
@@ -862,49 +1002,26 @@ Default HTML output:
 reports/eod/YYYY-MM-DD.html
 ```
 
-### Step 5 — verify enrichment actually occurred
+## 13.5 Verify enrichment
 
-Do not treat “HTML file created” as proof of a fully enriched report.
+Do not treat “HTML file created” as proof of complete enrichment.
 
 Check:
 
-- the intended History export was loaded or auto-detected;
-- ExecutionOS-owned versus broker-only counts are plausible;
-- known ExecutionOS-owned trades are not all broker-only;
-- owned trades show setup/process fields;
-- owned trades show planned risk/R when their contracts support it;
-- unmatched Schwab cycles remain explicitly broker-only.
+- intended History export loaded;
+- ExecutionOS-owned vs broker-only counts are plausible;
+- setup/process fields appear where expected;
+- planned risk/R appears only when supported;
+- V2.4 risk is based on effective stop;
+- unmatched broker cycles remain broker-only.
 
-Matching is intentionally conservative. Do not force ownership merely to improve match count.
+## 13.6 Carry-in/context warnings
 
-### Step 6 — investigate unexpected broker-only rows
+The reporter does not invent cost basis. If the first same-day execution is closing activity, that position may have existed before the report window.
 
-Verify:
+When carry-in/context warnings exist, reconstructed gross P/L is not a definitive whole-account daily P/L total.
 
-- report date;
-- completed History entry;
-- downloaded export;
-- browser origin/profile;
-- symbol;
-- direction;
-- entry timing;
-- that the intended export file, not a newer unrelated file, was loaded.
-
-### Step 7 — respect carry-in / incomplete-context warnings
-
-The reporter never invents a cost basis.
-
-If the first same-day execution is a closing execution, the position may have existed before the report date. That activity is treated as context-incomplete rather than receiving a fictional entry.
-
-When a carry-in/context warning exists, do **not** describe reconstructed gross P/L as definitive whole-account daily P/L.
-
-### Step 8 — planned risk and R
-
-For an ExecutionOS-owned historical trade, the EOD enrichment uses the applicable saved contract semantics. Broker-only trades do not receive fabricated planned risk or R.
-
-The EOD reporter's current account/risk snapshot is not a historical frozen per-trade risk budget.
-
-### Step 9 — profit-factor distinction
+## 13.7 Profit-factor distinction
 
 ```text
 Gross Profit Factor = gross profit / gross loss
@@ -914,58 +1031,50 @@ Gross Profit Factor = gross profit / gross loss
 Average Win/Loss Factor = average winner / abs(average loser)
 ```
 
-Do not conflate them.
+Keep them distinct.
 
-### Step 10 — retain artifacts privately
+## 13.8 Private artifacts
 
-The History JSON and generated HTML report contain private trading-plan/review information.
-
-Keep them local. Do not commit them to Git.
-
-For implementation/reporting details, see:
-
-```text
-docs/ExecutionOS_EOD_Report.md
-```
+History JSON and generated HTML contain private trading-plan/review information. Keep them local and do not commit them.
 
 ---
 
 # 14. Futures / NinjaTrader status
 
-Common futures such as MES/MNQ can be represented by the system, and Phase 4 contains futures sizing metadata/calculation support.
+MES/MNQ and other supported futures can be represented for sizing calculations.
 
 However:
 
 - live NinjaTrader broker binding is **not connected**;
 - Schwab must not be treated as the futures execution source;
 - futures sizing support is not equivalent to broker integration;
-- a futures candidate will not automatically promote to LIVE from NinjaTrader today.
-
-A future broker-agnostic adapter/observer design remains separate work.
+- a futures candidate will not automatically become LIVE from NinjaTrader today.
 
 ---
 
 # 15. Security
 
-Never commit or paste publicly:
+Never commit or expose:
 
 - Schwab Client Secret;
 - OAuth access/refresh tokens;
 - authorization codes;
 - unmasked account numbers;
 - private broker exports;
-- ExecutionOS private History exports.
+- ExecutionOS private History exports;
+- V2.4 local pretrade/handoff state files.
 
-Important local files:
+Important local files include:
 
 ```text
 .env.local
 .schwab-tokens.json
+.executionos-v24-state.json
+.executionos-v24-execution-board-handoffs.json
+.executionos-v24-execution-board-handoff-deliveries.json
 ```
 
 Keep secrets out of browser-exposed `VITE_` variables.
-
-The read-only broker boundary is a deliberate safety control.
 
 ---
 
@@ -973,107 +1082,128 @@ The read-only broker boundary is a deliberate safety control.
 
 ## 16.1 Broker offline
 
-Start/verify:
-
 ```bash
 npm run schwab:monitor
 curl http://127.0.0.1:8787/health
 ```
 
-If the API is on a custom port, ensure the UI uses the same `VITE_EXECUTIONOS_BROKER_URL`.
+`WAITING_FOR_SCHWAB` does not release durable ownership.
 
-## 16.2 Schwab authentication fails
+## 16.2 Pretrade service offline
 
-Verify `.env.local`, callback URL, and token state. Reauthorize with:
+```bash
+npm run v24:pretrade
+curl http://127.0.0.1:8788/health
+```
+
+`WAITING_FOR_PRETRADE` means new transport/activation work is unavailable. Durable post-LISTENING broker ownership processing continues when Schwab evidence is healthy.
+
+## 16.3 Schwab authentication fails
+
+Verify `.env.local`, callback URL, and token state. Reauthorize:
 
 ```bash
 npm run schwab:auth
 ```
 
-## 16.3 Router is not RUNNING
+## 16.4 Router is not RUNNING
 
-Interpret the visible health state first:
+Interpret the visible health state:
 
-- `WAITING_FOR_SCHWAB`: broker evidence unavailable or catching up; ownership is not released.
-- `WAITING_FOR_PRETRADE`: transport/activation waits; durable LISTENING ownership processing continues independently.
-- `WAITING_FOR_ROUTER_LOCK`: another tab owns router leadership.
-- `PAUSED`: check `VITE_EXECUTIONOS_V24_ROUTER_DISABLED=true`; durable ownership is preserved.
-- `BLOCKED`: known-invalid configuration or safety precondition.
-- `STALE`: expected leader heartbeat exceeded tolerance; do not create a second leader manually.
-- `ERROR`: inspect structured diagnostics; last durable execution state remains authoritative.
+- `WAITING_FOR_SCHWAB` — broker evidence unavailable;
+- `WAITING_FOR_PRETRADE` — new transport/activation unavailable;
+- `WAITING_FOR_ROUTER_LOCK` — another tab owns router leadership;
+- `PAUSED` — emergency negative switch active;
+- `BLOCKED` — known safety/config/capability blocker;
+- `STALE` — leader heartbeat exceeded tolerance;
+- `ERROR` — operational failure; durable ownership remains authoritative.
 
-## 16.4 Authorized candidate did not progress through handoff
+## 16.5 Imported WAITING candidate does not ARM automatically
 
-Check router health, Schwab availability, pretrade availability for transport/activation, exact account/symbol, durable handoff state, router leadership, and whether broker evidence is still catching up. Do not rewrite local storage to force progression.
+This is currently expected. The PRE-TRADE browser board is a WAITING proposal surface; the complete permission/ARM/handoff-creation operator workflow is not yet exposed there.
 
-## 16.5 Fill did not become owned
+Do not bypass this by fabricating handoff/local-storage state.
 
-Check durable LISTENING, `executionTime >= executionListeningAt`, exact authorized account, opening direction/effect, CONTIGUOUS coverage, valid ownership journal, absence of conflicting same-symbol activity, and required broker order provenance.
+## 16.6 Existing handoff did not progress
 
-A browser refresh should not be required merely to resume deterministic processing.
+Check:
 
+- router health;
+- Schwab availability;
+- pretrade/handoff transport availability for activation;
+- exact account/symbol;
+- handoff delivery state;
+- browser router leadership;
+- broker coverage catch-up.
 
-## 16.6 Phase 4 says no affordable size
+## 16.7 Fill did not become owned
 
-Do not tighten the stop.
+Check:
 
-Correct choices are:
+- durable LISTENING;
+- `executionTime >= executionListeningAt`;
+- exact authorized account;
+- matching opening direction/effect;
+- continuous coverage;
+- valid journal;
+- retirement state/cutoff;
+- broker order provenance.
 
-- choose a smaller valid quantity if one exists; or
-- pass when minimum quantity cannot fit.
+A refresh should not be required for normal deterministic recovery.
 
-## 16.7 Phase 4 is blocked
+## 16.8 Reconciliation required
 
-Common categories include:
+Do not delete ownership or edit persistent state.
+
+The current UI warns and retains ownership fail-closed. A complete explicit reconciliation-resolution workflow is not yet exposed.
+
+## 16.9 Phase 4 says no affordable size
+
+Do not tighten the stop. Reduce quantity if a smaller valid size exists; otherwise pass.
+
+## 16.10 Phase 4 blocked
+
+Common causes:
 
 - stale/missing quote;
-- required quote side missing;
+- missing required quote side;
 - crossed market;
 - invalid entry/stop geometry;
-- unresolved/stale/invalid account snapshot;
+- stale/invalid account snapshot;
 - unsupported currency/asset type;
-- invalid/inconsistent instrument metadata.
+- invalid/inconsistent instrument metadata;
+- on/after 2026-11-02, missing authoritative variable-MPI source where required.
 
-A `BLOCKED` result is not the same thing as `PASS — STOP_RISK_CONFLICT`.
+## 16.11 EOD broker-only rows
 
-## 16.8 EOD report shows broker-only trades unexpectedly
-
-Check, in order:
+Check:
 
 1. trade completed into History;
-2. History export was downloaded after completion;
-3. export helper used same origin/profile;
-4. intended export was loaded;
-5. symbol/direction/timing match plausibly.
-
-## 16.9 EOD export empty/incomplete
-
-Likely causes:
-
-- different browser origin;
-- different profile;
-- browser site data cleared;
-- export performed before completed trades reached History.
+2. export downloaded after completion;
+3. same browser origin/profile;
+4. intended export loaded;
+5. symbol/direction/timing plausibility.
 
 ---
 
 # 17. Current limitations and deferred work
 
-Current intentionally incomplete areas include:
+Current incomplete/deferred areas include:
 
-- broader context/decision-gate logic beyond the implemented V2.4 authorization/handoff path;
+- complete browser/API `WAITING → permission → ARM → handoff creation` operator orchestration;
+- explicit reconciliation-resolution workflow;
+- broader macro/context decision-gate logic beyond implemented components;
 - broker order placement/replacement/cancellation;
 - broker-write Governor enforcement;
 - buying-power/margin eligibility gate;
 - aggregate portfolio heat controls;
-- non-USD conversion/additional asset types;
+- broader asset/currency support;
 - automatic NinjaTrader futures binding;
-- cloud persistence / multi-device synchronization;
+- cloud persistence/multi-device synchronization;
 - durable production database for all decision history;
-- true contemporaneous NBBO capture for all historical slippage analysis;
 - AI in the latency-sensitive execution path.
 
-These are not reasons to bypass current safety boundaries with manual state edits or guessed fallbacks.
+Do not bypass these gaps with manual state edits or guessed fallbacks.
 
 ---
 
@@ -1081,65 +1211,74 @@ These are not reasons to bypass current safety boundaries with manual state edit
 
 Treat:
 
-- `v2.3.0` as the frozen downstream execution-release reference;
-- current `main` as the authoritative integrated baseline;
-- approved design documents as dated architecture records;
-- phase closeouts as implementation/acceptance records.
+- `v2.3.0` as the frozen downstream release reference;
+- `main` as the merged Phases 1–4 baseline;
+- `v24-execution-board-handoff` as the current accepted handoff/runtime integration branch until explicitly merged;
+- approved design/addendum documents as frozen architecture records;
+- closeout/status records as implementation evidence.
 
 Do not:
 
-- rewrite validated history casually;
 - move/delete the `v2.3.0` tag;
-- modify approved historical baselines merely to erase approval-time status;
+- rewrite approved historical design documents to simulate later implementation state;
 - begin V3 without explicit authorization;
-- commit credentials, tokens, raw private broker data, or private EOD exports.
+- commit credentials/tokens/private broker data/private EOD exports;
+- commit V2.4 local state files.
 
-Important PR records include:
-
-- PR #7 — read-only EOD reporting;
-- PR #12 — V2.4 Phase 3 DSS implementation;
-- PR #13 — Phase 3 post-merge documentation cleanup;
-- PR #14 — V2.4 Phase 4 Effective-Stop Risk Sizing.
+Before switching branches, understand which runtime you are selecting. `main` does not automatically contain unmerged handoff-branch work.
 
 ---
 
 # 19. Recommended daily operating procedure
 
-This reflects the accepted V2.4 authorization → handoff → V2.3 execution workflow.
+This procedure reflects what can be operated safely today.
 
 ## Before market / before first trade
 
-1. Update the integrated baseline when appropriate.
+1. Use `v24-execution-board-handoff` while that remains the accepted unmerged handoff branch.
 2. Start `npm run schwab:monitor`.
 3. Wait for healthy read-only broker state.
-4. Start `npm run dev`.
-5. Confirm router health. `RUNNING` is normal for the active leader; a passive tab may show `WAITING_FOR_ROUTER_LOCK`.
-6. Confirm broker positions and exact account state match reality.
+4. Start `npm run v24:pretrade`.
+5. Start `npm run dev`.
+6. Confirm broker/pretrade connectivity.
+7. Confirm router health. `RUNNING` is normal for the leader; another tab may show `WAITING_FOR_ROUTER_LOCK`.
+8. Confirm broker positions and exact account state match reality.
 
-## For each potential trade
+## Candidate/pretrade work
 
 1. Perform the READ outside ExecutionOS.
-2. Define thesis, trigger, structural invalidation, target, and management intent.
+2. Define thesis, trigger, structural invalidation, targets, management intent.
 3. Preserve `structure → effective stop → risk budget → size`.
-4. Allow V2.4 permission/DSS/risk evaluation to determine authorization.
-5. On ARM, verify selected quantity and frozen authorization.
-6. Inspect the read-only full trade specification when needed.
-7. Allow PREPARED → LISTENING handoff progression.
-8. Place the actual equity order only in thinkorswim/Schwab.
-9. Allow an eligible exact-account fill to establish LIVE ownership.
-10. Manage by `VALID / THREATENED / INVALID`.
-11. Use DISCARD only to withdraw an unfilled authorization; LISTENING discard may remain REQUESTED while broker evidence catches up.
+4. Import canonical candidate bundles when using V2.4 candidate ingestion.
+5. Treat the WAITING board as proposals only.
+6. Do not assume the current browser board will automatically run the complete permission/ARM/handoff-creation workflow.
 
-## During outage or restart
+## When a valid V2.4 handoff exists
 
-Do not interpret router/service loss as ownership release and do not edit local storage. PREPARED waits for admission; LISTENING retains its immutable boundary; REQUESTED retains its cutoff; LIVE remains owned; EXIT remains owned until History. Unprovable ownership requires reconciliation rather than guessing.
+1. Let the default-on router perform safe discovery/activation.
+2. Verify PREPARED/LISTENING authorization state in the Execution workspace.
+3. Inspect the read-only full trade specification as needed.
+4. Place actual equity orders only in thinkorswim/Schwab.
+5. Let eligible exact-account fills establish LIVE ownership.
+6. Manage LIVE state by `VALID / THREATENED / INVALID`.
+7. Use DISCARD only for a pre-fill authorization; remember LISTENING discard may remain REQUESTED while Schwab evidence catches up.
 
-## After the session
+## During outage/restart
 
-Follow the existing EOD History export/report procedure and keep private artifacts local.
+Do not interpret service loss as ownership release and do not edit persistent state.
+
+- PREPARED remains durable;
+- LISTENING retains immutable boundary;
+- REQUESTED retains cutoff;
+- LIVE remains owned;
+- EXIT remains owned until History;
+- unprovable history requires reconciliation.
+
+## After session
+
+Export ExecutionOS History before shutting down the UI origin if you want enriched EOD reporting, then run the EOD report and retain artifacts privately.
 
 ---
-
 
 # 20. Command reference
 
@@ -1150,6 +1289,7 @@ npm install
 npm run dev
 npm run build
 npm run preview
+npm run v24:pretrade
 ```
 
 ## Schwab
@@ -1177,24 +1317,36 @@ npm run schwab:eod -- --date=YYYY-MM-DD --symbol=NVDA
 npm run schwab:eod -- --date=YYYY-MM-DD --out=~/Desktop/eod-YYYY-MM-DD.html
 ```
 
-## V2.4 validation
+## V2.4 market data / DSS
 
 ```bash
+npm run v24:market-data-test
+npm run v24:market-data-probe
+npm run v24:dss-live-probe
 npm run v24:dss-test
 npm run v24:risk-sizing-test
-npm run v24:runtime-router-test
-npm run v24:store-authority-test
+```
+
+## V2.4 handoff / ownership / runtime validation
+
+```bash
+npm run v24:handoff-test
+npm run v24:handoff-api-test
+npm run v24:broker-provenance-test
+npm run v24:handoff-admission-test
+npm run v24:v23-compat-test
 npm run v24:v23-install-test
+npm run v24:fill-ownership-test
 npm run v24:retirement-test
 npm run v24:activation-test
-npm run v24:fill-ownership-test
 npm run v24:live-lifecycle-test
-npm run v24:v23-compat-test
+npm run v24:store-authority-test
+npm run v24:runtime-router-test
 npm run v24:router-hardening-test
 npm run v24:router-browser-test
 ```
 
-The browser suite uses real Web Locks for multi-tab leadership/recovery. The hardening suite covers the synthetic read-only REQUESTED-retirement recovery regression.
+The browser router suite uses real Web Locks for multi-tab leadership/recovery. The hardening suite covers the synthetic read-only REQUESTED-retirement recovery regression.
 
 ## Full tests / analytics
 
@@ -1209,44 +1361,28 @@ npm run analytics:capture
 npm run analytics:counterfactuals
 ```
 
-## Historical research / diagnostics
-
-The repository retains research commands for reproducibility, including:
-
-```bash
-npm run research:30day-management
-npm run research:normalize-30day
-npm run research:reconstruct-30day
-npm run research:enrich-stops
-npm run research:report-recovered
-npm run research:audit-market-data
-npm run research:diagnose-fast-winners
-npm run research:diagnose-fast-winner-strata
-npm run research:validate-fast-winners-schwab
-npm run research:diagnose-minute-alignment
-```
-
-Use the research methodology document for provenance/anti-curve-fitting rules.
-
 ---
 
 # 21. Documentation map
 
-Use the following sources by purpose:
+Authority principle: current validated code/runtime defines what the system actually does; this guide translates that into operator procedure; approved design addenda define frozen architecture for their scope.
 
 | Need | Source |
 |---|---|
-| Operate ExecutionOS today | `USER-GUIDE.md` |
-| Current documentation authority/status | `docs/ExecutionOS_Documentation_Index.md` |
+| Operate current handoff branch | `USER-GUIDE.md` |
+| Documentation authority/status | `docs/ExecutionOS_Documentation_Index.md` |
 | Current vs historical map | `DOCUMENTATION-STATUS.md` |
 | Overall V2.4 architecture | `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` |
-| Phase 3 implementation | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` |
+| Phase 3 accepted implementation | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` |
 | Phase 4 design | `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md` |
-| Phase 4 implementation / merge | `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md` |
-| Execution Board handoff + Decision 22 runtime hardening | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v1.2_APPROVED.md` |
+| Phase 4 accepted implementation | `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md` |
+| Handoff Decisions 10–20 | approved handoff design baseline/addenda through `v1.0` |
+| Full Trade Specification Inspector | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v1.1_APPROVED.md` |
+| Decision 22 runtime hardening | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v1.2_APPROVED.md` |
 | EOD semantics | `docs/ExecutionOS_EOD_Report.md` |
-| Longer-term Governor direction | `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` |
 | Historical analytics provenance | `research/30-day-management-study/methodology.md` |
+
+Historical approved documents may intentionally contain status wording that was true at approval time. Do not use an older approval-time “not implemented yet” statement to override newer accepted code/closeout evidence.
 
 ---
 
@@ -1256,61 +1392,60 @@ Use the following sources by purpose:
 The chart condition/price structure that proves the thesis wrong.
 
 **Effective stop**  
-The Phase 3 volatility-protected stop derived from structural invalidation. Phase 4 may not change it.
+The Phase 3 volatility-protected execution stop derived from structural invalidation. Phase 4 may not change it.
 
 **DSS evaluation**  
-An immutable Phase 3 evaluation identified by `dssEvaluationId`.
+Immutable Phase 3 evaluation identified by `dssEvaluationId`.
 
 **Risk evaluation**  
-An immutable Phase 4 evaluation identified by `riskEvaluationId`, containing expected-entry, account, instrument, calculation, status, and provenance.
+Immutable Phase 4 evaluation identified by `riskEvaluationId`.
 
 **Maximum affordable quantity**  
-The largest valid quantity whose planned entry→effective-stop risk fits the 0.5% budget. It is a ceiling, not a required quantity.
+Largest valid quantity whose planned entry→effective-stop risk fits the 0.5% budget. It is a ceiling, not a required size.
 
-**V2.4 `ARMED` authorization**
-Immutable pre-trade authorization freeze containing exact candidate, DSS, effective-stop, risk, account, and selected-quantity identity. It does not place an order; the handoff transfers it downstream.
+**V2.4 `ARMED` authorization**  
+Immutable pre-trade authorization freeze containing exact candidate, DSS, effective-stop, risk, account, and selected-quantity identity. It does not place an order.
 
-**PREPARED**
-Durable local reservation before broker-fill listening begins.
+**Handoff**  
+Immutable transfer contract from V2.4 authorization into the downstream execution boundary.
 
-**LISTENING**
-Durable pre-fill ownership with one immutable `executionListeningAt`.
+**PREPARED**  
+Durable local pre-fill reservation before authoritative broker-fill listening begins.
 
-**REQUESTED**
-Durable nonterminal retirement state after LISTENING discard; it retains cutoff and ownership while evidence catches up.
+**LISTENING**  
+Durable pre-fill reservation with immutable `executionListeningAt` and broker-fill eligibility.
 
-**RETIRED**
-Clean retirement proven through cutoff with no eligible prior fill; releases the pre-fill reservation.
+**REQUESTED**  
+Durable nonterminal retirement state after LISTENING discard; retains cutoff and ownership while evidence catches up.
 
-**SUPERSEDED_BY_PRIOR_FILL**
+**RETIRED**  
+Clean pre-fill retirement proven through cutoff with no eligible prior fill; releases the reservation.
+
+**SUPERSEDED_BY_PRIOR_FILL**  
 Retirement outcome when an eligible fill occurred before cutoff; ownership proceeds toward LIVE.
 
-**Broker binding / first-fill ownership**
-Assignment of the first eligible exact-account opening fill to the correct LISTENING authorization.
+**LIVE_RECONCILIATION_REQUIRED**  
+Fail-closed LIVE ownership state after broker execution continuity/provenance becomes unprovable. Ownership is retained; current UI does not yet expose a complete reconciliation-resolution workflow.
 
-**Router leadership**
+**Router leadership**  
 Browser-wide exclusive Web Lock authority permitting one tab to run automated V2.4 routing.
 
-**Canonical store writer authority**
+**Canonical store writer authority**  
 Browser-wide serialized writer boundary for canonical Execution Board mutations.
 
-
 **Execution state**  
-The live structural classification `VALID`, `THREATENED`, or `INVALID`.
+Live structural classification `VALID`, `THREATENED`, or `INVALID`.
 
 **Trade contract**  
-The saved pre-entry intent: thesis, trigger, invalidation, target/management, and risk context.
-
-**Trade episode**  
-A broker position lifecycle from flat to flat, subject to reversal semantics.
+Saved pre-entry intent: thesis, trigger, invalidation, targets/management, and risk context.
 
 **Governor**  
-The planned future V3 deterministic management-policy layer. V3 has not started.
+Planned future V3 deterministic management-policy layer. V3 has not started.
 
 ---
 
 ## Living-document maintenance rule
 
-Update this guide whenever normal startup, broker-data source, candidate/risk semantics, pre-trade/ARM boundaries, broker ownership, persistence, supported instruments, safety boundaries, EOD procedure, or CLI surface changes.
+Update this guide whenever normal startup, active branch/release state, broker-data source, candidate/risk semantics, pre-trade/ARM operator surface, handoff/ownership, persistence, supported instruments, safety boundaries, EOD procedure, or CLI surface changes.
 
-Do not let this guide silently drift away from the actual application.
+Do not let this guide silently drift away from validated application behavior.
