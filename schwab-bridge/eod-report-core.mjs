@@ -155,13 +155,22 @@ export function reconstructDailyTrades(executionLegs = [], { date = localDateKey
 }
 
 function safeNumber(value) {
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  if (typeof value === "string" && !value.trim()) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
+function executionRiskStopFromHistory(trade) {
+  if (trade?.origin === "V24_HANDOFF" && trade?.v24) {
+    return safeNumber(trade.v24.effectiveStop);
+  }
+  return safeNumber(trade?.originalPlan?.structuralStop);
+}
+
 function plannedRiskFromHistory(trade) {
   const entry = safeNumber(trade?.risk?.expectedEntry);
-  const stop = safeNumber(trade?.originalPlan?.structuralStop);
+  const stop = executionRiskStopFromHistory(trade);
   const size = safeNumber(trade?.risk?.intendedSize);
   if ([entry, stop, size].some((value) => value == null) || size <= 0) return null;
   return Math.abs(entry - stop) * size;
@@ -217,19 +226,26 @@ export function enrichWithExecutionOs(trades = [], executionOsPayload, { date = 
     used.add(match._tradeIndex);
     const plannedRisk = plannedRiskFromHistory(historyTrade);
     const structuralStop = safeNumber(historyTrade?.originalPlan?.structuralStop);
-    const actualEntryRisk = structuralStop != null && match.entryVwap != null
-      ? Math.abs(match.entryVwap - structuralStop) * match.peakQuantity
+    const effectiveStop = historyTrade?.origin === "V24_HANDOFF"
+      ? safeNumber(historyTrade?.v24?.effectiveStop)
+      : null;
+    const executionStop = executionRiskStopFromHistory(historyTrade);
+    const actualEntryRisk = executionStop != null && match.entryVwap != null
+      ? Math.abs(match.entryVwap - executionStop) * match.peakQuantity
       : null;
     const rMultiple = plannedRisk && plannedRisk > 0 ? match.grossPnl / plannedRisk : null;
 
     match.executionOs = {
       id: historyTrade.id,
+      origin: historyTrade?.origin || "LEGACY_MANUAL_V23",
       setup: historyTrade?.originalPlan?.setup || "",
       timeframe: historyTrade?.originalPlan?.timeframe || "",
       thesis: historyTrade?.originalPlan?.thesis || "",
       trigger: historyTrade?.originalPlan?.trigger || "",
       invalidation: historyTrade?.originalPlan?.invalidation || "",
       structuralStop,
+      effectiveStop,
+      executionStop,
       target: historyTrade?.originalPlan?.target || "",
       management: historyTrade?.originalPlan?.management || "",
       expectedEntry: safeNumber(historyTrade?.risk?.expectedEntry),
