@@ -2,6 +2,13 @@ import React, { useEffect, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 
 import useV24ExecutionRouter from "../../src/hooks/useV24ExecutionRouter.js";
+import {
+  EXECUTION_BOARD_STORE_KEY,
+  EXECUTION_BOARD_STORE_WRITER_LOCK_NAME,
+  readExecutionBoardStore,
+  subscribeExecutionBoardStore,
+  transactExecutionBoardStoreSerialized,
+} from "../../src/execution/execution-board-store-repository.js";
 
 function RouterHarness() {
   const broker = useMemo(() => ({
@@ -45,6 +52,61 @@ function RouterHarness() {
   useEffect(() => {
     window.__V24_ROUTER_STATE__ = router;
   }, [router]);
+
+  useEffect(() => {
+    let projection = readExecutionBoardStore();
+
+    const unsubscribe = subscribeExecutionBoardStore({
+      listener: (snapshot) => {
+        projection = snapshot;
+        window.__V24_STORE_PROJECTION__ = snapshot;
+      },
+    });
+
+    window.__V24_STORE_PROJECTION__ = projection;
+
+    window.__V24_STORE_TEST__ = {
+      storeKey: EXECUTION_BOARD_STORE_KEY,
+      writerLockName: EXECUTION_BOARD_STORE_WRITER_LOCK_NAME,
+
+      read() {
+        return readExecutionBoardStore();
+      },
+
+      projection() {
+        return window.__V24_STORE_PROJECTION__;
+      },
+
+      async appendCandidate(candidateId) {
+        return transactExecutionBoardStoreSerialized({
+          mutate: (store) => ({
+            ...store,
+            candidates: [
+              ...(Array.isArray(store.candidates) ? store.candidates : []),
+              {
+                id: String(candidateId),
+                origin: "PLAYWRIGHT_CROSS_TAB",
+              },
+            ],
+          }),
+        });
+      },
+
+      dispatchUntrustedStorageNotification(fakeNewValue) {
+        window.dispatchEvent(new StorageEvent("storage", {
+          key: EXECUTION_BOARD_STORE_KEY,
+          newValue: fakeNewValue,
+          storageArea: localStorage,
+          url: window.location.href,
+        }));
+      },
+    };
+
+    return () => {
+      unsubscribe();
+      delete window.__V24_STORE_TEST__;
+    };
+  }, []);
 
   return (
     <main>
