@@ -6,258 +6,174 @@ Its governing principle is:
 
 > **Structure decides. P&L emotion does not.**
 
-ExecutionOS is not a setup scanner and is not a broker replacement. The trader performs the market read and places orders in the normal broker platform; ExecutionOS freezes intent, applies deterministic pre-trade risk rules, observes broker reality, reconstructs trade state, and creates an auditable management record.
+ExecutionOS is not a broker replacement. The trader performs the market read and places orders in the normal broker platform; ExecutionOS freezes intent, applies deterministic pre-trade risk rules, observes broker reality, owns execution state, and creates an auditable management record.
 
-## Core workflow
+## Current accepted state
 
-```text
-READ → PLAN → PRE-TRADE PERMISSION → RISK → ARM → TRIGGER → HOLD → UPDATE → EXIT → REVIEW
-```
-
-The downstream live trade state remains classified independently as:
-
-- `VALID`
-- `THREATENED`
-- `INVALID`
-
-> Entry freezes the original plan. New structure can modify it. Emotion cannot.
-
----
-
-## Current product baseline
-
-### Frozen downstream execution release
-
-The validated broker-aware execution baseline remains frozen under:
+### Frozen downstream reference
 
 ```text
 v2.3.0
-```
-
-Tag target:
-
-```text
 baabb75f36050599f20e6c89e8db2f1f7d7769a1
 ```
 
-V2.3 remains the trusted downstream broker-fill ownership and execution-management reference.
+### V2.4 Phases 1–4
 
-### V2.4 pre-trade extension now on `main`
+Merged to `main`:
 
-Current `main` also contains V2.4 Phases 1–4:
+1. Candidate Ingestion;
+2. MarketDataProvider;
+3. DSS / Micro-Volatility Buffer;
+4. Effective-Stop Risk Sizing.
 
-1. **Candidate Ingestion** — merged.
-2. **MarketDataProvider** — merged / live-accepted.
-3. **DSS / Micro-Volatility Buffer** — merged / accepted.
-4. **Effective-Stop Risk Sizing** — merged / accepted via PR #14.
+### V2.4 Execution Board handoff runtime
 
-Phase 4 merge commit:
-
-```text
-0a976fb8bc68f64fd479d48322a011c9d419b2c2
-```
-
-The approved Phase 4 implementation sizes exclusively from the Phase 3 `effectiveStop`, caps planned entry-to-stop risk at 0.5% of exact-account equity, creates immutable risk-evaluation provenance, and requires a fresh risk evaluation for every ARM attempt.
-
-> **Phase 3 determines the correct stop. Phase 4 determines whether and how large we can afford to trade against that stop. Phase 4 never changes the stop.**
-
-### Critical boundary
-
-V2.4 Phase 4 can freeze an **internal `ARMED` authorization/provenance state**, but the explicit transfer/binding of that V2.4 state into the existing V2.3 Execution Board remains future work.
-
-Therefore:
-
-- internal V2.4 `ARMED` does **not** place a broker order;
-- it does **not** claim a fill;
-- it does **not** silently change V2.3 ownership semantics;
-- Schwab/thinkorswim remains the equity order-entry venue;
-- the Schwab integration remains read-only.
-
-V3 has **not** started.
-
----
-
-## Current architecture
+The accepted handoff/runtime integration currently lives on:
 
 ```text
-PRE-TRADE / V2.4
-
-Candidate
-   ↓
-Phase 3 DSS
-   structural invalidation
-   effectiveStop
-   dssEvaluationId
-   ↓
-Phase 4 risk sizing
-   currentExpectedEntry
-   exact account equity
-   instrument conversion
-   maxAffordableQuantity
-   riskEvaluationId
-   ↓
-permission consequence
-   ↓
-READY / CAUTION / PASS
-   ↓
-ARM attempt
-   ↓
-fresh Phase 4 evaluation
-   ↓
-selected quantity validation
-   ↓
-internal ARMED provenance freeze
-   ↓
-[future explicit handoff]
-   ↓
-
-EXECUTION / frozen V2.3
-
-V2.3 Execution Board
-   ↓
-matching broker fill
-   ↓
-LIVE
-   ↓
-VALID / THREATENED / INVALID
+v24-execution-board-handoff
 ```
 
-The bracketed V2.4→V2.3 handoff is intentionally not yet implemented.
+Governing invariant:
 
----
+> **V2.4 authorizes; the handoff transfers; V2.3 owns execution.**
+
+Implemented/accepted on this branch:
+
+- immutable V2.4 handoff provenance;
+- sticky receiver identity;
+- exact-account admission and broker-activity proof;
+- PREPARED/LISTENING local installation;
+- immutable `executionListeningAt`;
+- pre-fill DISCARD/retirement with durable cutoff;
+- lossless exact-account first-fill ownership;
+- atomic LIVE lifecycle + visible Execution Board promotion;
+- fragmented-entry / ADD / PARTIAL / FLAT / REVERSAL lifecycle handling;
+- canonical browser store authority;
+- cross-tab Web Lock serialization;
+- default-on top-level runtime router;
+- router health/telemetry and restart/HMR/takeover recovery;
+- read-only full trade-specification inspector;
+- synthetic read-only browser/runtime recovery acceptance.
+
+The router is default-on. The only runtime switch is the negative emergency pause:
+
+```text
+VITE_EXECUTIONOS_V24_ROUTER_DISABLED=true
+```
+
+No broker writes are authorized.
+
+## Important operator-surface boundary
+
+The downstream handoff receiver/router/ownership path is implemented and accepted, but the current PRE-TRADE browser surface does **not yet expose the complete**:
+
+```text
+WAITING → permission → READY/CAUTION → ARM → create/register handoff
+```
+
+workflow as one normal operator path.
+
+Imported WAITING candidates are proposals only. Internal Phase 3, Phase 4, ARM authorization, and handoff-construction services exist and are tested, but the normal browser PRE-TRADE board does not yet orchestrate all of them end to end.
 
 ## Risk model
 
-Maximum planned loss per trade is:
+Maximum planned price risk per trade is:
 
 ```text
 0.5% of the exact relevant trading-account equity
 ```
 
-The hierarchy is:
+Hierarchy:
 
 ```text
 STRUCTURE → INVALIDATION → EFFECTIVE STOP → RISK BUDGET → POSITION SIZE
 ```
 
-Never reverse that hierarchy by tightening the stop to make a desired position size fit.
+Phase 3 determines the volatility-protected `effectiveStop`. Phase 4 sizes against that stop and may reduce quantity or reject affordability; it may never tighten the stop to make size fit.
 
-### Phase 3
+For V2.4 EOD reporting, `v24.effectiveStop` remains risk-stop authority. Legacy/manual V2.3 trades continue to use `originalPlan.structuralStop`.
 
-Phase 3 converts structural invalidation into a volatility-protected `effectiveStop` using the approved 2-minute Wilder ATR buffer and protective price-increment rounding.
+## Normal V2.4 startup on the accepted branch
 
-### Phase 4
+Until the handoff branch is merged to `main`:
 
-Phase 4:
+```bash
+git checkout v24-execution-board-handoff
+git pull --ff-only
+```
 
-- obtains a conservative current expected entry;
-- obtains exact execution-account `liquidationValue`;
-- applies the fixed 0.5% planned-risk budget;
-- converts equity/futures stop distance into risk per unit;
-- rounds risk budget and quantity only downward/protectively;
-- returns `NO_AFFORDABLE_SIZE` when even minimum size cannot fit;
-- persists immutable risk evaluations;
-- requires a new risk evaluation on every ARM attempt;
-- permits a selected quantity below, but never above, the maximum affordable quantity.
+Run:
 
-Phase 4 does **not** impose an arbitrary notional cap at account equity. Buying power and margin eligibility are separate future concerns.
+```bash
+npm run schwab:monitor
+npm run v24:pretrade
+npm run dev
+```
 
----
-
-## V2.3 execution capabilities
-
-The frozen V2.3 execution layer supports:
-
-- multiple armed candidates;
-- one armed candidate per symbol;
-- broker-fill binding by symbol, direction, opening effect, and arm time;
-- automatic downstream `ARMED → LIVE` transition when a matching Schwab fill is observed;
-- deterministic edit/fill ownership;
-- multiple simultaneous live trades;
-- actual broker average price, quantity, peak quantity, and state reconstruction;
-- `ENTRY / ADD / PARTIAL / FLAT / REVERSAL` semantics;
-- History and execution review;
-- browser-local persistence.
-
-These semantics remain frozen/trusted and were regression-validated during Phase 4 closeout.
-
----
+The services are read-only with respect to broker writes.
 
 ## Broker architecture
 
 ### Schwab / thinkorswim equities
 
-The local Schwab boundary remains read-only and provides:
+Schwab provides read-only:
 
-- OAuth authentication and token refresh;
-- account discovery and exact-account balances;
-- positions, orders, and transactions;
-- read-only market data;
-- live execution polling and latency observation;
-- trade-state reconstruction;
-- historical reconstruction/replay;
-- EOD reporting;
-- Phase 3 market-data inputs;
-- Phase 4 exact-account risk inputs.
+- OAuth/account discovery;
+- exact-account balances;
+- positions/orders/transactions;
+- market data;
+- execution polling and coverage/activity provenance;
+- lossless ownership-journal inputs;
+- historical reconstruction/EOD reporting.
 
-Credentials/tokens remain local and Git-ignored. Secrets must never be committed or exposed to browser code.
+Actual equity order entry remains in thinkorswim/Schwab.
 
 ### NinjaTrader futures
 
-MES/MNQ futures remain executed through NinjaTrader. Automatic NinjaTrader fill binding is not connected yet.
+Phase 4 supports normalized futures sizing calculations. Live NinjaTrader fill binding is not connected yet.
 
-Phase 4 supports normalized futures sizing metadata/calculation, but that is not the same as live NinjaTrader integration.
+## Persistence
 
----
+Server-side local V2.4 state includes:
+
+```text
+.executionos-v24-state.json
+.executionos-v24-execution-board-handoffs.json
+.executionos-v24-execution-board-handoff-deliveries.json
+```
+
+Browser downstream authority uses localStorage key:
+
+```text
+execution-v23-store
+```
+
+The historical key name now contains both V2.3 and V2.4 downstream namespaces. Runtime state files and private exports are Git-ignored.
 
 ## End-of-Day reporting
-
-ExecutionOS includes a read-only EOD reporter:
 
 ```bash
 npm run schwab:eod -- --date=YYYY-MM-DD
 ```
 
-For a **fully enriched** report, completed trades must first be present in ExecutionOS History and the browser History must be exported while Vite is still running.
-
-Open on the same browser origin/profile used for ExecutionOS:
+For enriched reports, export browser History from:
 
 ```text
 http://localhost:5173/eod-export.html
 ```
 
-Choose **DOWNLOAD EXECUTIONOS EOD HISTORY**, then run the EOD command.
+See `USER-GUIDE.md` and `docs/ExecutionOS_EOD_Report.md`.
 
-Without the ExecutionOS History export, Schwab broker-cycle reconstruction can still work for complete-context trades, but setup, planned risk, R, ownership, and process fields cannot be treated as complete.
+## Current limitations
 
-Generated reports default to:
-
-```text
-reports/eod/YYYY-MM-DD.html
-```
-
-See:
-
-- `USER-GUIDE.md` — complete operator sequence;
-- `docs/ExecutionOS_EOD_Report.md` — report semantics and limitations.
-
----
-
-## Validation baseline
-
-Final Phase 4 acceptance on 2026-09-01:
-
-```text
-v24:risk-sizing-test  170/170 PASS
-v24:dss-test           91/91 PASS
-analytics:test        293/293 PASS
-schwab:state-test      10/10 PASS
-production build      PASS
-```
-
-The frozen V2.3 deterministic state suite remained 10/10 green.
-
----
+- complete browser/API WAITING→permission→ARM→handoff creation orchestration;
+- explicit reconciliation-resolution workflow;
+- broker order placement/replacement/cancellation/flattening;
+- broker-write Governor;
+- buying-power/margin and portfolio-heat gates;
+- live NinjaTrader binding;
+- V3 Management Governor.
 
 ## Common commands
 
@@ -265,66 +181,34 @@ The frozen V2.3 deterministic state suite remained 10/10 green.
 npm install
 npm run dev
 npm run build
+npm run v24:pretrade
 
-# Schwab / broker
-npm run schwab:status
+npm run schwab:auth
 npm run schwab:account
 npm run schwab:monitor
-npm run schwab:history
-npm run schwab:state-test
-
-# EOD
 npm run schwab:eod
-npm run schwab:eod -- --date=YYYY-MM-DD
 
-# V2.4 validation
 npm run v24:dss-test
 npm run v24:risk-sizing-test
+npm run v24:handoff-test
+npm run v24:handoff-api-test
+npm run v24:store-authority-test
+npm run v24:runtime-router-test
+npm run v24:router-hardening-test
+npm run v24:router-browser-test
 
-# Full repository tests
 npm run analytics:test
 ```
 
-Research/forensic commands remain documented in `USER-GUIDE.md` and `research/30-day-management-study/methodology.md`.
-
----
-
 ## Documentation
 
-Use these in order of purpose:
+Use:
 
-- `USER-GUIDE.md` — current operating procedure and limitations.
-- `docs/ExecutionOS_Documentation_Index.md` — documentation authority/status map.
-- `DOCUMENTATION-STATUS.md` — current vs historical records.
-- `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` — overall V2.4 design.
-- `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` — Phase 3 implementation/acceptance.
-- `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md` — Phase 4 design.
-- `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md` — Phase 4 implementation/acceptance/merge record.
-- `docs/ExecutionOS_EOD_Report.md` — EOD reference.
-- `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` — dated architecture / Governor direction.
-- `research/30-day-management-study/methodology.md` — research provenance.
+- `USER-GUIDE.md` — current operator procedure;
+- `docs/ExecutionOS_Documentation_Index.md` — authority/status map;
+- `DOCUMENTATION-STATUS.md` — current vs historical records;
+- approved V2.4 design baselines/addenda — frozen architecture;
+- Phase 3/4 closeouts — accepted implementation evidence;
+- `docs/ExecutionOS_EOD_Report.md` — reporting semantics.
 
----
-
-## Current development sequence
-
-Completed:
-
-1. V2.3 broker-aware execution validation and frozen tag.
-2. Analytics preservation.
-3. Read-only EOD reporting.
-4. V2.4 Phase 1 Candidate Ingestion.
-5. V2.4 Phase 2 MarketDataProvider.
-6. V2.4 Phase 3 DSS / effective stop.
-7. V2.4 Phase 4 Effective-Stop Risk Sizing and internal ARM provenance freeze.
-
-Next V2.4 work must be treated as a new phase/scope and should include, as appropriate:
-
-- broader context / decision-gate completion;
-- explicit internal V2.4 `ARMED` → V2.3 Execution Board handoff;
-- any separate buying-power/margin gate;
-- operator/UI exposure of the merged pre-trade internals.
-
-Broker-write authority remains out of scope unless separately designed, validated, and explicitly authorized.
-
-V3 Management Governor remains **not started**.
+V3 has not started.
