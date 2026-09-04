@@ -25,6 +25,7 @@
     "v24:live-lifecycle-test": "node --test tests/execution-v24-live-lifecycle.test.mjs",
     "v24:store-authority-test": "node --test tests/execution-board-store-repository.test.mjs tests/execution-v23-store-authority.test.mjs tests/execution-v23-react-store-authority.test.mjs",
     "v24:runtime-router-test": "node --test tests/execution-v24-runtime-router.test.mjs tests/execution-v24-router-health.test.mjs tests/execution-v24-router-telemetry.test.mjs tests/execution-v24-runtime-ui-routing.test.mjs tests/execution-v24-installation-ownership-transfer.test.mjs",
+    "v24:router-browser-test": "playwright test",
     "schwab:auth": "node schwab-bridge/index.mjs auth",
     "schwab:account": "node schwab-bridge/index.mjs account",
     "schwab:monitor": "node schwab-bridge/monitor.mjs",
@@ -69,14 +70,15 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
-    "vite": "^7.0.0",
+    "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0"
+    "vite": "^7.0.0"
   },
   "devDependencies": {
-    "tailwindcss": "^3.4.17",
+    "@playwright/test": "^1.62.1",
+    "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
-    "autoprefixer": "^10.4.20"
+    "tailwindcss": "^3.4.17"
   }
 }
