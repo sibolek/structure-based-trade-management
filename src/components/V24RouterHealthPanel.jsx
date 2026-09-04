@@ -118,6 +118,29 @@ function presentation(status) {
   }
 }
 
+function failureLabel(failure) {
+  if (!failure) return null;
+
+  const identity = [
+    text(failure.stage),
+    text(failure.code),
+    text(failure.symbol),
+    text(failure.handoffId),
+  ].filter(Boolean);
+
+  return {
+    identity: identity.join(" · "),
+    message: text(failure.message),
+    scope: text(failure.scope),
+    recoverable: failure.recoverable === true
+      ? "RECOVERABLE"
+      : failure.recoverable === false
+        ? "NON-RECOVERABLE"
+        : "",
+    occurredAt: failure.occurredAt,
+  };
+}
+
 function toneClasses(tone, attention) {
   const base = attention
     ? "border-2 shadow-terminal"
@@ -142,6 +165,9 @@ export default function V24RouterHealthPanel({ router } = {}) {
   const view = presentation(status);
   const Icon = view.Icon;
   const error = text(router?.error);
+  const activeFailure = failureLabel(router?.activeError);
+  const lastFailure = failureLabel(router?.lastFailure);
+  const recoveredFailure = !activeFailure && lastFailure;
 
   return (
     <section
@@ -166,8 +192,35 @@ export default function V24RouterHealthPanel({ router } = {}) {
               <p className="mt-1 text-xs opacity-90">{view.detail}</p>
             )}
 
-            {error && (
+            {error && !activeFailure && (
               <p className="mt-1 font-mono text-[10px] text-red-200">{error}</p>
+            )}
+
+            {activeFailure && (
+              <div className="mt-2 rounded border border-red-400/30 bg-red-950/30 p-2 text-[10px]">
+                <div className="flex flex-wrap items-center gap-2 font-semibold text-red-100">
+                  <span>ACTIVE FAILURE</span>
+                  <span className="font-mono">{activeFailure.identity}</span>
+                  {activeFailure.scope && <span>{activeFailure.scope}</span>}
+                  {activeFailure.recoverable && <span>{activeFailure.recoverable}</span>}
+                </div>
+                {activeFailure.message && (
+                  <p className="mt-1 text-red-200">{activeFailure.message}</p>
+                )}
+              </div>
+            )}
+
+            {recoveredFailure && (
+              <div className="mt-2 rounded border border-zinc-700 bg-zinc-950/40 p-2 text-[10px] text-zinc-400">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-zinc-300">LAST FAILURE · RECOVERED</span>
+                  <span className="font-mono">{recoveredFailure.identity}</span>
+                  {recoveredFailure.scope && <span>{recoveredFailure.scope}</span>}
+                </div>
+                {recoveredFailure.message && (
+                  <p className="mt-1">{recoveredFailure.message}</p>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -180,7 +233,7 @@ export default function V24RouterHealthPanel({ router } = {}) {
       </div>
 
       <p className="mt-1 text-[10px] text-zinc-500">
-        Health is observational only · broker write authority: NONE
+        Health and failure telemetry are observational only · execution ownership is unchanged · broker write authority: NONE
       </p>
     </section>
   );

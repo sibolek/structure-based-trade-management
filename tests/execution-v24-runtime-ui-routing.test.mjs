@@ -207,7 +207,7 @@ test("Decision 22H router health remains independently operator-visible", () => 
   assert.match(panel, /lastHeartbeatAt/);
   assert.match(panel, /lastSuccessfulCycleAt/);
   assert.match(panel, /lastFailedCycleAt/);
-  assert.match(panel, /Health is observational only/);
+  assert.match(panel, /Health and failure telemetry are observational only/);
   assert.match(panel, /broker write authority: NONE/);
   assert.match(panel, /Durable execution ownership remains authoritative/);
   assert.doesNotMatch(panel, /transactExecutionBoardStore/);
@@ -225,4 +225,25 @@ test("runtime hook separates active Decision 22I error telemetry from last failu
   assert.match(hook, /lastFailure: activeError \|\| prior\.lastFailure/);
   assert.match(hook, /activeError: failure/);
   assert.match(hook, /lastFailure: failure/);
+});
+
+test("Decision 22I active and recovered failures are operator-visible but never execution authority", () => {
+  const panel = source("src/components/V24RouterHealthPanel.jsx");
+
+  assert.match(panel, /router\?\.activeError/);
+  assert.match(panel, /router\?\.lastFailure/);
+  assert.match(panel, /ACTIVE FAILURE/);
+  assert.match(panel, /LAST FAILURE · RECOVERED/);
+  assert.match(panel, /failure\.stage/);
+  assert.match(panel, /failure\.code/);
+  assert.match(panel, /failure\.symbol/);
+  assert.match(panel, /failure\.handoffId/);
+  assert.match(panel, /failure\.scope/);
+  assert.match(panel, /failure\.recoverable/);
+  assert.match(panel, /execution ownership is unchanged/);
+  assert.match(panel, /broker write authority: NONE/);
+
+  assert.doesNotMatch(panel, /transactExecutionBoardStore/);
+  assert.doesNotMatch(panel, /localStorage\.setItem/);
+  assert.doesNotMatch(panel, /requestV24Retirement/);
 });
