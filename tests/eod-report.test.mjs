@@ -119,6 +119,7 @@ test("joins ExecutionOS history and calculates planned risk, R and process stats
   assert.equal(enriched.trades[0].executionOs.plannedRisk, 10);
   assert.equal(enriched.trades[0].executionOs.actualEntryRisk, 10);
   assert.equal(enriched.trades[0].executionOs.rMultiple, 2);
+  assert.equal(enriched.trades[0].executionOs.executionStop, 99);
   assert.deepEqual(enriched.trades[0].executionOs.stateStats, { threatened: 1, invalid: 1, validAfterThreat: 1 });
 
   const summary = summarizeReport({
@@ -129,4 +130,48 @@ test("joins ExecutionOS history and calculates planned risk, R and process stats
   });
   assert.equal(summary.totalR, 2);
   assert.equal(summary.executionOwnedTrades, 1);
+});
+
+test("V2.4 EOD risk uses effectiveStop rather than structural invalidation", () => {
+  const rows = [
+    row({ time: t(20), instruction: "BUY", effect: "OPENING", quantity: 10, price: 100 }),
+    row({ time: t(21), instruction: "SELL", effect: "CLOSING", quantity: 10, price: 104 }),
+  ];
+  const reconstructed = reconstructDailyTrades(rows, { date });
+  const payload = {
+    history: [{
+      id: "v24-history",
+      origin: "V24_HANDOFF",
+      completedAt: t(22),
+      v24: {
+        handoffId: "handoff-1",
+        effectiveStop: 98,
+      },
+      originalPlan: {
+        symbol: "NVDA",
+        direction: "LONG",
+        setup: "PMH breakout/retest",
+        timeframe: "2m",
+        structuralStop: 99,
+        thesis: "t",
+        trigger: "tr",
+        invalidation: "inv",
+        target: "104",
+        management: "hold",
+      },
+      risk: { expectedEntry: 100, intendedSize: 10 },
+      broker: { entryDetectedAt: t(20) },
+      exit: { classification: "STRUCTURAL / PLANNED", reason: "Planned target" },
+      decisions: [],
+    }],
+  };
+
+  const enriched = enrichWithExecutionOs(reconstructed.completedTrades, payload, { date });
+  const executionOs = enriched.trades[0].executionOs;
+  assert.equal(executionOs.structuralStop, 99);
+  assert.equal(executionOs.effectiveStop, 98);
+  assert.equal(executionOs.executionStop, 98);
+  assert.equal(executionOs.plannedRisk, 20);
+  assert.equal(executionOs.actualEntryRisk, 20);
+  assert.equal(executionOs.rMultiple, 2);
 });
