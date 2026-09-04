@@ -6,6 +6,10 @@ dist/
 .schwab-tokens.json
 .executionos-v24-state.json
 .executionos-v24-state.json.tmp
+.executionos-v24-execution-board-handoffs.json
+.executionos-v24-execution-board-handoffs.json.tmp
+.executionos-v24-execution-board-handoff-deliveries.json
+.executionos-v24-execution-board-handoff-deliveries.json.tmp
 npm-debug.log*
 research/30-day-management-study/raw-schwab-history.json
 research/30-day-management-study/normalized-trades.json
