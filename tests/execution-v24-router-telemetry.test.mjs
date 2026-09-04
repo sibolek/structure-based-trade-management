@@ -6,6 +6,7 @@ import {
   V24_ROUTER_FAILURE_STAGES,
   createV24RouterFailure,
   failuresFromV24RouterCycleResult,
+  isV24RouterGlobalStoreFailure,
 } from "../src/execution/execution-v24-router-telemetry.js";
 
 const OCCURRED = "2026-09-03T23:30:00.000Z";
@@ -105,4 +106,16 @@ test("non-stable free-text reason receives a stable stage error code while prese
 
   assert.equal(failure.code, "TRANSPORT_ERROR");
   assert.equal(failure.message, "pretrade connection reset");
+});
+
+test("Decision 22I distinguishes global store blockers from handoff failures", () => {
+  assert.equal(isV24RouterGlobalStoreFailure({
+    code: "EXECUTION_BOARD_STORE_WRITER_LOCK_UNAVAILABLE",
+  }), true);
+  assert.equal(isV24RouterGlobalStoreFailure({
+    code: "LOCAL_EXECUTION_PERSISTENCE_FAILED",
+  }), true);
+  assert.equal(isV24RouterGlobalStoreFailure({
+    code: "ACTIVATION_HANDOFF_FAILURE",
+  }), false);
 });

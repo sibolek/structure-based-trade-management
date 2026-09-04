@@ -406,3 +406,156 @@ test("pretrade discovery failure does not block durable ownership processing", a
       && item.status === "WAITING"
   ));
 });
+
+test("Decision 22I activation failure is handoff-scoped and later envelopes still process", async () => {
+  const calls = [];
+  const result = await runV24ExecutionRouterCycle({
+    transport: {
+      discover: async () => [
+        { handoff: { handoffId: "h-bad", symbol: "NVDA" } },
+        { handoff: { handoffId: "h-good", symbol: "AMD" } },
+      ],
+    },
+    receiverId: "receiver-A",
+    brokerState: {},
+    dependencies: {
+      readStore: () => baseStore(),
+      advanceActivation: async ({ envelope }) => {
+        const id = envelope.handoff.handoffId;
+        calls.push(id);
+        if (id === "h-bad") {
+          const error = new Error("activation failed");
+          error.code = "ACTIVATION_HANDOFF_FAILURE";
+          throw error;
+        }
+        return { status: "DELIVERED" };
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ["h-bad", "h-good"]);
+  assert.ok(result.results.some(
+    (item) => item.stage === "ACTIVATION"
+      && item.handoffId === "h-bad"
+      && item.status === "ERROR"
+      && item.reason === "ACTIVATION_HANDOFF_FAILURE"
+  ));
+  assert.ok(result.results.some(
+    (item) => item.stage === "ACTIVATION"
+      && item.handoffId === "h-good"
+      && item.status === "DELIVERED"
+  ));
+  assert.equal(result.results.some(
+    (item) => item.stage === "TRANSPORT" && item.status === "ERROR"
+  ), false);
+});
+
+test("Decision 22I retirement failure does not block unrelated LISTENING ownership", async () => {
+  const bad = installation("h-retire-bad");
+  const good = installation("h-retire-good");
+  const current = baseStore({
+    v24Installations: [bad, good],
+    v24Retirements: [{ handoffId: bad.handoffId, status: "REQUESTED" }],
+  });
+  const matched = [];
+
+  const result = await runV24ExecutionRouterCycle({
+    transport: { discover: async () => [] },
+    receiverId: "receiver-A",
+    brokerState: {},
+    dependencies: {
+      readStore: () => current,
+      resolveRetirement: async () => {
+        const error = new Error("retirement handoff failed");
+        error.code = "RETIREMENT_HANDOFF_FAILURE";
+        throw error;
+      },
+      evaluateInitialFill: ({ installation: item }) => {
+        matched.push(item.handoffId);
+        return { status: "WAITING", reason: null };
+      },
+    },
+  });
+
+  assert.deepEqual(matched, ["h-retire-good"]);
+  assert.ok(result.results.some(
+    (item) => item.stage === "RETIREMENT"
+      && item.handoffId === "h-retire-bad"
+      && item.status === "ERROR"
+  ));
+  assert.ok(result.results.some(
+    (item) => item.stage === "FIRST_FILL"
+      && item.handoffId === "h-retire-good"
+      && item.status === "WAITING"
+  ));
+});
+
+test("Decision 22I lifecycle failure is handoff-scoped and later lifecycle still advances", async () => {
+  const current = baseStore({
+    v24Lifecycles: [
+      { handoffId: "h-life-bad", symbol: "NVDA", status: "LIVE" },
+      { handoffId: "h-life-good", symbol: "AMD", status: "LIVE" },
+    ],
+  });
+  const calls = [];
+
+  const result = await runV24ExecutionRouterCycle({
+    transport: { discover: async () => [] },
+    receiverId: "receiver-A",
+    brokerState: {},
+    dependencies: {
+      readStore: () => current,
+      advanceLifecycle: async ({ handoffId }) => {
+        calls.push(handoffId);
+        if (handoffId === "h-life-bad") {
+          const error = new Error("lifecycle failed");
+          error.code = "LIFECYCLE_HANDOFF_FAILURE";
+          throw error;
+        }
+        return { status: "UNCHANGED", handoffId };
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ["h-life-bad", "h-life-good"]);
+  assert.ok(result.results.some(
+    (item) => item.stage === "LIFECYCLE"
+      && item.handoffId === "h-life-bad"
+      && item.status === "ERROR"
+      && item.symbol === "NVDA"
+  ));
+  assert.ok(result.results.some(
+    (item) => item.stage === "LIFECYCLE"
+      && item.handoffId === "h-life-good"
+      && item.status === "UNCHANGED"
+  ));
+});
+
+test("Decision 22I global store capability failure aborts the cycle instead of being handoff-isolated", async () => {
+  const calls = [];
+
+  await assert.rejects(
+    runV24ExecutionRouterCycle({
+      transport: {
+        discover: async () => [
+          { handoff: { handoffId: "h-store-bad" } },
+          { handoff: { handoffId: "h-should-not-run" } },
+        ],
+      },
+      receiverId: "receiver-A",
+      brokerState: {},
+      dependencies: {
+        readStore: () => baseStore(),
+        advanceActivation: async ({ envelope }) => {
+          calls.push(envelope.handoff.handoffId);
+          const error = new Error("writer lock unavailable");
+          error.code = "EXECUTION_BOARD_STORE_WRITER_LOCK_UNAVAILABLE";
+          throw error;
+        },
+      },
+    }),
+    (error) => error?.code === "EXECUTION_BOARD_STORE_WRITER_LOCK_UNAVAILABLE",
+  );
+
+  assert.deepEqual(calls, ["h-store-bad"]);
+});

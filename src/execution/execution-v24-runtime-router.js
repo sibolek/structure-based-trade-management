@@ -11,6 +11,7 @@ import {
   createV24LiveLifecycle,
 } from "./execution-v24-live-lifecycle.js";
 import { resolveV24RetirementSerialized } from "./execution-v24-retirement.js";
+import { isV24RouterGlobalStoreFailure } from "./execution-v24-router-telemetry.js";
 
 export const V24_RUNTIME_ROUTER_SCHEMA_VERSION = 1;
 
@@ -357,6 +358,22 @@ function routerResult(stage, handoffId, status, extra = {}) {
   return { stage, handoffId: text(handoffId), status, ...extra };
 }
 
+function errorReason(error) {
+  return error?.code || error?.message || String(error);
+}
+
+function rethrowGlobalStoreFailure(error) {
+  if (isV24RouterGlobalStoreFailure(error)) throw error;
+}
+
+function isFirstFillReconciliationError(error) {
+  return [
+    "V24_LISTENING_INSTALLATION_REQUIRED",
+    "V24_HANDOFF_RETIREMENT_ACTIVE",
+    "V24_FIRST_FILL_PROMOTION_CONFLICT",
+  ].includes(upper(error?.code));
+}
+
 export async function runV24ExecutionRouterCycle({
   transport,
   receiverId,
@@ -395,11 +412,23 @@ export async function runV24ExecutionRouterCycle({
   } else {
     try {
       envelopes = await transport.discover(receiver);
+    } catch (error) {
+      results.push(routerResult(
+        "TRANSPORT",
+        "",
+        "ERROR",
+        { reason: errorReason(error) },
+      ));
+      envelopes = [];
+    }
 
-      // Decision 20: activation envelopes are always processed serially in server order.
-      for (const envelope of envelopes) {
-        const handoffId = text(envelope?.handoff?.handoffId);
-        if (!handoffId) continue;
+    // Decision 20: activation envelopes are always processed serially in server order.
+    // Decision 22I: one handoff failure must not prevent unrelated safe handoffs.
+    for (const envelope of envelopes) {
+      const handoffId = text(envelope?.handoff?.handoffId);
+      if (!handoffId) continue;
+
+      try {
         const activation = await activate({
           envelope,
           brokerState,
@@ -417,14 +446,18 @@ export async function runV24ExecutionRouterCycle({
         } else if (["DELIVERED", "BLOCKED", "RETIREMENT_ACTIVE", "RECONCILIATION_REQUIRED"].includes(activation.status)) {
           clearProposedBoundary(proposedBoundaries, handoffId);
         }
+      } catch (error) {
+        rethrowGlobalStoreFailure(error);
+        results.push(routerResult(
+          "ACTIVATION",
+          handoffId,
+          "ERROR",
+          {
+            reason: errorReason(error),
+            symbol: envelope?.handoff?.symbol || envelope?.candidate?.symbol || null,
+          },
+        ));
       }
-    } catch (error) {
-      results.push(routerResult(
-        "TRANSPORT",
-        "",
-        "ERROR",
-        { reason: error?.code || error?.message || String(error) },
-      ));
     }
   }
 
@@ -444,17 +477,28 @@ export async function runV24ExecutionRouterCycle({
     let lifecycle = lifecycleByHandoff(store, handoffId);
 
     if (retirement && upper(retirement.status) === "REQUESTED") {
-      retirement = await resolveRetirement({
-        storage,
-        storeKey,
-        handoffId,
-        brokerState,
-        finalizedAt: now(),
-        lockManager,
-      });
-      results.push(routerResult("RETIREMENT", handoffId, retirement.status));
-      store = readStore({ storage, storeKey });
-      lifecycle = lifecycleByHandoff(store, handoffId);
+      try {
+        retirement = await resolveRetirement({
+          storage,
+          storeKey,
+          handoffId,
+          brokerState,
+          finalizedAt: now(),
+          lockManager,
+        });
+        results.push(routerResult("RETIREMENT", handoffId, retirement.status));
+        store = readStore({ storage, storeKey });
+        lifecycle = lifecycleByHandoff(store, handoffId);
+      } catch (error) {
+        rethrowGlobalStoreFailure(error);
+        results.push(routerResult(
+          "RETIREMENT",
+          handoffId,
+          "ERROR",
+          { reason: errorReason(error), symbol: installation?.symbol || null },
+        ));
+        continue;
+      }
     }
 
     if (!lifecycle) {
@@ -464,10 +508,21 @@ export async function runV24ExecutionRouterCycle({
       }
 
       let ownership;
-      if (upper(retirement?.status) === "SUPERSEDED_BY_PRIOR_FILL" && retirement?.priorFill) {
-        ownership = { status: "MATCHED", matchedExecution: retirement.priorFill, reason: null };
-      } else {
-        ownership = matchFill({ installation, brokerState });
+      try {
+        if (upper(retirement?.status) === "SUPERSEDED_BY_PRIOR_FILL" && retirement?.priorFill) {
+          ownership = { status: "MATCHED", matchedExecution: retirement.priorFill, reason: null };
+        } else {
+          ownership = matchFill({ installation, brokerState });
+        }
+      } catch (error) {
+        rethrowGlobalStoreFailure(error);
+        results.push(routerResult(
+          "FIRST_FILL",
+          handoffId,
+          "ERROR",
+          { reason: errorReason(error), symbol: installation?.symbol || null },
+        ));
+        continue;
       }
 
       if (ownership.status === "MATCHED") {
@@ -482,9 +537,19 @@ export async function runV24ExecutionRouterCycle({
           });
           results.push(routerResult("FIRST_FILL", handoffId, promoted.status));
         } catch (error) {
-          results.push(routerResult("FIRST_FILL", handoffId, "RECONCILIATION_REQUIRED", {
-            reason: error?.code || error?.message || String(error),
-          }));
+          rethrowGlobalStoreFailure(error);
+
+          if (isFirstFillReconciliationError(error)) {
+            results.push(routerResult("FIRST_FILL", handoffId, "RECONCILIATION_REQUIRED", {
+              reason: errorReason(error),
+              symbol: installation?.symbol || null,
+            }));
+          } else {
+            results.push(routerResult("FIRST_FILL", handoffId, "ERROR", {
+              reason: errorReason(error),
+              symbol: installation?.symbol || null,
+            }));
+          }
         }
       } else {
         results.push(routerResult("FIRST_FILL", handoffId, ownership.status, { reason: ownership.reason || null }));
@@ -500,16 +565,27 @@ export async function runV24ExecutionRouterCycle({
   for (const lifecycle of lifecycles) {
     const handoffId = text(lifecycle?.handoffId);
     if (!handoffId) continue;
-    const advanced = await advanceLifecycle({
-      storage,
-      storeKey,
-      handoffId,
-      brokerState,
-      lockManager,
-    });
-    results.push(routerResult("LIFECYCLE", handoffId, advanced.status, {
-      reason: advanced.reason || advanced.lifecycle?.reconciliationReason || null,
-    }));
+
+    try {
+      const advanced = await advanceLifecycle({
+        storage,
+        storeKey,
+        handoffId,
+        brokerState,
+        lockManager,
+      });
+      results.push(routerResult("LIFECYCLE", handoffId, advanced.status, {
+        reason: advanced.reason || advanced.lifecycle?.reconciliationReason || null,
+      }));
+    } catch (error) {
+      rethrowGlobalStoreFailure(error);
+      results.push(routerResult(
+        "LIFECYCLE",
+        handoffId,
+        "ERROR",
+        { reason: errorReason(error), symbol: lifecycle?.symbol || null },
+      ));
+    }
   }
 
   const finalStore = readStore({ storage, storeKey });

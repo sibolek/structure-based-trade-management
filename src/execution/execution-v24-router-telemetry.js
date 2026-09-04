@@ -41,17 +41,17 @@ function stableCode(value, fallback) {
   return /^[A-Z0-9_]+$/.test(candidate) ? candidate : fallback;
 }
 
-function isStoreFailureCode(code) {
-  const value = upper(code);
+export function isV24RouterGlobalStoreFailure(value) {
+  const code = upper(value?.code ?? value);
   return (
-    value === "LOCAL_EXECUTION_PERSISTENCE_FAILED"
-    || value === "EXECUTION_BOARD_STORE_WRITER_LOCK_UNAVAILABLE"
-    || value.startsWith("INVALID_EXECUTION_BOARD_STORE_")
+    code === "LOCAL_EXECUTION_PERSISTENCE_FAILED"
+    || code === "EXECUTION_BOARD_STORE_WRITER_LOCK_UNAVAILABLE"
+    || code.startsWith("INVALID_EXECUTION_BOARD_STORE_")
   );
 }
 
 function normalizeStage(stage, code) {
-  if (isStoreFailureCode(code)) return "STORE";
+  if (isV24RouterGlobalStoreFailure(code)) return "STORE";
 
   const candidate = upper(stage);
   return V24_ROUTER_FAILURE_STAGES.includes(candidate)
