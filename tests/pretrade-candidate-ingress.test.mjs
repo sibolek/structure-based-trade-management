@@ -65,19 +65,20 @@ test("accepted candidate starts WAITING at revision 0 with durable ingress event
 
   const accepted = store.snapshot().candidates[0];
   assert.equal(accepted.stateRevision, 0);
-  assert.equal(accepted.lifecycleEvents.length, 1);
-  assert.equal(accepted.lifecycleEvents[0].eventType, "CANDIDATE_ACCEPTED");
-  assert.equal(accepted.lifecycleEvents[0].beforeState, null);
-  assert.equal(accepted.lifecycleEvents[0].afterState, "WAITING");
-  assert.equal(accepted.lifecycleEvents[0].resultingRevision, 0);
-  assert.equal(accepted.lifecycleOperations.length, 1);
-  assert.equal(accepted.lifecycleOperations[0].action, "ACCEPT_CANDIDATE");
+  assert.equal(accepted.lifecycleJournal.events.length, 1);
+  assert.equal(accepted.lifecycleJournal.events[0].eventType, "CANDIDATE_ACCEPTED");
+  assert.equal(accepted.lifecycleJournal.events[0].beforeState, null);
+  assert.equal(accepted.lifecycleJournal.events[0].afterState, "WAITING");
+  assert.equal(accepted.lifecycleJournal.events[0].resultingRevision, 0);
+  assert.equal(accepted.lifecycleJournal.operations.length, 1);
+  assert.equal(accepted.lifecycleJournal.operations[0].action, "ACCEPT_CANDIDATE");
+  assert.ok(accepted.lifecycleJournal.operations[0].operationHash);
 
   const reloaded = new PreTradeStore({ filePath });
   const persisted = reloaded.load().candidates[0];
   assert.equal(persisted.stateRevision, 0);
-  assert.equal(persisted.lifecycleEvents[0].eventType, "CANDIDATE_ACCEPTED");
-  assert.equal(persisted.lifecycleOperations[0].action, "ACCEPT_CANDIDATE");
+  assert.equal(persisted.lifecycleJournal.events[0].eventType, "CANDIDATE_ACCEPTED");
+  assert.equal(persisted.lifecycleJournal.operations[0].action, "ACCEPT_CANDIDATE");
 });
 
 test("duplicate same version/content remains idempotent and does not duplicate ingress provenance", () => {
@@ -88,8 +89,8 @@ test("duplicate same version/content remains idempotent and does not duplicate i
   assert.equal(result.outcomes[0].status, "DUPLICATE");
   const accepted = store.snapshot().candidates[0];
   assert.equal(accepted.stateRevision, 0);
-  assert.equal(accepted.lifecycleEvents.length, 1);
-  assert.equal(accepted.lifecycleOperations.length, 1);
+  assert.equal(accepted.lifecycleJournal.events.length, 1);
+  assert.equal(accepted.lifecycleJournal.operations.length, 1);
 });
 
 test("newer accepted version supersedes active prior version with revision and durable event", () => {
@@ -111,23 +112,23 @@ test("newer accepted version supersedes active prior version with revision and d
   assert.equal(v1.lifecycleState, "SUPERSEDED");
   assert.equal(v1.stateRevision, 1);
   assert.equal(v1.supersededByVersion, 2);
-  assert.equal(v1.lifecycleEvents.length, 2);
-  assert.equal(v1.lifecycleEvents[1].eventType, "CANDIDATE_SUPERSEDED");
-  assert.equal(v1.lifecycleEvents[1].beforeState, "WAITING");
-  assert.equal(v1.lifecycleEvents[1].afterState, "SUPERSEDED");
-  assert.equal(v1.lifecycleEvents[1].resultingRevision, 1);
-  assert.equal(v1.lifecycleOperations.length, 2);
-  assert.equal(v1.lifecycleOperations[1].action, "SUPERSEDE_CANDIDATE");
+  assert.equal(v1.lifecycleJournal.events.length, 2);
+  assert.equal(v1.lifecycleJournal.events[1].eventType, "CANDIDATE_SUPERSEDED");
+  assert.equal(v1.lifecycleJournal.events[1].beforeState, "WAITING");
+  assert.equal(v1.lifecycleJournal.events[1].afterState, "SUPERSEDED");
+  assert.equal(v1.lifecycleJournal.events[1].resultingRevision, 1);
+  assert.equal(v1.lifecycleJournal.operations.length, 2);
+  assert.equal(v1.lifecycleJournal.operations[1].action, "SUPERSEDE_CANDIDATE");
 
   assert.equal(v2.lifecycleState, "WAITING");
   assert.equal(v2.stateRevision, 0);
-  assert.equal(v2.lifecycleEvents[0].eventType, "CANDIDATE_ACCEPTED");
+  assert.equal(v2.lifecycleJournal.events[0].eventType, "CANDIDATE_ACCEPTED");
 
   const reloaded = new PreTradeStore({ filePath });
   const persistedV1 = reloaded.load().candidates.find((item) => item.contractVersion === 1);
   assert.equal(persistedV1.lifecycleState, "SUPERSEDED");
   assert.equal(persistedV1.stateRevision, 1);
-  assert.equal(persistedV1.lifecycleEvents[1].eventType, "CANDIDATE_SUPERSEDED");
+  assert.equal(persistedV1.lifecycleJournal.events[1].eventType, "CANDIDATE_SUPERSEDED");
 });
 
 test("same version different content conflicts and older version remains stale", () => {
@@ -153,7 +154,29 @@ test("terminal prior version is not rewritten when newer version is accepted", (
   const prior = store.snapshot().candidates.find((item) => item.contractVersion === 1);
   assert.equal(prior.lifecycleState, "DECLINED");
   assert.equal(prior.stateRevision, 1);
-  assert.equal(prior.lifecycleEvents.length, 1);
+  assert.equal(prior.lifecycleJournal.events.length, 1);
+});
+
+test("legacy split lifecycle arrays migrate into canonical lifecycleJournal when ingress touches candidate", () => {
+  const { store, ingress } = createIngress();
+  ingress.importBundle({ candidates: [candidate()] });
+  const existing = store.state.candidates[0];
+  existing.lifecycleEvents = existing.lifecycleJournal.events;
+  existing.lifecycleOperations = existing.lifecycleJournal.operations.map((operation) => ({
+    ...operation,
+    fingerprint: operation.operationHash,
+    operationHash: undefined,
+  }));
+  delete existing.lifecycleJournal;
+  store.save();
+
+  ingress.importBundle({ candidates: [candidate({ contractVersion: 2, thesis: "new version" })] });
+  const migrated = store.snapshot().candidates.find((item) => item.contractVersion === 1);
+  assert.equal(migrated.lifecycleJournal.events.length, 2);
+  assert.equal(migrated.lifecycleJournal.operations.length, 2);
+  assert.ok(migrated.lifecycleJournal.operations[0].operationHash);
+  assert.equal(Object.prototype.hasOwnProperty.call(migrated, "lifecycleEvents"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(migrated, "lifecycleOperations"), false);
 });
 
 test("persistence failure rolls back acceptance and supersession mutations", () => {
