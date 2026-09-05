@@ -79,12 +79,16 @@ function statusForError(error) {
     || code === "ENTITY_MUTATION_IN_PROGRESS"
     || code === "NO_PERMISSION_BLOCKER"
     || code === "NO_RECOVERY_GATE"
+    || code === "CANDIDATE_NOT_YET_VALID"
+    || code === "CANDIDATE_VALIDITY_EXPIRED"
   ) return 409;
   if (
     code === "EACCES"
     || code === "ENOSPC"
     || code === "EROFS"
     || code === "EIO"
+    || code === "CANDIDATE_CONTRACT_INTEGRITY_ERROR"
+    || code === "CANDIDATE_VALIDITY_UNVERIFIABLE"
   ) return 500;
   return 400;
 }
