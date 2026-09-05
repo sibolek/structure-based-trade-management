@@ -1,6 +1,7 @@
 import http from "node:http";
 import { isAllowedLocalOrigin } from "./local-origin.mjs";
 import { PreTradeStore, DEFAULT_PRETRADE_STATE_FILE } from "./pretrade-state.mjs";
+import { PreTradeCandidateIngress } from "./pretrade-candidate-ingress.mjs";
 import {
   ExecutionBoardHandoffRepository,
   DEFAULT_EXECUTION_BOARD_HANDOFF_FILE,
@@ -20,6 +21,7 @@ const MAX_BODY_BYTES = 1024 * 1024;
 
 const store = new PreTradeStore({ filePath: STATE_FILE });
 store.load();
+const candidateIngress = new PreTradeCandidateIngress({ store });
 
 const handoffRepository = new ExecutionBoardHandoffRepository({ filePath: HANDOFF_FILE });
 handoffRepository.load();
@@ -128,7 +130,7 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const payload = await readJson(req);
-      const result = store.importBundle(payload);
+      const result = candidateIngress.importBundle(payload);
       json(res, 200, result, origin);
     } catch (error) {
       const statusCode = error?.code === "BODY_TOO_LARGE" ? 413 : 400;
@@ -145,6 +147,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] State file: ${STATE_FILE}`);
   console.log(`[ExecutionOS V2.4] Handoff file: ${HANDOFF_FILE}`);
   console.log(`[ExecutionOS V2.4] Handoff delivery file: ${HANDOFF_DELIVERY_FILE}`);
+  console.log("[ExecutionOS V2.4] Candidate import is routed through authoritative ingress with revision/event provenance.");
   console.log("[ExecutionOS V2.4] Handoff transport API enabled; browser handoff creation is not exposed.");
   console.log("[ExecutionOS V2.4] Broker boundary remains read-only; this service does not place, replace, cancel, or flatten orders.");
 });
