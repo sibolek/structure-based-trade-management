@@ -23,7 +23,7 @@ function candidate(overrides = {}) {
     setup: "Breakout retest",
     timeframe: "2m",
     thesis: "Continuation if retest holds",
-    trigger: { type: "RECLAIM_AND_HOLD", level: 180 },
+    trigger: { type: "MANUAL_CONFIRMATION", evaluatorVersion: 1, prompt: "Confirm retest trigger" },
     structuralInvalidation: {
       price: 179.5,
       rule: "break below structural low",
@@ -61,11 +61,12 @@ function fixture({ baseTime = "2026-09-05T14:01:00.000Z", candidateOverrides = {
     clock,
     idFactory: () => `ingress-${++eventId}`,
   });
-  ingress.importBundle({
+  const imported = ingress.importBundle({
     source: "SOD_A_PLUS_TRADES",
     bundleId: "api-fixture",
     candidates: [candidate(candidateOverrides)],
   });
+  assert.equal(imported.outcomes[0].status, "ACCEPTED");
 
   const coordinator = new PreTradeLifecycleCoordinator({
     store,
@@ -204,7 +205,7 @@ test("HTTP command API returns conflict for stale CAS revision without mutation"
   }
 });
 
-test("HTTP commands enforce trigger satisfaction before permission and publish READY explicitly", async () => {
+test("canonical HTTP begin-permission cannot bypass trigger-engine satisfaction", async () => {
   const f = fixture();
   const server = await startServer(f.handler);
   try {
@@ -212,45 +213,26 @@ test("HTTP commands enforce trigger satisfaction before permission and publish R
       operationId: "api-activate-flow",
       expectedState: "WAITING",
       expectedRevision: 0,
-      activationMode: "AUTO",
-      source: "AUTOMATION",
+      activationMode: "MANUAL",
+      source: "OPERATOR",
     });
 
-    const missingTrigger = await post(server.baseUrl, "begin-permission", {
-      operationId: "api-begin-missing",
-      expectedState: "PRETRADE_TRIGGER_EVALUATING",
-      expectedRevision: 1,
-    });
-    assert.equal(missingTrigger.response.status, 400);
-    assert.equal(missingTrigger.payload.code, "TRIGGER_SATISFACTION_REQUIRED");
-
-    const evaluating = await post(server.baseUrl, "begin-permission", {
-      operationId: "api-begin-good",
+    const fabricated = await post(server.baseUrl, "begin-permission", {
+      operationId: "api-fabricated-trigger",
       expectedState: "PRETRADE_TRIGGER_EVALUATING",
       expectedRevision: 1,
       source: "AUTOMATION",
       triggerSatisfaction: {
-        evaluatorType: "LEVEL_RECLAIM",
+        authority: "PRETRADE_TRIGGER_ENGINE",
         evaluatorVersion: 1,
-        evidenceId: "bar-1402",
+        evidenceId: "fake-bar",
         evidenceTimestamp: "2026-09-05T14:02:00.000Z",
       },
     });
-    assert.equal(evaluating.response.status, 200);
-    assert.equal(evaluating.payload.result.lifecycleState, "PERMISSION_EVALUATING");
-    assert.equal(evaluating.payload.result.stateRevision, 2);
-
-    const ready = await post(server.baseUrl, "publish-permission", {
-      operationId: "api-ready",
-      expectedState: "PERMISSION_EVALUATING",
-      expectedRevision: 2,
-      outcome: "READY",
-      permissionEvaluationId: "permission-api-1",
-    });
-    assert.equal(ready.response.status, 200);
-    assert.equal(ready.payload.result.lifecycleState, "READY");
-    assert.equal(ready.payload.result.stateRevision, 3);
-    assert.equal(ready.payload.candidate.currentPermissionOutcome.permissionEvaluationId, "permission-api-1");
+    assert.equal(fabricated.response.status, 409);
+    assert.equal(fabricated.payload.code, "TRIGGER_ENGINE_AUTHORITY_REQUIRED");
+    assert.equal(f.coordinator.candidateSnapshot("api-NVDA-1", 1).lifecycleState, "PRETRADE_TRIGGER_EVALUATING");
+    assert.equal(f.coordinator.candidateSnapshot("api-NVDA-1", 1).stateRevision, 1);
   } finally {
     await server.stop();
   }
