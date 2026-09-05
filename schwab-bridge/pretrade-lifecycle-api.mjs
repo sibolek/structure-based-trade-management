@@ -1,4 +1,5 @@
 import { isAllowedLocalOrigin } from "./local-origin.mjs";
+import { isCanonicalCandidate } from "./pretrade-candidate-contract.mjs";
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
@@ -81,6 +82,7 @@ function statusForError(error) {
     || code === "NO_RECOVERY_GATE"
     || code === "CANDIDATE_NOT_YET_VALID"
     || code === "CANDIDATE_VALIDITY_EXPIRED"
+    || code === "TRIGGER_ENGINE_AUTHORITY_REQUIRED"
   ) return 409;
   if (
     code === "EACCES"
@@ -145,6 +147,16 @@ export class PreTradeLifecycleApiService {
       && Number(payload.contractVersion) !== pathIdentity.contractVersion
     ) {
       throw apiError("contractVersion in body conflicts with path identity", "CANDIDATE_IDENTITY_CONFLICT");
+    }
+
+    if (commandName === "begin-permission") {
+      const candidate = this.coordinator.candidateSnapshot(pathIdentity.candidateId, pathIdentity.contractVersion);
+      if (isCanonicalCandidate(candidate)) {
+        throw apiError(
+          "canonical candidates may begin permission only from authoritative trigger-engine satisfaction",
+          "TRIGGER_ENGINE_AUTHORITY_REQUIRED",
+        );
+      }
     }
 
     const result = this.coordinator[methodName]({
