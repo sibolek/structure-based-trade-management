@@ -1,4 +1,5 @@
 import { PRETRADE_SCHEMA_VERSION, contentHash } from "./pretrade-state.mjs";
+import { normalizeTriggerContract } from "./pretrade-trigger-contract.mjs";
 
 export const CANONICAL_CANDIDATE_CONTRACT_AUTHORITY = "CANONICAL_CANDIDATE_INGRESS";
 export const CANONICAL_CANDIDATE_CONTRACT_SCHEMA_VERSION = 1;
@@ -171,7 +172,14 @@ export function normalizeCanonicalCandidateProposal(input, { bundleSource = null
     sourceTimeframe: text(structuralInput.sourceTimeframe) || null,
   };
 
-  const trigger = candidate.trigger && typeof candidate.trigger === "object" ? clone(candidate.trigger) : null;
+  const triggerInput = candidate.trigger && typeof candidate.trigger === "object" ? clone(candidate.trigger) : null;
+  let trigger = null;
+  if (triggerInput) {
+    const triggerResult = normalizeTriggerContract(triggerInput);
+    trigger = triggerResult.normalized;
+    errors.push(...triggerResult.errors.map((message) => `trigger: ${message}`));
+  }
+
   const decisionTimeframe = text(candidate.decisionTimeframe || "5m");
   const entryTimeframe = text(candidate.entryTimeframe || candidate.timeframe || "2m");
   const volatilityTimeframe = text(candidate.volatilityTimeframe || "2m");
