@@ -66,8 +66,9 @@ function comparison(operator, left, right) {
 }
 
 function evidenceClock(evidence) {
-  if (evidence.type === "BAR_CLOSE") return timestamp(evidence.barTimestamp || evidence.observedAt);
-  return timestamp(evidence.observedAt);
+  return evidence.type === "BAR_CLOSE"
+    ? timestamp(evidence.barTimestamp || evidence.observedAt)
+    : timestamp(evidence.observedAt);
 }
 
 function normalizeEvidence(input, candidate) {
@@ -141,7 +142,6 @@ function emptyRuntime(candidate, contract) {
     consumedEvidence: {},
     lastEvidenceTimeByType: {},
     lastProcessedAt: null,
-    satisfaction: null,
   };
 }
 
@@ -166,7 +166,9 @@ function ensureRuntime(candidate, contract) {
 
 function evaluateLeaf(node, evidence, runtime) {
   if (node.type === "MANUAL_CONFIRMATION") {
-    if (evidence.type !== "MANUAL_EVENT" || evidence.nodeId !== node.nodeId) return { applicable: false, matched: runtime.nodeStates[node.nodeId]?.matched === true };
+    if (evidence.type !== "MANUAL_EVENT" || evidence.nodeId !== node.nodeId) {
+      return { applicable: false, matched: runtime.nodeStates[node.nodeId]?.matched === true };
+    }
     const matched = evidence.confirmed === true;
     runtime.nodeStates[node.nodeId] = { matched, evidenceId: evidence.evidenceId, evidenceTime: evidence.observedAt };
     return { applicable: true, matched };
@@ -239,13 +241,21 @@ export class PreTradeTriggerEngine {
     const candidate = this.#findCandidate(candidateId, contractVersion);
     assertCanonicalCandidateIntegrity(candidate);
     const contract = assertTriggerContract(candidate.trigger);
+    candidate.lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
+
+    const evidence = normalizeEvidence(rawEvidence, candidate);
+    const runtime = ensureRuntime(candidate, contract);
+    const prior = runtime.consumedEvidence[evidence.evidenceId];
+    if (prior) {
+      if (prior.evidenceHash !== hash(evidence)) throw error("evidenceId already used with different payload", "TRIGGER_EVIDENCE_ID_CONFLICT");
+      return this.#completeTransition(candidate, contract, runtime, clone(prior.result), true);
+    }
+
     const at = this.clock();
     const validity = candidateValidityStatusAt(candidate, at);
     if (validity.status !== "VALID") {
       throw error(`candidate validity is ${validity.status}`, "TRIGGER_CANDIDATE_NOT_VALID", validity);
     }
-
-    candidate.lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
     if (!TRIGGER_ACTIVE_STATES.has(candidate.lifecycleState)) {
       throw error(`trigger evidence cannot advance candidate in ${candidate.lifecycleState}`, "TRIGGER_NOT_ACTIVE_IN_STATE");
     }
@@ -256,14 +266,6 @@ export class PreTradeTriggerEngine {
       throw error("trigger expected stateRevision is stale", "STALE_STATE_REVISION");
     }
 
-    const evidence = normalizeEvidence(rawEvidence, candidate);
-    const runtime = ensureRuntime(candidate, contract);
-    const prior = runtime.consumedEvidence[evidence.evidenceId];
-    if (prior) {
-      if (prior.evidenceHash !== hash(evidence)) throw error("evidenceId already used with different payload", "TRIGGER_EVIDENCE_ID_CONFLICT");
-      return this.#completeTransition(candidate, contract, runtime, clone(prior.result), true);
-    }
-
     const evidenceTime = evidenceClock(evidence);
     const lastEvidenceTime = runtime.lastEvidenceTimeByType[evidence.type];
     if (lastEvidenceTime && Date.parse(evidenceTime) < Date.parse(lastEvidenceTime)) {
@@ -271,6 +273,7 @@ export class PreTradeTriggerEngine {
     }
 
     const beforeStore = clone(this.store.state);
+    let progressResult;
     try {
       const beforeRevision = Number(candidate.stateRevision || 0);
       const beforeState = candidate.lifecycleState;
@@ -284,7 +287,7 @@ export class PreTradeTriggerEngine {
 
       runtime.lastEvidenceTimeByType[evidence.type] = evidenceTime;
       runtime.lastProcessedAt = at;
-      const progressResult = {
+      progressResult = {
         evidenceId: evidence.evidenceId,
         evidenceType: evidence.type,
         evidenceTime,
@@ -343,16 +346,64 @@ export class PreTradeTriggerEngine {
       });
       this.store.state.updatedAt = at;
       this.store.save();
-      return this.#completeTransition(candidate, contract, runtime, progressResult, false);
     } catch (cause) {
       this.store.state = beforeStore;
       throw cause;
     }
+
+    return this.#completeTransition(candidate, contract, runtime, progressResult, false);
+  }
+
+  recoverCandidate(candidateId, contractVersion) {
+    const candidate = this.#findCandidate(candidateId, contractVersion);
+    assertCanonicalCandidateIntegrity(candidate);
+    const contract = assertTriggerContract(candidate.trigger);
+    const runtime = ensureRuntime(candidate, contract);
+    const entries = Object.values(runtime.consumedEvidence || {}).filter((item) => item?.result);
+    if (!entries.length) return { status: "NO_TRIGGER_PROGRESS", candidateId, contractVersion };
+    entries.sort((left, right) => Date.parse(left.processedAt) - Date.parse(right.processedAt));
+    return this.#completeTransition(candidate, contract, runtime, clone(entries.at(-1).result), true);
+  }
+
+  recoverAll() {
+    const results = [];
+    for (const candidate of this.store.state?.candidates || []) {
+      if (!candidate?.triggerRuntime) continue;
+      try {
+        results.push(this.recoverCandidate(candidate.candidateId, candidate.contractVersion));
+      } catch (cause) {
+        results.push({ candidateId: candidate.candidateId, contractVersion: candidate.contractVersion, status: "RECOVERY_BLOCKED", code: cause.code || "TRIGGER_RECOVERY_ERROR" });
+      }
+    }
+    return results;
   }
 
   #completeTransition(candidate, contract, runtime, progressResult, duplicateEvidence) {
     const current = this.#findCandidate(candidate.candidateId, candidate.contractVersion);
     current.lifecycleState = canonicalLifecycleState(current.lifecycleState);
+
+    if (duplicateEvidence) {
+      if (
+        ["PERMISSION_EVALUATING", "READY", "CAUTION", "PASS"].includes(current.lifecycleState)
+        && current.triggerSatisfaction?.authority === PRETRADE_TRIGGER_ENGINE_AUTHORITY
+        && current.triggerSatisfaction?.evidenceId === progressResult.evidenceId
+      ) {
+        return { status: "SATISFIED", duplicateEvidence: true, progress: clone(progressResult), transition: null, lifecycleState: current.lifecycleState, stateRevision: current.stateRevision };
+      }
+      if (
+        current.lifecycleState === PRETRADE_TRIGGER_EVALUATING
+        && current.activation?.mode === "AUTO"
+        && current.activation?.provenance?.evidenceId === progressResult.evidenceId
+      ) {
+        return { status: "ACTIVATED", duplicateEvidence: true, progress: clone(progressResult), transition: null, lifecycleState: current.lifecycleState, stateRevision: current.stateRevision };
+      }
+      if (
+        current.lifecycleState === "WAITING"
+        && current.lastDeactivation?.provenance?.evidenceId === progressResult.evidenceId
+      ) {
+        return { status: "RETURNED_TO_WAITING", duplicateEvidence: true, progress: clone(progressResult), transition: null, lifecycleState: current.lifecycleState, stateRevision: current.stateRevision };
+      }
+    }
 
     if (current.lifecycleState === "WAITING" && contract.relevance && progressResult.relevance.applicable && progressResult.relevance.matched) {
       const result = this.lifecycleCoordinator.activateCandidate({
@@ -380,7 +431,6 @@ export class PreTradeTriggerEngine {
         persistence: clone(contract.persistence),
         nodeStates: clone(runtime.nodeStates),
       };
-      runtime.satisfaction = clone(satisfaction);
       const result = this.lifecycleCoordinator.beginPermission({
         operationId: `TRIGGER_SATISFIED:${current.candidateId}:v${current.contractVersion}:${progressResult.evidenceId}`,
         candidateId: current.candidateId,
@@ -417,7 +467,7 @@ export class PreTradeTriggerEngine {
     }
 
     return {
-      status: contract.relevance || current.lifecycleState === PRETRADE_TRIGGER_EVALUATING ? "PROGRESS_RECORDED" : "MANUAL_ACTIVATION_REQUIRED",
+      status: !contract.relevance && current.lifecycleState === "WAITING" ? "MANUAL_ACTIVATION_REQUIRED" : "PROGRESS_RECORDED",
       duplicateEvidence,
       progress: clone(progressResult),
       transition: null,
