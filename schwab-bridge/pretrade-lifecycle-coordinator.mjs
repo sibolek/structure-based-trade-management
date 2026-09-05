@@ -1,5 +1,10 @@
 import crypto from "node:crypto";
 import { canonicalLifecycleState, PRETRADE_TRIGGER_EVALUATING } from "./pretrade-state.mjs";
+import {
+  assertCanonicalCandidateIntegrity,
+  candidateValidityStatusAt,
+  isCanonicalCandidate,
+} from "./pretrade-candidate-contract.mjs";
 
 export const PRETRADE_ACTIVE_UNARMED_STATES = new Set([
   "WAITING",
@@ -103,6 +108,7 @@ export class PreTradeLifecycleCoordinator {
   snapshot() {
     const snapshot = this.store.snapshot();
     const candidates = Array.isArray(snapshot.candidates) ? snapshot.candidates : [];
+    for (const candidate of candidates) assertCanonicalCandidateIntegrity(candidate);
     snapshot.lifecycleEvents = candidates.flatMap((candidate) => candidate?.lifecycleJournal?.events || []);
     snapshot.lifecycleOperations = candidates.flatMap((candidate) => candidate?.lifecycleJournal?.operations || []);
     return snapshot;
@@ -121,6 +127,7 @@ export class PreTradeLifecycleCoordinator {
       action: "ACTIVATE_CANDIDATE",
       eventType: "CANDIDATE_ACTIVATED",
       allowedStates: new Set(["WAITING"]),
+      requireValidWindow: true,
       payload: { mode, reason: text(command.reason) || null, provenance: command.provenance ?? null },
       update: (candidate, at) => {
         candidate.lifecycleState = PRETRADE_TRIGGER_EVALUATING;
@@ -171,6 +178,7 @@ export class PreTradeLifecycleCoordinator {
       action: "BEGIN_PERMISSION",
       eventType: "TRIGGER_SATISFIED",
       allowedStates: new Set([PRETRADE_TRIGGER_EVALUATING]),
+      requireValidWindow: true,
       payload: { triggerSatisfaction: command.triggerSatisfaction },
       eventMetadata: { triggerSatisfaction: command.triggerSatisfaction },
       update: (candidate, at) => {
@@ -192,6 +200,7 @@ export class PreTradeLifecycleCoordinator {
       action: `PUBLISH_${outcome}`,
       eventType: "PERMISSION_OUTCOME_PUBLISHED",
       allowedStates: new Set(["PERMISSION_EVALUATING"]),
+      requireValidWindow: true,
       payload: {
         outcome,
         permissionEvaluationId: text(command.permissionEvaluationId) || null,
@@ -219,6 +228,7 @@ export class PreTradeLifecycleCoordinator {
       action: "REVALIDATE_PERMISSION",
       eventType: "PERMISSION_REVALIDATION_STARTED",
       allowedStates: new Set(["READY", "CAUTION"]),
+      requireValidWindow: true,
       payload: { reason: text(command.reason) || null, provenance: command.provenance ?? null },
       update: (candidate) => {
         candidate.lifecycleState = "PERMISSION_EVALUATING";
@@ -242,6 +252,98 @@ export class PreTradeLifecycleCoordinator {
     const reasonCode = text(command.reasonCode || command.reason);
     if (!reasonCode) throw error("INVALIDATED requires a reason", "INVALIDATION_REASON_REQUIRED");
     return this.#terminal(command, "INVALIDATED", "CANDIDATE_INVALIDATED", reasonCode, new Set(["WAITING", PRETRADE_TRIGGER_EVALUATING]));
+  }
+
+  reconcileCandidateValidity({ candidateId, contractVersion, source = "VALIDITY_CLOCK" } = {}) {
+    const candidate = this.#findCandidate(candidateId, contractVersion);
+    this.#prepareCandidate(candidate);
+    if (!isCanonicalCandidate(candidate)) {
+      return {
+        candidateId: text(candidateId),
+        contractVersion: Number(contractVersion),
+        status: "UNMANAGED_LEGACY",
+        lifecycleState: candidate.lifecycleState,
+        stateRevision: candidate.stateRevision,
+      };
+    }
+
+    const evaluatedAt = this.clock();
+    const validity = candidateValidityStatusAt(candidate, evaluatedAt);
+    if (validity.status === "UNVERIFIABLE") {
+      throw error("canonical candidate validity cannot be authoritatively evaluated", "CANDIDATE_VALIDITY_UNVERIFIABLE", validity);
+    }
+    if (validity.status !== "EXPIRED") {
+      return {
+        candidateId: candidate.candidateId,
+        contractVersion: candidate.contractVersion,
+        status: validity.status,
+        lifecycleState: candidate.lifecycleState,
+        stateRevision: candidate.stateRevision,
+        evaluatedAt,
+        validity,
+      };
+    }
+
+    if (candidate.lifecycleState === "ARMED") {
+      return {
+        candidateId: candidate.candidateId,
+        contractVersion: candidate.contractVersion,
+        status: "ARMED_NOT_REVOKED",
+        lifecycleState: candidate.lifecycleState,
+        stateRevision: candidate.stateRevision,
+        evaluatedAt,
+        validity,
+      };
+    }
+
+    if (!PRETRADE_ACTIVE_UNARMED_STATES.has(candidate.lifecycleState)) {
+      return {
+        candidateId: candidate.candidateId,
+        contractVersion: candidate.contractVersion,
+        status: "TERMINAL_UNARMED",
+        lifecycleState: candidate.lifecycleState,
+        stateRevision: candidate.stateRevision,
+        evaluatedAt,
+        validity,
+      };
+    }
+
+    const result = this.expireCandidate({
+      operationId: `VALIDITY_EXPIRE:${candidate.candidateId}:v${candidate.contractVersion}:${candidate.validity.validUntil}`,
+      candidateId: candidate.candidateId,
+      contractVersion: candidate.contractVersion,
+      expectedState: candidate.lifecycleState,
+      expectedRevision: candidate.stateRevision,
+      source,
+      reason: "VALIDITY_ENDED",
+      reasonCode: "VALIDITY_ENDED",
+      provenance: {
+        evaluatedAt,
+        validFrom: candidate.validity.validFrom,
+        validUntil: candidate.validity.validUntil,
+        timezone: candidate.validity.timezone,
+        session: candidate.validity.session,
+      },
+    });
+
+    return {
+      candidateId: candidate.candidateId,
+      contractVersion: candidate.contractVersion,
+      status: "EXPIRED",
+      lifecycleState: result.lifecycleState,
+      stateRevision: result.stateRevision,
+      evaluatedAt,
+      validity,
+      result,
+    };
+  }
+
+  reconcileAllValidity({ source = "VALIDITY_CLOCK" } = {}) {
+    const identities = (this.store.state?.candidates || []).map((candidate) => ({
+      candidateId: candidate?.candidateId,
+      contractVersion: candidate?.contractVersion,
+    }));
+    return identities.map((identity) => this.reconcileCandidateValidity({ ...identity, source }));
   }
 
   setPrerequisites(command = {}) {
@@ -429,9 +531,10 @@ export class PreTradeLifecycleCoordinator {
         throw error(`${spec.action} is not allowed while candidate is ${candidate.lifecycleState}`, "ILLEGAL_LIFECYCLE_ACTION");
       }
 
-      spec.precondition?.(candidate);
-      const beforeState = candidate.lifecycleState;
       const committedAt = this.clock();
+      if (spec.requireValidWindow) this.#assertValidWindow(candidate, committedAt);
+      spec.precondition?.(candidate, committedAt);
+      const beforeState = candidate.lifecycleState;
       spec.update(candidate, committedAt);
       candidate.lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
       candidate.stateRevision += 1;
@@ -484,6 +587,19 @@ export class PreTradeLifecycleCoordinator {
     }
   }
 
+  #assertValidWindow(candidate, at) {
+    if (!isCanonicalCandidate(candidate)) return;
+    const validity = candidateValidityStatusAt(candidate, at);
+    if (validity.status === "VALID") return;
+    if (validity.status === "NOT_YET_VALID") {
+      throw error("candidate cannot progress before validFrom", "CANDIDATE_NOT_YET_VALID", validity);
+    }
+    if (validity.status === "EXPIRED") {
+      throw error("candidate cannot progress at or after validUntil", "CANDIDATE_VALIDITY_EXPIRED", validity);
+    }
+    throw error("canonical candidate validity cannot be authoritatively evaluated", "CANDIDATE_VALIDITY_UNVERIFIABLE", validity);
+  }
+
   #prepareCandidate(candidate) {
     candidate.lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
     candidate.stateRevision = revision(candidate.stateRevision);
@@ -496,6 +612,7 @@ export class PreTradeLifecycleCoordinator {
     if (!Object.prototype.hasOwnProperty.call(candidate, "permissionEvaluationStatus")) candidate.permissionEvaluationStatus = null;
     if (!Object.prototype.hasOwnProperty.call(candidate, "permissionBlocker")) candidate.permissionBlocker = null;
     if (!Object.prototype.hasOwnProperty.call(candidate, "recoveryGate")) candidate.recoveryGate = null;
+    assertCanonicalCandidateIntegrity(candidate);
   }
 
   #findCandidate(candidateId, contractVersion) {
