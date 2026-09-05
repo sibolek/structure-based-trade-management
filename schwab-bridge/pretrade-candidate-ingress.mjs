@@ -46,12 +46,27 @@ function ingressError(message, code) {
 function ensureCandidateAuthorityShape(candidate) {
   candidate.lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
   candidate.stateRevision = normalizeRevision(candidate.stateRevision);
-  if (!Array.isArray(candidate.lifecycleEvents)) candidate.lifecycleEvents = [];
-  if (!Array.isArray(candidate.lifecycleOperations)) candidate.lifecycleOperations = [];
+  if (!candidate.lifecycleJournal || typeof candidate.lifecycleJournal !== "object") {
+    candidate.lifecycleJournal = { events: [], operations: [] };
+  }
+  if (!Array.isArray(candidate.lifecycleJournal.events)) candidate.lifecycleJournal.events = [];
+  if (!Array.isArray(candidate.lifecycleJournal.operations)) candidate.lifecycleJournal.operations = [];
+
+  if (Array.isArray(candidate.lifecycleEvents) && candidate.lifecycleEvents.length) {
+    candidate.lifecycleJournal.events.push(...candidate.lifecycleEvents);
+  }
+  if (Array.isArray(candidate.lifecycleOperations) && candidate.lifecycleOperations.length) {
+    candidate.lifecycleJournal.operations.push(...candidate.lifecycleOperations.map((operation) => ({
+      ...operation,
+      operationHash: operation.operationHash || operation.fingerprint || null,
+    })));
+  }
+  delete candidate.lifecycleEvents;
+  delete candidate.lifecycleOperations;
   return candidate;
 }
 
-function operationFingerprint(value) {
+function operationHash(value) {
   return crypto
     .createHash("sha256")
     .update(JSON.stringify(value))
@@ -194,7 +209,7 @@ export class PreTradeCandidateIngress {
 
     const acceptanceOperation = {
       operationId: acceptanceOperationId,
-      fingerprint: operationFingerprint({
+      operationHash: operationHash({
         action: "ACCEPT_CANDIDATE",
         candidateId: normalized.candidateId,
         contractVersion: normalized.contractVersion,
@@ -220,8 +235,10 @@ export class PreTradeCandidateIngress {
       contentHash: hash,
       lifecycleState: "WAITING",
       stateRevision: 0,
-      lifecycleEvents: [acceptanceEvent],
-      lifecycleOperations: [acceptanceOperation],
+      lifecycleJournal: {
+        events: [acceptanceEvent],
+        operations: [acceptanceOperation],
+      },
       importedAt,
       evaluation: null,
       prerequisiteStatus: null,
@@ -262,7 +279,7 @@ export class PreTradeCandidateIngress {
     const beforeRevision = existing.stateRevision;
     const operationId = `INGRESS_SUPERSEDE:${existing.candidateId}:v${existing.contractVersion}->v${supersededByVersion}:${supersedingContentHash}`;
 
-    if (existing.lifecycleOperations.some((item) => item?.operationId === operationId)) return;
+    if (existing.lifecycleJournal.operations.some((item) => item?.operationId === operationId)) return;
 
     existing.lifecycleState = "SUPERSEDED";
     existing.stateRevision = beforeRevision + 1;
@@ -292,10 +309,10 @@ export class PreTradeCandidateIngress {
       metadata: null,
     };
 
-    existing.lifecycleEvents.push(event);
-    existing.lifecycleOperations.push({
+    existing.lifecycleJournal.events.push(event);
+    existing.lifecycleJournal.operations.push({
       operationId,
-      fingerprint: operationFingerprint({
+      operationHash: operationHash({
         action: "SUPERSEDE_CANDIDATE",
         candidateId: existing.candidateId,
         contractVersion: existing.contractVersion,
