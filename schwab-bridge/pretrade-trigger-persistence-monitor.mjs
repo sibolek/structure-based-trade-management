@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { assertCanonicalCandidateIntegrity, candidateValidityStatusAt } from "./pretrade-candidate-contract.mjs";
 import { assertTriggerContract } from "./pretrade-trigger-contract.mjs";
 import { canonicalLifecycleState } from "./pretrade-state.mjs";
@@ -24,6 +25,21 @@ function finiteNumber(value) {
 function timestamp(value) {
   const parsed = Date.parse(String(value ?? ""));
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function stable(value) {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value && typeof value === "object") {
+    return Object.keys(value).sort().reduce((result, key) => {
+      result[key] = stable(value[key]);
+      return result;
+    }, {});
+  }
+  return value;
+}
+
+function evidenceHash(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
 }
 
 function comparison(operator, left, right) {
@@ -112,6 +128,7 @@ export class PreTradeTriggerPersistenceMonitor {
     }
 
     const evidence = normalizeEvidence(rawEvidence, candidate);
+    const hash = evidenceHash(evidence);
     const satisfiedAt = timestamp(candidate.triggerSatisfaction.evidenceTimestamp);
     const evidenceTime = evidence.type === "BAR_CLOSE" ? evidence.barTimestamp : evidence.observedAt;
     if (!satisfiedAt) throw error("trigger satisfaction evidence timestamp is missing", "TRIGGER_SATISFACTION_NOT_AUTHORITATIVE");
@@ -136,6 +153,7 @@ export class PreTradeTriggerPersistenceMonitor {
         expectedRevision: candidate.stateRevision,
         evidenceId: evidence.evidenceId,
         evidenceTimestamp: evidenceTime,
+        evidenceHash: hash,
         reasonCode: "CONDITION_NO_LONGER_HELD",
       });
       return { status: "EXPIRED_TO_TRIGGER_EVALUATING", reason: "CONDITION_NO_LONGER_HELD", transition };
@@ -152,6 +170,7 @@ export class PreTradeTriggerPersistenceMonitor {
         expectedRevision: candidate.stateRevision,
         evidenceId: evidence.evidenceId,
         evidenceTimestamp: evidenceTime,
+        evidenceHash: hash,
         reasonCode: "BAR_BOUND_SATISFACTION_EXPIRED",
       });
       return { status: "EXPIRED_TO_TRIGGER_EVALUATING", reason: "BAR_BOUND_SATISFACTION_EXPIRED", transition };
