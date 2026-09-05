@@ -89,6 +89,28 @@ function readJson(req) {
   });
 }
 
+function statusForPreTradeError(error) {
+  const code = String(error?.code || "").trim();
+  if (code === "BODY_TOO_LARGE") return 413;
+  if (
+    code === "CANDIDATE_CONTRACT_INTEGRITY_ERROR"
+    || code === "CANDIDATE_VALIDITY_UNVERIFIABLE"
+    || code === "EACCES"
+    || code === "ENOSPC"
+    || code === "EROFS"
+    || code === "EIO"
+  ) return 500;
+  return 400;
+}
+
+function failPreTradeRequest(res, error, origin = null, fallbackCode = "PRETRADE_API_ERROR") {
+  json(res, statusForPreTradeError(error), {
+    error: error.message,
+    code: error.code || fallbackCode,
+    details: error.details || null,
+  }, origin);
+}
+
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin || null;
   const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
@@ -130,14 +152,23 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname.startsWith("/api/candidates")) {
-    lifecycleCoordinator.reconcileAllValidity({ source: "REQUEST_VALIDITY_RECONCILIATION" });
+    try {
+      lifecycleCoordinator.reconcileAllValidity({ source: "REQUEST_VALIDITY_RECONCILIATION" });
+    } catch (error) {
+      failPreTradeRequest(res, error, origin, "VALIDITY_RECONCILIATION_ERROR");
+      return;
+    }
   }
 
   if (await handleLifecycleApi(req, res)) return;
   if (await handleHandoffApi(req, res)) return;
 
   if (req.method === "GET" && pathname === "/api/candidates") {
-    json(res, 200, lifecycleCoordinator.snapshot(), origin);
+    try {
+      json(res, 200, lifecycleCoordinator.snapshot(), origin);
+    } catch (error) {
+      failPreTradeRequest(res, error, origin, "CANDIDATE_SNAPSHOT_ERROR");
+    }
     return;
   }
 
@@ -155,8 +186,7 @@ const server = http.createServer(async (req, res) => {
       });
       json(res, 200, { ...result, validityReconciliation }, origin);
     } catch (error) {
-      const statusCode = error?.code === "BODY_TOO_LARGE" ? 413 : 400;
-      json(res, statusCode, { error: error.message, code: error.code || "IMPORT_ERROR" }, origin);
+      failPreTradeRequest(res, error, origin, "IMPORT_ERROR");
     }
     return;
   }
