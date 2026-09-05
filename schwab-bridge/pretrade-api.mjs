@@ -4,6 +4,8 @@ import { PreTradeStore, DEFAULT_PRETRADE_STATE_FILE } from "./pretrade-state.mjs
 import { PreTradeCandidateIngress } from "./pretrade-candidate-ingress.mjs";
 import { PreTradeLifecycleCoordinator } from "./pretrade-lifecycle-coordinator.mjs";
 import { createPreTradeLifecycleApiHandler } from "./pretrade-lifecycle-api.mjs";
+import { PreTradeTriggerEngine } from "./pretrade-trigger-engine.mjs";
+import { createPreTradeTriggerApiHandler } from "./pretrade-trigger-api.mjs";
 import {
   ExecutionBoardHandoffRepository,
   DEFAULT_EXECUTION_BOARD_HANDOFF_FILE,
@@ -26,6 +28,14 @@ store.load();
 const candidateIngress = new PreTradeCandidateIngress({ store });
 const lifecycleCoordinator = new PreTradeLifecycleCoordinator({ store });
 lifecycleCoordinator.reconcileAllValidity({ source: "STARTUP_VALIDITY_RECONCILIATION" });
+
+const triggerEngine = new PreTradeTriggerEngine({ store, lifecycleCoordinator });
+const triggerRecovery = triggerEngine.recoverAll();
+const handleTriggerApi = createPreTradeTriggerApiHandler({
+  triggerEngine,
+  lifecycleCoordinator,
+  maxBodyBytes: MAX_BODY_BYTES,
+});
 const handleLifecycleApi = createPreTradeLifecycleApiHandler({
   coordinator: lifecycleCoordinator,
   maxBodyBytes: MAX_BODY_BYTES,
@@ -144,6 +154,10 @@ const server = http.createServer(async (req, res) => {
       candidateIngressAuthority: true,
       candidateContractVersioning: true,
       candidateValidityAuthority: true,
+      triggerContractAuthority: true,
+      triggerEngineAuthority: true,
+      triggerEvidenceApi: true,
+      triggerRecoveryBlocked: triggerRecovery.filter((item) => item.status === "RECOVERY_BLOCKED").length,
       lifecycleCommandApi: true,
       handoffTransportApi: true,
       brokerWriteAuthority: false,
@@ -160,6 +174,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (await handleTriggerApi(req, res)) return;
   if (await handleLifecycleApi(req, res)) return;
   if (await handleHandoffApi(req, res)) return;
 
@@ -201,6 +216,9 @@ server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] Handoff delivery file: ${HANDOFF_DELIVERY_FILE}`);
   console.log("[ExecutionOS V2.4] Candidate import is routed through authoritative ingress with immutable contract/version provenance.");
   console.log("[ExecutionOS V2.4] Exact candidate validity is reconciled before PRETRADE candidate operations.");
+  console.log("[ExecutionOS V2.4] Trigger contracts are versioned and evaluated by the authoritative durable trigger engine.");
+  console.log(`[ExecutionOS V2.4] Trigger startup recovery inspected ${triggerRecovery.length} persisted runtime record(s).`);
+  console.log("[ExecutionOS V2.4] Canonical permission entry cannot bypass trigger-engine satisfaction.");
   console.log("[ExecutionOS V2.4] PRETRADE lifecycle mutations are exposed only as intent-specific authoritative commands.");
   console.log("[ExecutionOS V2.4] Handoff transport API enabled; browser handoff creation is not exposed.");
   console.log("[ExecutionOS V2.4] Broker boundary remains read-only; this service does not place, replace, cancel, or flatten orders.");
