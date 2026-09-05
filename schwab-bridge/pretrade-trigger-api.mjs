@@ -1,6 +1,7 @@
 import { isAllowedLocalOrigin } from "./local-origin.mjs";
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+const PERSISTENCE_STATES = new Set(["PERMISSION_EVALUATING", "READY", "CAUTION"]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -31,15 +32,24 @@ function readJson(req, maxBodyBytes) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     req.on("data", (chunk) => {
+      if (settled) return;
       size += chunk.length;
       if (size > maxBodyBytes) {
-        reject(apiError("Request body too large", "BODY_TOO_LARGE"));
+        fail(apiError("Request body too large", "BODY_TOO_LARGE"));
         return;
       }
       chunks.push(chunk);
     });
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
       try {
         const body = Buffer.concat(chunks).toString("utf8");
         resolve(body ? JSON.parse(body) : {});
@@ -48,7 +58,7 @@ function readJson(req, maxBodyBytes) {
         reject(error);
       }
     });
-    req.on("error", reject);
+    req.on("error", fail);
   });
 }
 
@@ -74,6 +84,9 @@ function statusForError(error) {
     || code === "TRIGGER_CANDIDATE_NOT_VALID"
     || code === "TRIGGER_NOT_ACTIVE_IN_STATE"
     || code === "TRIGGER_RUNTIME_RECONCILIATION_REQUIRED"
+    || code === "TRIGGER_PERSISTENCE_NOT_ACTIVE_IN_STATE"
+    || code === "TRIGGER_PERSISTENCE_STATE_CONFLICT"
+    || code === "TRIGGER_SATISFACTION_NOT_AUTHORITATIVE"
   ) return 409;
   if (
     code === "CANDIDATE_CONTRACT_INTEGRITY_ERROR"
@@ -87,6 +100,7 @@ function statusForError(error) {
 
 export function createPreTradeTriggerApiHandler({
   triggerEngine,
+  persistenceMonitor = null,
   lifecycleCoordinator,
   maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
 } = {}) {
@@ -116,7 +130,12 @@ export function createPreTradeTriggerApiHandler({
       if (payload.contractVersion !== undefined && Number(payload.contractVersion) !== route.contractVersion) {
         throw apiError("contractVersion in body conflicts with path identity", "CANDIDATE_IDENTITY_CONFLICT");
       }
-      const result = triggerEngine.processEvidence({
+
+      const before = lifecycleCoordinator.candidateSnapshot(route.candidateId, route.contractVersion);
+      const processor = PERSISTENCE_STATES.has(before.lifecycleState) && persistenceMonitor
+        ? persistenceMonitor
+        : triggerEngine;
+      const result = processor.processEvidence({
         candidateId: route.candidateId,
         contractVersion: route.contractVersion,
         expectedState: payload.expectedState,
