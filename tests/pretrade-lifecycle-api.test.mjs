@@ -33,17 +33,25 @@ function candidate(overrides = {}) {
     plannedEntryReference: 180.1,
     targets: [181, 182],
     managementPlan: { mode: "FLEXIBLE_WITHIN_CEILING" },
-    armPolicy: { requestedMode: "MANUAL" },
+    validity: {
+      validFrom: "2026-09-05T14:00:00.000Z",
+      validUntil: "2026-09-05T20:00:00.000Z",
+      timezone: "America/New_York",
+      session: "RTH",
+    },
+    armPolicy: { requestedMode: "MANUAL", armAuthorized: false },
+    armAuthorized: false,
+    status: "WAITING",
     ...overrides,
   };
 }
 
-function fixture() {
+function fixture({ baseTime = "2026-09-05T14:01:00.000Z", candidateOverrides = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "executionos-pretrade-api-"));
   const filePath = path.join(dir, "state.json");
   let tick = 0;
   let eventId = 0;
-  const base = Date.parse("2026-09-05T14:01:00.000Z");
+  const base = Date.parse(baseTime);
   const clock = () => new Date(base + tick++ * 1000).toISOString();
 
   const store = new PreTradeStore({ filePath });
@@ -53,7 +61,11 @@ function fixture() {
     clock,
     idFactory: () => `ingress-${++eventId}`,
   });
-  ingress.importBundle({ source: "SOD_A_PLUS_TRADES", bundleId: "api-fixture", candidates: [candidate()] });
+  ingress.importBundle({
+    source: "SOD_A_PLUS_TRADES",
+    bundleId: "api-fixture",
+    candidates: [candidate(candidateOverrides)],
+  });
 
   const coordinator = new PreTradeLifecycleCoordinator({
     store,
@@ -126,6 +138,42 @@ test("HTTP activate command is authoritative, durable, and idempotent", async ()
     assert.equal(persisted.lifecycleState, "PRETRADE_TRIGGER_EVALUATING");
     assert.equal(persisted.stateRevision, 1);
     assert.equal(persisted.lifecycleJournal.events.length, 2);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("HTTP activation before validFrom fails as a lifecycle conflict without mutation", async () => {
+  const f = fixture({ baseTime: "2026-09-05T13:59:00.000Z" });
+  const server = await startServer(f.handler);
+  try {
+    const result = await post(server.baseUrl, "activate", {
+      operationId: "api-before-valid",
+      expectedState: "WAITING",
+      expectedRevision: 0,
+      activationMode: "MANUAL",
+    });
+    assert.equal(result.response.status, 409);
+    assert.equal(result.payload.code, "CANDIDATE_NOT_YET_VALID");
+    assert.equal(f.coordinator.candidateSnapshot("api-NVDA-1", 1).stateRevision, 0);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("HTTP activation at or after validUntil fails as a lifecycle conflict without mutation", async () => {
+  const f = fixture({ baseTime: "2026-09-05T20:00:00.000Z" });
+  const server = await startServer(f.handler);
+  try {
+    const result = await post(server.baseUrl, "activate", {
+      operationId: "api-after-valid",
+      expectedState: "WAITING",
+      expectedRevision: 0,
+      activationMode: "MANUAL",
+    });
+    assert.equal(result.response.status, 409);
+    assert.equal(result.payload.code, "CANDIDATE_VALIDITY_EXPIRED");
+    assert.equal(f.coordinator.candidateSnapshot("api-NVDA-1", 1).stateRevision, 0);
   } finally {
     await server.stop();
   }
