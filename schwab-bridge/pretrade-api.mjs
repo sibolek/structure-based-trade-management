@@ -5,6 +5,8 @@ import { PreTradeCandidateIngress } from "./pretrade-candidate-ingress.mjs";
 import { PreTradeLifecycleCoordinator } from "./pretrade-lifecycle-coordinator.mjs";
 import { createPreTradeLifecycleApiHandler } from "./pretrade-lifecycle-api.mjs";
 import { PreTradeTriggerEngine } from "./pretrade-trigger-engine.mjs";
+import { PreTradeTriggerPersistenceAuthority } from "./pretrade-trigger-persistence-authority.mjs";
+import { PreTradeTriggerPersistenceMonitor } from "./pretrade-trigger-persistence-monitor.mjs";
 import { createPreTradeTriggerApiHandler } from "./pretrade-trigger-api.mjs";
 import {
   ExecutionBoardHandoffRepository,
@@ -30,9 +32,15 @@ const lifecycleCoordinator = new PreTradeLifecycleCoordinator({ store });
 lifecycleCoordinator.reconcileAllValidity({ source: "STARTUP_VALIDITY_RECONCILIATION" });
 
 const triggerEngine = new PreTradeTriggerEngine({ store, lifecycleCoordinator });
+const triggerPersistenceAuthority = new PreTradeTriggerPersistenceAuthority({ store });
+const triggerPersistenceMonitor = new PreTradeTriggerPersistenceMonitor({
+  store,
+  persistenceAuthority: triggerPersistenceAuthority,
+});
 const triggerRecovery = triggerEngine.recoverAll();
 const handleTriggerApi = createPreTradeTriggerApiHandler({
   triggerEngine,
+  persistenceMonitor: triggerPersistenceMonitor,
   lifecycleCoordinator,
   maxBodyBytes: MAX_BODY_BYTES,
 });
@@ -157,6 +165,7 @@ const server = http.createServer(async (req, res) => {
       triggerContractAuthority: true,
       triggerEngineAuthority: true,
       triggerEvidenceApi: true,
+      triggerPersistenceAuthority: true,
       triggerRecoveryBlocked: triggerRecovery.filter((item) => item.status === "RECOVERY_BLOCKED").length,
       lifecycleCommandApi: true,
       handoffTransportApi: true,
@@ -217,6 +226,7 @@ server.listen(PORT, HOST, () => {
   console.log("[ExecutionOS V2.4] Candidate import is routed through authoritative ingress with immutable contract/version provenance.");
   console.log("[ExecutionOS V2.4] Exact candidate validity is reconciled before PRETRADE candidate operations.");
   console.log("[ExecutionOS V2.4] Trigger contracts are versioned and evaluated by the authoritative durable trigger engine.");
+  console.log("[ExecutionOS V2.4] Trigger persistence is monitored separately from pre-satisfaction trigger progress.");
   console.log(`[ExecutionOS V2.4] Trigger startup recovery inspected ${triggerRecovery.length} persisted runtime record(s).`);
   console.log("[ExecutionOS V2.4] Canonical permission entry cannot bypass trigger-engine satisfaction.");
   console.log("[ExecutionOS V2.4] PRETRADE lifecycle mutations are exposed only as intent-specific authoritative commands.");
