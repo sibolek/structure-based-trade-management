@@ -123,6 +123,19 @@ function normalizePersistence(input, satisfaction, errors) {
   };
 }
 
+function validatePersistenceCompatibility(persistence, satisfaction, errors) {
+  if (persistence.type === "CONDITION_HELD" && satisfaction?.type !== "QUOTE_COMPARISON") {
+    errors.push("evaluator v1 CONDITION_HELD persistence requires a single QUOTE_COMPARISON satisfaction node");
+  }
+  if (persistence.type === "BAR_BOUND") {
+    if (satisfaction?.type !== "BAR_CLOSE_COMPARISON") {
+      errors.push("evaluator v1 BAR_BOUND persistence requires a single BAR_CLOSE_COMPARISON satisfaction node");
+    } else if (text(persistence.timeframe) !== text(satisfaction.timeframe)) {
+      errors.push("BAR_BOUND persistence timeframe must match the satisfaction bar timeframe");
+    }
+  }
+}
+
 export function normalizeTriggerContract(input) {
   const trigger = input && typeof input === "object" ? input : {};
   const errors = [];
@@ -148,6 +161,7 @@ export function normalizeTriggerContract(input) {
     ? normalizeNode(relevanceInput, "relevance", errors, { allowManual: false })
     : null;
   const persistence = normalizePersistence(trigger.persistence, satisfaction, errors);
+  validatePersistenceCompatibility(persistence, satisfaction, errors);
 
   return {
     normalized: {
