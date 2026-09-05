@@ -2,6 +2,8 @@ import http from "node:http";
 import { isAllowedLocalOrigin } from "./local-origin.mjs";
 import { PreTradeStore, DEFAULT_PRETRADE_STATE_FILE } from "./pretrade-state.mjs";
 import { PreTradeCandidateIngress } from "./pretrade-candidate-ingress.mjs";
+import { PreTradeLifecycleCoordinator } from "./pretrade-lifecycle-coordinator.mjs";
+import { createPreTradeLifecycleApiHandler } from "./pretrade-lifecycle-api.mjs";
 import {
   ExecutionBoardHandoffRepository,
   DEFAULT_EXECUTION_BOARD_HANDOFF_FILE,
@@ -22,6 +24,11 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const store = new PreTradeStore({ filePath: STATE_FILE });
 store.load();
 const candidateIngress = new PreTradeCandidateIngress({ store });
+const lifecycleCoordinator = new PreTradeLifecycleCoordinator({ store });
+const handleLifecycleApi = createPreTradeLifecycleApiHandler({
+  coordinator: lifecycleCoordinator,
+  maxBodyBytes: MAX_BODY_BYTES,
+});
 
 const handoffRepository = new ExecutionBoardHandoffRepository({ filePath: HANDOFF_FILE });
 handoffRepository.load();
@@ -109,16 +116,19 @@ const server = http.createServer(async (req, res) => {
       stateFile: STATE_FILE,
       handoffFile: HANDOFF_FILE,
       handoffDeliveryFile: HANDOFF_DELIVERY_FILE,
+      candidateIngressAuthority: true,
+      lifecycleCommandApi: true,
       handoffTransportApi: true,
       brokerWriteAuthority: false,
     }, origin);
     return;
   }
 
+  if (await handleLifecycleApi(req, res)) return;
   if (await handleHandoffApi(req, res)) return;
 
   if (req.method === "GET" && req.url === "/api/candidates") {
-    json(res, 200, store.snapshot(), origin);
+    json(res, 200, lifecycleCoordinator.snapshot(), origin);
     return;
   }
 
@@ -148,6 +158,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] Handoff file: ${HANDOFF_FILE}`);
   console.log(`[ExecutionOS V2.4] Handoff delivery file: ${HANDOFF_DELIVERY_FILE}`);
   console.log("[ExecutionOS V2.4] Candidate import is routed through authoritative ingress with revision/event provenance.");
+  console.log("[ExecutionOS V2.4] PRETRADE lifecycle mutations are exposed only as intent-specific authoritative commands.");
   console.log("[ExecutionOS V2.4] Handoff transport API enabled; browser handoff creation is not exposed.");
   console.log("[ExecutionOS V2.4] Broker boundary remains read-only; this service does not place, replace, cancel, or flatten orders.");
 });
