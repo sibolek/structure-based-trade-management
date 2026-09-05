@@ -42,7 +42,7 @@ export class PreTradeTriggerPersistenceAuthority {
     this.idFactory = idFactory;
   }
 
-  expireSatisfaction({ candidateId, contractVersion, expectedState, expectedRevision, evidenceId, evidenceTimestamp, reasonCode } = {}) {
+  expireSatisfaction({ candidateId, contractVersion, expectedState, expectedRevision, evidenceId, evidenceTimestamp, evidenceHash, reasonCode } = {}) {
     const candidate = this.#findCandidate(candidateId, contractVersion);
     assertCanonicalCandidateIntegrity(candidate);
     candidate.lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
@@ -88,7 +88,18 @@ export class PreTradeTriggerPersistenceAuthority {
         candidate.currentDssEvaluationStaleAt = at;
         candidate.currentDssEvaluationStaleReason = "TRIGGER_SATISFACTION_EXPIRED";
       }
-      if (candidate.triggerRuntime?.nodeStates) candidate.triggerRuntime.nodeStates = {};
+      if (candidate.triggerRuntime) {
+        candidate.triggerRuntime.nodeStates = {};
+        if (!candidate.triggerRuntime.persistenceConsumedEvidence || typeof candidate.triggerRuntime.persistenceConsumedEvidence !== "object") {
+          candidate.triggerRuntime.persistenceConsumedEvidence = {};
+        }
+        candidate.triggerRuntime.persistenceConsumedEvidence[text(evidenceId)] = {
+          evidenceHash: text(evidenceHash) || null,
+          evidenceTimestamp: text(evidenceTimestamp) || null,
+          consumedAt: at,
+          reasonCode: text(reasonCode) || "TRIGGER_PERSISTENCE_EXPIRED",
+        };
+      }
 
       const eventId = this.idFactory();
       const event = {
@@ -106,6 +117,7 @@ export class PreTradeTriggerPersistenceAuthority {
         provenance: {
           evidenceId: text(evidenceId) || null,
           evidenceTimestamp: text(evidenceTimestamp) || null,
+          evidenceHash: text(evidenceHash) || null,
         },
         metadata: null,
       };
@@ -121,7 +133,7 @@ export class PreTradeTriggerPersistenceAuthority {
       candidate.lifecycleJournal.events.push(event);
       candidate.lifecycleJournal.operations.push({
         operationId,
-        operationHash: hash({ action: "EXPIRE_TRIGGER_SATISFACTION", candidateId, contractVersion, evidenceId, evidenceTimestamp, reasonCode }),
+        operationHash: hash({ action: "EXPIRE_TRIGGER_SATISFACTION", candidateId, contractVersion, evidenceId, evidenceTimestamp, evidenceHash, reasonCode }),
         action: "EXPIRE_TRIGGER_SATISFACTION",
         candidateId,
         contractVersion,
