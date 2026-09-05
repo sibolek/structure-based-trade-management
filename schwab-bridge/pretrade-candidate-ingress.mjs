@@ -1,11 +1,14 @@
 import crypto from "node:crypto";
 import {
-  PRETRADE_SCHEMA_VERSION,
   PRETRADE_TRIGGER_EVALUATING,
   canonicalLifecycleState,
-  contentHash,
-  normalizeCandidate,
 } from "./pretrade-state.mjs";
+import {
+  assertCanonicalCandidateIntegrity,
+  buildCanonicalContractAuthority,
+  candidateContractHash,
+  normalizeCanonicalCandidateProposal,
+} from "./pretrade-candidate-contract.mjs";
 
 const ACTIVE_PRETRADE_STATES = new Set([
   "INGESTED",
@@ -93,8 +96,10 @@ export class PreTradeCandidateIngress {
 
     const stateBeforeMutation = clone(this.store.state);
     const importedAt = this.clock();
-    const bundleSource = upper(bundle.source || "UNKNOWN");
-    const bundleId = text(bundle.bundleId) || null;
+    const bundleSource = upper(bundle.source);
+    const bundleId = text(bundle.bundleId);
+    if (!bundleSource) throw ingressError("canonical candidate bundle source is required", "INVALID_BUNDLE_SOURCE");
+    if (!bundleId) throw ingressError("canonical candidate bundleId is required", "INVALID_BUNDLE_ID");
 
     try {
       const outcomes = bundle.candidates.map((candidate) => this.#importCandidate({
@@ -126,7 +131,7 @@ export class PreTradeCandidateIngress {
   }
 
   #importCandidate({ input, importedAt, bundleSource, bundleId }) {
-    const { normalized, errors } = normalizeCandidate(input);
+    const { normalized, errors } = normalizeCanonicalCandidateProposal(input, { bundleSource });
     if (errors.length) {
       return {
         candidateId: normalized.candidateId || null,
@@ -136,24 +141,26 @@ export class PreTradeCandidateIngress {
       };
     }
 
-    const hash = contentHash(normalized);
+    const hash = candidateContractHash(normalized);
     const versions = this.store.state.candidates.filter((item) => item.candidateId === normalized.candidateId);
-    const sameVersion = versions.find((item) => Number(item.contractVersion) === normalized.contractVersion);
+    const sameVersionRaw = versions.find((item) => Number(item.contractVersion) === normalized.contractVersion);
 
-    if (sameVersion) {
+    if (sameVersionRaw) {
+      const sameVersion = ensureCandidateAuthorityShape(sameVersionRaw);
+      assertCanonicalCandidateIntegrity(sameVersion);
       if (sameVersion.contentHash === hash) {
         return {
           candidateId: normalized.candidateId,
           contractVersion: normalized.contractVersion,
           status: "DUPLICATE",
-          reasons: ["same candidateId, contractVersion, and content already imported"],
+          reasons: ["same candidateId, contractVersion, and canonical content already imported"],
         };
       }
       return {
         candidateId: normalized.candidateId,
         contractVersion: normalized.contractVersion,
         status: "CONFLICT",
-        reasons: ["same candidateId and contractVersion already exist with different content"],
+        reasons: ["same candidateId and contractVersion already exist with different canonical content"],
       };
     }
 
@@ -169,6 +176,7 @@ export class PreTradeCandidateIngress {
 
     for (const existingRaw of versions) {
       const existing = ensureCandidateAuthorityShape(existingRaw);
+      assertCanonicalCandidateIntegrity(existing);
       if (
         Number(existing.contractVersion) < normalized.contractVersion
         && ACTIVE_PRETRADE_STATES.has(existing.lifecycleState)
@@ -231,8 +239,13 @@ export class PreTradeCandidateIngress {
 
     this.store.state.candidates.push({
       ...normalized,
-      schemaVersion: Number(normalized.schemaVersion || PRETRADE_SCHEMA_VERSION),
       contentHash: hash,
+      contractAuthority: buildCanonicalContractAuthority({
+        contentHash: hash,
+        bundleSource,
+        bundleId,
+        acceptedAt: importedAt,
+      }),
       lifecycleState: "WAITING",
       stateRevision: 0,
       lifecycleJournal: {
@@ -240,6 +253,7 @@ export class PreTradeCandidateIngress {
         operations: [acceptanceOperation],
       },
       importedAt,
+      armAuthorized: false,
       evaluation: null,
       prerequisiteStatus: null,
       activation: null,
@@ -263,6 +277,7 @@ export class PreTradeCandidateIngress {
       status: "ACCEPTED",
       lifecycleState: "WAITING",
       stateRevision: 0,
+      contentHash: hash,
       reasons: [],
     };
   }
