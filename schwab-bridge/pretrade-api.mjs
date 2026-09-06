@@ -22,6 +22,7 @@ import {
 } from "./risk-evaluation-repository.mjs";
 import { RiskSizingPermissionService } from "./risk-sizing-permission-service.mjs";
 import { PreTradeStructuralValidityService } from "./pretrade-structural-validity.mjs";
+import { PreTradePermissionDecisionService } from "./pretrade-permission-decision.mjs";
 import {
   PreTradePermissionAttemptRepository,
   DEFAULT_PRETRADE_PERMISSION_ATTEMPT_FILE,
@@ -99,10 +100,11 @@ const riskSizingPermissionService = new RiskSizingPermissionService({
   now: () => Date.now(),
 });
 
-// No discretionary structural rule is guessed. Until a trusted deterministic
-// evaluator is registered for a candidate's structure family, the explicit
-// operator structural assessment path is the fail-closed fallback.
+// Discretionary structure or macro/setup context is never guessed. Until a
+// trusted deterministic evaluator is registered, explicit operator assessment
+// is the fail-closed fallback for that component of permission.
 const structuralValidityService = new PreTradeStructuralValidityService();
+const permissionDecisionService = new PreTradePermissionDecisionService();
 const permissionAttemptRepository = new PreTradePermissionAttemptRepository({ filePath: PERMISSION_ATTEMPT_FILE });
 permissionAttemptRepository.load();
 const permissionPipeline = new PreTradePermissionPipeline({
@@ -112,6 +114,7 @@ const permissionPipeline = new PreTradePermissionPipeline({
   dssPermissionService,
   riskSizingPermissionService,
   riskEvaluationRepository,
+  permissionDecisionService,
   attemptRepository: permissionAttemptRepository,
 });
 const permissionRecovery = permissionPipeline.recoverAll();
@@ -242,6 +245,7 @@ const server = http.createServer(async (req, res) => {
       triggerPersistenceAuthority: true,
       triggerRecoveryBlocked: triggerRecovery.filter((item) => item.status === "RECOVERY_BLOCKED").length,
       structuralValidityAuthority: true,
+      permissionDecisionAuthority: true,
       permissionAttemptAuthority: true,
       permissionPipelineAuthority: true,
       permissionEvaluationApi: true,
@@ -314,9 +318,10 @@ server.listen(PORT, HOST, () => {
   console.log("[ExecutionOS V2.4] Trigger persistence is monitored separately from pre-satisfaction trigger progress.");
   console.log(`[ExecutionOS V2.4] Trigger startup recovery inspected ${triggerRecovery.length} persisted runtime record(s).`);
   console.log("[ExecutionOS V2.4] Canonical permission entry cannot bypass trigger-engine satisfaction.");
-  console.log("[ExecutionOS V2.4] Permission attempts bind structural validity, DSS, exact account/entry evidence, Phase 4, and outcome immutably.");
+  console.log("[ExecutionOS V2.4] Permission attempts bind structural validity, DSS, exact account/entry evidence, Phase 4, macro/setup decision, and outcome immutably.");
   console.log(`[ExecutionOS V2.4] Permission startup recovery inspected ${permissionRecovery.length} persisted attempt record(s).`);
   console.log("[ExecutionOS V2.4] Canonical READY/CAUTION/PASS and permission blockers are permission-pipeline authority only.");
+  console.log("[ExecutionOS V2.4] Discretionary structural or macro/setup judgments require explicit operator assessment until a trusted evaluator is registered.");
   console.log("[ExecutionOS V2.4] Schwab permission reads are GET-only and never refresh or write OAuth tokens.");
   console.log("[ExecutionOS V2.4] PRETRADE lifecycle mutations are exposed only as intent-specific authoritative commands.");
   console.log("[ExecutionOS V2.4] Handoff transport API enabled; browser handoff creation is not exposed.");
