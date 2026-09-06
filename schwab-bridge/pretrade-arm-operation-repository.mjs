@@ -8,6 +8,8 @@ export const DEFAULT_PRETRADE_ARM_OPERATION_FILE = ".executionos-v24-arm-operati
 export const PRETRADE_ARM_OPERATION_AUTHORITY = "PRETRADE_ARM_OPERATION";
 
 const STATUSES = new Set(["REQUESTED", "REVIEW_REQUIRED", "REJECTED", "AUTHORIZED", "COMPLETED"]);
+const PERMISSION_STATES = new Set(["READY", "CAUTION"]);
+const DIRECTIONS = new Set(["LONG", "SHORT"]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -60,6 +62,24 @@ function positiveNumber(value) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
+function validAuthorization(authorization) {
+  const value = authorization && typeof authorization === "object" ? authorization : {};
+  if (!text(value.candidateId) || !Number.isInteger(Number(value.contractVersion)) || Number(value.contractVersion) < 1) return false;
+  if (!text(value.candidateContentHash) || !text(value.symbol) || !DIRECTIONS.has(upper(value.direction))) return false;
+  if (!text(value.reviewPackageId) || !text(value.permissionAttemptId) || !PERMISSION_STATES.has(upper(value.permissionState))) return false;
+  if (!Number.isInteger(Number(value.permissionStateRevision)) || Number(value.permissionStateRevision) < 0) return false;
+  if (!text(value.dssEvaluationId) || !text(value.riskEvaluationId) || !text(value.accountId)) return false;
+  if (positiveNumber(value.selectedQuantity) === null || !validIso(value.authorizedAt)) return false;
+  if (!text(value.handoffId) || !validIso(value.handoffCreatedAt)) return false;
+  if (!value.executionOwnershipProof || upper(value.executionOwnershipProof.status) !== "FREE") return false;
+  if (Array.isArray(value.ocoSiblings)) {
+    for (const sibling of value.ocoSiblings) {
+      if (!text(sibling?.candidateId) || !Number.isInteger(Number(sibling?.contractVersion)) || Number(sibling.contractVersion) < 1) return false;
+    }
+  }
+  return true;
+}
+
 function emptyState() {
   return {
     schemaVersion: PRETRADE_ARM_OPERATION_REPOSITORY_SCHEMA_VERSION,
@@ -69,7 +89,7 @@ function emptyState() {
 }
 
 export function armAuthorizationProof(record) {
-  if (!record || !["AUTHORIZED", "COMPLETED"].includes(upper(record.status)) || !record.authorization) return null;
+  if (!record || !["AUTHORIZED", "COMPLETED"].includes(upper(record.status)) || !validAuthorization(record.authorization)) return null;
   return immutable({
     authority: PRETRADE_ARM_OPERATION_AUTHORITY,
     status: "AUTHORIZED",
@@ -166,12 +186,6 @@ export class PreTradeArmOperationRepository {
   }
 
   authorize(operationId, authorization = {}) {
-    const requiredText = ["candidateId", "candidateContentHash", "direction", "reviewPackageId", "permissionAttemptId", "dssEvaluationId", "riskEvaluationId", "accountId", "handoffId"];
-    for (const field of requiredText) if (!text(authorization[field])) throw opError(`ARM authorization ${field} is required`, "INVALID_ARM_AUTHORIZATION_PROOF");
-    if (!Number.isInteger(Number(authorization.contractVersion)) || Number(authorization.contractVersion) < 1) throw opError("ARM authorization contractVersion is invalid", "INVALID_ARM_AUTHORIZATION_PROOF");
-    if (!Number.isInteger(Number(authorization.permissionStateRevision)) || Number(authorization.permissionStateRevision) < 0) throw opError("ARM authorization permissionStateRevision is invalid", "INVALID_ARM_AUTHORIZATION_PROOF");
-    if (!positiveNumber(authorization.selectedQuantity)) throw opError("ARM authorization selectedQuantity is invalid", "INVALID_ARM_AUTHORIZATION_PROOF");
-    if (!validIso(authorization.authorizedAt)) throw opError("ARM authorization authorizedAt is invalid", "INVALID_ARM_AUTHORIZATION_PROOF");
     const normalized = immutable({
       candidateId: text(authorization.candidateId),
       contractVersion: Number(authorization.contractVersion),
@@ -190,9 +204,14 @@ export class PreTradeArmOperationRepository {
       handoffId: text(authorization.handoffId),
       handoffCreatedAt: validIso(authorization.handoffCreatedAt || authorization.authorizedAt),
       ocoGroupId: text(authorization.ocoGroupId) || null,
-      ocoSiblings: Array.isArray(authorization.ocoSiblings) ? authorization.ocoSiblings.map((item) => ({ candidateId: text(item.candidateId), contractVersion: Number(item.contractVersion) })) : [],
+      ocoSiblings: Array.isArray(authorization.ocoSiblings)
+        ? authorization.ocoSiblings.map((item) => ({ candidateId: text(item.candidateId), contractVersion: Number(item.contractVersion) }))
+        : [],
       executionOwnershipProof: authorization.executionOwnershipProof ? immutable(authorization.executionOwnershipProof) : null,
     });
+    if (!validAuthorization(normalized)) {
+      throw opError("ARM authorization proof is incomplete or invalid", "INVALID_ARM_AUTHORIZATION_PROOF");
+    }
     return this.#transition(operationId, new Set(["REQUESTED"]), "AUTHORIZED", {
       authorization: normalized,
       reasonCode: null,
@@ -260,7 +279,7 @@ export class PreTradeArmOperationRepository {
       }
       if (ids.has(record.operationId)) throw opError("persisted ARM operationId is duplicated", "CORRUPT_ARM_OPERATION_REPOSITORY");
       ids.add(record.operationId);
-      if (["AUTHORIZED", "COMPLETED"].includes(record.status) && !armAuthorizationProof(record)) throw opError("persisted authorized ARM operation lacks proof", "CORRUPT_ARM_OPERATION_REPOSITORY");
+      if (["AUTHORIZED", "COMPLETED"].includes(record.status) && !armAuthorizationProof(record)) throw opError("persisted authorized ARM operation lacks valid proof", "CORRUPT_ARM_OPERATION_REPOSITORY");
       if (["REVIEW_REQUIRED", "REJECTED"].includes(record.status) && !text(record.reasonCode)) throw opError("persisted terminal ARM operation lacks reason", "CORRUPT_ARM_OPERATION_REPOSITORY");
     }
   }
