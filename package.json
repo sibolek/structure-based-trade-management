@@ -10,6 +10,7 @@
     "v24:pretrade": "node schwab-bridge/pretrade-api.mjs",
     "v24:sod-export": "node schwab-bridge/sod-candidate-export.mjs",
     "v24:sod-export-test": "node --test tests/sod-candidate-export.test.mjs",
+    "v24:execution-ownership-test": "node --test tests/pretrade-execution-ownership-provider.test.mjs tests/pretrade-execution-ownership-authority.test.mjs tests/pretrade-execution-ownership-api.test.mjs tests/pretrade-oco.test.mjs",
     "v24:market-data-test": "node --test tests/market-data-provider.test.mjs",
     "v24:market-data-probe": "node schwab-bridge/market-data-probe.mjs",
     "v24:dss-live-probe": "node schwab-bridge/dss-live-probe.mjs",
