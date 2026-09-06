@@ -16,6 +16,11 @@ function key(value) {
   return `${text(value?.candidateId)}:v${Number(value?.contractVersion)}`;
 }
 
+function sameSymbolArmBlockingState(value) {
+  const state = canonicalLifecycleState(value);
+  return state === "ARMED" || PRETRADE_ACTIVE_UNARMED_STATES.has(state);
+}
+
 export class PreTradeOcoService {
   constructor({
     lifecycleCoordinator,
@@ -96,7 +101,7 @@ export class PreTradeOcoService {
       if (key(other) === key(candidate)) return false;
       if (text(other.symbol).toUpperCase() !== text(candidate.symbol).toUpperCase()) return false;
       const otherState = canonicalLifecycleState(other.lifecycleState);
-      if (!PRETRADE_ACTIVE_UNARMED_STATES.has(otherState)) return false;
+      if (!sameSymbolArmBlockingState(otherState)) return false;
       if (group && group.members.some((member) => key(member) === key(other))) return false;
       return true;
     }).map((other) => ({ candidateId: other.candidateId, contractVersion: other.contractVersion, lifecycleState: canonicalLifecycleState(other.lifecycleState) }));
