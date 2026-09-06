@@ -3,9 +3,10 @@ import { getOrCreateExecutionBoardReceiverId } from "../execution/execution-boar
 import {
   EXECUTION_BOARD_STORE_KEY,
   readExecutionBoardStore,
+  subscribeExecutionBoardStore,
 } from "../execution/execution-board-store-repository.js";
 
-const PUBLISH_INTERVAL_MS = 1000;
+const PUBLISH_INTERVAL_MS = 500;
 const SOURCE = "EXECUTION_CANONICAL_STORE";
 const AUTHORITY = "EXECUTION_BOARD_STORE";
 
@@ -45,7 +46,9 @@ export default function useExecutionOwnershipPublisher({ pretrade } = {}) {
     let active = true;
     let timer = null;
     let publishing = false;
+    let pendingSnapshot = null;
     let acknowledged = null;
+    let unsubscribe = null;
     let publisherId;
 
     try {
@@ -79,12 +82,23 @@ export default function useExecutionOwnershipPublisher({ pretrade } = {}) {
       return response?.result || {};
     }
 
+    function queueLatestSnapshot(store = null) {
+      try {
+        pendingSnapshot = store || readExecutionBoardStore();
+      } catch (error) {
+        setState((current) => ({ ...current, status: "ERROR", error: errorText(error) }));
+        return;
+      }
+      if (!publishing) void tick({ forceSnapshot: true });
+    }
+
     async function tick({ forceSnapshot = false } = {}) {
       if (!active || publishing) return;
       publishing = true;
       let publishedFullSnapshot = false;
       try {
-        const store = readExecutionBoardStore();
+        const store = pendingSnapshot || readExecutionBoardStore();
+        pendingSnapshot = null;
         let result;
         if (forceSnapshot || !acknowledged || acknowledged.storeRevision !== Number(store.storeRevision)) {
           result = await publishSnapshot(store);
@@ -99,7 +113,7 @@ export default function useExecutionOwnershipPublisher({ pretrade } = {}) {
               "EXECUTION_OWNERSHIP_STALE_REVISION",
             ].includes(error?.code)) {
               acknowledged = null;
-              result = await publishSnapshot(store);
+              result = await publishSnapshot(readExecutionBoardStore());
               publishedFullSnapshot = true;
             } else {
               throw error;
@@ -116,7 +130,7 @@ export default function useExecutionOwnershipPublisher({ pretrade } = {}) {
         });
 
         // A full snapshot can change PRETRADE's ownership-connected health immediately.
-        // Heartbeats do not force duplicate candidate/health polling every second.
+        // Heartbeats do not force duplicate candidate/health polling.
         if (publishedFullSnapshot && typeof refreshNow === "function") {
           refreshNow().catch(() => {});
         }
@@ -129,21 +143,32 @@ export default function useExecutionOwnershipPublisher({ pretrade } = {}) {
         }));
       } finally {
         publishing = false;
+        if (active && pendingSnapshot) void tick({ forceSnapshot: true });
       }
     }
 
-    const publishOnFocus = () => tick({ forceSnapshot: true });
+    const publishOnFocus = () => queueLatestSnapshot();
     const publishOnVisibility = () => {
-      if (document.visibilityState === "visible") tick({ forceSnapshot: true });
+      if (document.visibilityState === "visible") queueLatestSnapshot();
     };
 
-    tick({ forceSnapshot: true });
-    timer = window.setInterval(() => tick(), PUBLISH_INTERVAL_MS);
+    try {
+      unsubscribe = subscribeExecutionBoardStore({
+        listener: (snapshot) => queueLatestSnapshot(snapshot),
+      });
+    } catch (error) {
+      setState({ status: "BLOCKED", storeRevision: null, lastPublishedAt: null, error: errorText(error) });
+      return undefined;
+    }
+
+    queueLatestSnapshot();
+    timer = window.setInterval(() => void tick(), PUBLISH_INTERVAL_MS);
     window.addEventListener("focus", publishOnFocus);
     document.addEventListener("visibilitychange", publishOnVisibility);
 
     return () => {
       active = false;
+      unsubscribe?.();
       if (timer !== null) window.clearInterval(timer);
       window.removeEventListener("focus", publishOnFocus);
       document.removeEventListener("visibilitychange", publishOnVisibility);
