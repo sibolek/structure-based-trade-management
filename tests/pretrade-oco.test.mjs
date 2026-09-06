@@ -127,6 +127,26 @@ test("same-symbol active candidate outside OCO group blocks ARM", async () => {
   assert.equal(gate.conflicts[0].candidateId, "nvda-third");
 });
 
+test("same-symbol ARMED candidate outside OCO group blocks a second ARM before Execution projection catches up", async () => {
+  const values = [
+    { candidateId: "nvda-new", contractVersion: 1, symbol: "NVDA", lifecycleState: "READY", stateRevision: 3 },
+    { candidateId: "nvda-armed", contractVersion: 1, symbol: "NVDA", lifecycleState: "ARMED", stateRevision: 8 },
+  ];
+  const repo = new PreTradeOcoRepository({ filePath: tempFile(), clock: () => NOW });
+  repo.load();
+  const service = new PreTradeOcoService({
+    lifecycleCoordinator: coordinator(values),
+    ocoRepository: repo,
+    armLifecycleAuthority: noopArmLifecycle,
+    executionOwnershipProvider: { async checkSymbol() { return { status: "FREE" }; } },
+  });
+  const gate = await service.armGate({ candidateId: "nvda-new", contractVersion: 1, review: null });
+  assert.equal(gate.allowed, false);
+  assert.equal(gate.reasonCode, "SAME_SYMBOL_PRETRADE_CONFLICT");
+  assert.equal(gate.conflicts[0].candidateId, "nvda-armed");
+  assert.equal(gate.conflicts[0].lifecycleState, "ARMED");
+});
+
 test("Execution ownership UNKNOWN or OWNED blocks ARM; exact FREE permits it", async () => {
   const values = candidates().slice(0, 2);
   const repo = new PreTradeOcoRepository({ filePath: tempFile(), clock: () => NOW });
