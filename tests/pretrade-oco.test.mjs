@@ -22,6 +22,7 @@ function candidates() {
 }
 
 function coordinator(values = candidates()) {
+  const revalidations = [];
   return {
     candidateSnapshot(candidateId, contractVersion) {
       const found = values.find((item) => item.candidateId === candidateId && item.contractVersion === Number(contractVersion));
@@ -29,6 +30,17 @@ function coordinator(values = candidates()) {
       return structuredClone(found);
     },
     snapshot() { return { candidates: structuredClone(values) }; },
+    revalidatePermission(command) {
+      const found = values.find((item) => item.candidateId === command.candidateId && item.contractVersion === Number(command.contractVersion));
+      if (!found) { const error = new Error("not found"); error.code = "CANDIDATE_NOT_FOUND"; throw error; }
+      assert.equal(found.lifecycleState, command.expectedState);
+      assert.equal(found.stateRevision, command.expectedRevision);
+      found.lifecycleState = "PERMISSION_EVALUATING";
+      found.stateRevision += 1;
+      revalidations.push(structuredClone(command));
+      return { candidateId: found.candidateId, contractVersion: found.contractVersion, lifecycleState: found.lifecycleState, stateRevision: found.stateRevision };
+    },
+    revalidations,
   };
 }
 
@@ -56,6 +68,35 @@ test("OCO group binds exact candidate versions, symbol, and common account", () 
   assert.equal(group.symbol, "NVDA");
   assert.equal(group.accountId, "acct-1");
   assert.deepEqual(repo.groupForCandidate("nvda-long", 1).members, group.members);
+});
+
+test("changing common OCO account invalidates READY/CAUTION permission for every active member", () => {
+  const values = candidates().slice(0, 2);
+  const lifecycle = coordinator(values);
+  const repo = new PreTradeOcoRepository({ filePath: tempFile(), clock: () => NOW });
+  repo.load();
+  const service = new PreTradeOcoService({
+    lifecycleCoordinator: lifecycle,
+    ocoRepository: repo,
+    armLifecycleAuthority: noopArmLifecycle,
+    executionOwnershipProvider: { async checkSymbol() { return { status: "FREE" }; } },
+  });
+  service.createGroup({
+    operationId: "create-account",
+    groupId: "oco-account",
+    accountId: "acct-1",
+    members: [
+      { candidateId: "nvda-long", contractVersion: 1 },
+      { candidateId: "nvda-short", contractVersion: 1 },
+    ],
+  });
+  const updated = service.setAccount({ operationId: "account-change", groupId: "oco-account", accountId: "acct-2" });
+  assert.equal(updated.accountId, "acct-2");
+  assert.equal(updated.accountRevision, 1);
+  assert.equal(lifecycle.candidateSnapshot("nvda-long", 1).lifecycleState, "PERMISSION_EVALUATING");
+  assert.equal(lifecycle.candidateSnapshot("nvda-short", 1).lifecycleState, "PERMISSION_EVALUATING");
+  assert.equal(lifecycle.revalidations.length, 2);
+  assert.equal(lifecycle.revalidations[0].provenance.accountId, "acct-2");
 });
 
 test("same-symbol active candidate outside OCO group blocks ARM", async () => {
