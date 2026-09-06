@@ -143,6 +143,24 @@ test("SOD exporter requires exact finite validity and never invents a session wi
   );
 });
 
+test("candidate-specific partial validity fails closed instead of silently falling back to bundle validity", () => {
+  const input = draft();
+  input.candidates[0].validity = {
+    validUntil: "2026-09-08T20:00:00.000Z",
+    timezone: "America/Denver",
+    session: "RTH",
+  };
+
+  assert.throws(
+    () => buildCanonicalSodCandidateBundle(input),
+    (error) => {
+      assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
+      assert.match(error.message, /validity\.validFrom/);
+      return true;
+    },
+  );
+});
+
 test("SOD exporter refuses AUTO ARM intent", () => {
   const input = draft();
   input.candidates[0].armPolicy = { requestedMode: "AUTO" };
@@ -152,6 +170,79 @@ test("SOD exporter refuses AUTO ARM intent", () => {
     (error) => {
       assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
       assert.match(error.message, /SOD_A_PLUS_TRADES.*MANUAL/);
+      return true;
+    },
+  );
+});
+
+test("SOD exporter rejects runtime authority instead of silently sanitizing it", () => {
+  for (const forbidden of [
+    { selectedQuantity: 25 },
+    { riskEvaluation: { status: "VALID" } },
+    { permissionOutcome: "READY" },
+    { armAuthorized: true },
+    { armPolicy: { requestedMode: "MANUAL", armAuthorized: true } },
+    { lifecycleState: "READY" },
+  ]) {
+    const input = draft();
+    Object.assign(input.candidates[0], forbidden);
+    assert.throws(
+      () => buildCanonicalSodCandidateBundle(input),
+      (error) => {
+        assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
+        assert.match(error.message, /runtime authority|ARM authorization/i);
+        return true;
+      },
+    );
+  }
+});
+
+test("SOD exporter rejects candidate source and sourceDate conflicts with the bundle", () => {
+  const wrongSource = draft();
+  wrongSource.candidates[0].source = "CHATGPT_AD_HOC";
+  assert.throws(
+    () => buildCanonicalSodCandidateBundle(wrongSource),
+    (error) => error.code === "SOD_CANDIDATE_EXPORT_INVALID" && /source must be SOD_A_PLUS_TRADES/.test(error.message),
+  );
+
+  const wrongDate = draft();
+  wrongDate.candidates[0].sourceDate = "2026-09-09";
+  assert.throws(
+    () => buildCanonicalSodCandidateBundle(wrongDate),
+    (error) => error.code === "SOD_CANDIDATE_EXPORT_INVALID" && /conflicts with bundle sourceDate/.test(error.message),
+  );
+});
+
+test("SOD exporter rejects ambiguous free-text legacy management plans", () => {
+  const input = draft();
+  input.candidates[0].managementPlan = "Manage against structure.";
+
+  assert.throws(
+    () => buildCanonicalSodCandidateBundle(input),
+    (error) => {
+      assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
+      assert.match(error.message, /managementPlan.*structured object/i);
+      return true;
+    },
+  );
+});
+
+test("SOD exporter rejects conflicting managementContract and legacy managementPlan", () => {
+  const input = draft();
+  input.candidates[0].managementContract = {
+    mode: "SINGLE_ENTRY",
+    allowReAdd: false,
+    allowFlatReEntry: false,
+  };
+  input.candidates[0].managementPlan = {
+    mode: "FLEXIBLE_WITHIN_CEILING",
+  };
+
+  assert.throws(
+    () => buildCanonicalSodCandidateBundle(input),
+    (error) => {
+      assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
+      assert.match(error.message, /managementContract and legacy managementPlan may not conflict/);
       return true;
     },
   );
