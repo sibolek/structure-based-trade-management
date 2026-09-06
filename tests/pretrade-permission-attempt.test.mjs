@@ -66,6 +66,7 @@ function attempt(overrides = {}) {
       source: "SOD_A_PLUS_TRADES",
       symbol: "NVDA",
       direction: "LONG",
+      stateRevision: 2,
     },
     triggerSatisfaction: {
       authority: "PRETRADE_TRIGGER_ENGINE",
@@ -101,6 +102,7 @@ test("permission attempt repository records and reloads immutable complete evide
   repo.load();
   const recorded = repo.record(attempt());
   assert.equal(recorded.permissionAttemptId, "permission-attempt-1");
+  assert.equal(recorded.candidate.permissionStateRevision, 2);
   assert.equal(recorded.account.accountId, "acct-1");
   assert.equal(recorded.expectedEntry.currentExpectedEntry, 180);
   assert.equal(recorded.phase4.riskEvaluationId, "risk-1");
@@ -138,6 +140,24 @@ test("CAUTION requires explicit reason provenance", () => {
   );
 });
 
+test("permissionStateRevision is required so recovery cannot cross permission cycles", () => {
+  assert.throws(
+    () => attempt({
+      build: {
+        candidate: {
+          candidateId: "candidate-1",
+          contractVersion: 1,
+          contentHash: "candidate-hash-1",
+          source: "SOD_A_PLUS_TRADES",
+          symbol: "NVDA",
+          direction: "LONG",
+        },
+      },
+    }),
+    (error) => error.code === "INVALID_PERMISSION_ATTEMPT",
+  );
+});
+
 test("READY cannot be recorded without exact account and expected-entry evidence", () => {
   const brokenRisk = riskEvaluation();
   brokenRisk.account.accountId = null;
@@ -153,6 +173,7 @@ test("READY cannot be recorded without exact account and expected-entry evidence
         source: "SOD_A_PLUS_TRADES",
         symbol: "NVDA",
         direction: "LONG",
+        stateRevision: 2,
       },
       triggerSatisfaction: { authority: "PRETRADE_TRIGGER_ENGINE" },
       structuralValidity: { authority: "PRETRADE_STRUCTURAL_VALIDITY", status: "VALID" },
