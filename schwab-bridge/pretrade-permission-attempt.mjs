@@ -63,6 +63,7 @@ export function buildPermissionAttempt({
   structuralValidity,
   dssResult = null,
   riskEvaluation = null,
+  permissionDecision = null,
   result,
   startedAt,
   completedAt,
@@ -109,6 +110,7 @@ export function buildPermissionAttempt({
     expectedEntry: riskEvaluation?.entry ? structuredClone(riskEvaluation.entry) : null,
     account: riskEvaluation?.account ? structuredClone(riskEvaluation.account) : null,
     instrument: riskEvaluation?.instrument ? structuredClone(riskEvaluation.instrument) : null,
+    permissionDecision: permissionDecision ? structuredClone(permissionDecision) : null,
     result: result ? {
       kind: upper(result.kind),
       outcome: result.outcome ? upper(result.outcome) : null,
@@ -148,6 +150,13 @@ export function validatePermissionAttempt(value) {
   if (!timestamp(attempt.startedAt)) errors.push("startedAt is invalid");
   if (!timestamp(attempt.completedAt)) errors.push("completedAt is invalid");
 
+  if (attempt.permissionDecision) {
+    if (attempt.permissionDecision.authority !== "PRETRADE_PERMISSION_DECISION") errors.push("permissionDecision authority is invalid");
+    if (text(attempt.permissionDecision.candidateId) !== text(attempt.candidate?.candidateId)) errors.push("permissionDecision candidateId mismatch");
+    if (Number(attempt.permissionDecision.contractVersion) !== Number(attempt.candidate?.contractVersion)) errors.push("permissionDecision contractVersion mismatch");
+    if (text(attempt.permissionDecision.candidateContentHash) !== text(attempt.candidate?.candidateContentHash)) errors.push("permissionDecision candidateContentHash mismatch");
+  }
+
   const kind = upper(attempt.result?.kind);
   if (!RESULT_KINDS.has(kind)) errors.push("result.kind is invalid");
   if (kind === "OUTCOME") {
@@ -160,7 +169,12 @@ export function validatePermissionAttempt(value) {
       if (!text(attempt.phase4?.riskEvaluationId)) errors.push(`${outcome} requires riskEvaluationId`);
       if (!text(attempt.account?.accountId)) errors.push(`${outcome} requires exact accountId`);
       if (finiteNumber(attempt.expectedEntry?.currentExpectedEntry) === null) errors.push(`${outcome} requires currentExpectedEntry`);
+      if (!attempt.permissionDecision || attempt.permissionDecision.authority !== "PRETRADE_PERMISSION_DECISION") errors.push(`${outcome} requires authoritative permissionDecision`);
+      if (upper(attempt.permissionDecision?.kind) !== "OUTCOME" || upper(attempt.permissionDecision?.outcome) !== outcome) errors.push(`${outcome} must match permissionDecision outcome`);
       if (outcome === "CAUTION" && !(attempt.result?.reasonCodes || []).length) errors.push("CAUTION requires reasonCodes");
+    }
+    if (attempt.permissionDecision?.kind === "OUTCOME" && upper(attempt.permissionDecision.outcome) !== outcome) {
+      errors.push("result outcome must match permissionDecision outcome");
     }
   } else if (!text(attempt.result?.reasonCode) && !(attempt.result?.reasonCodes || []).length) {
     errors.push(`${kind || "blocked/error"} result requires reason provenance`);
