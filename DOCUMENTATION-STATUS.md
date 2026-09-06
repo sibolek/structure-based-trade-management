@@ -128,7 +128,7 @@ Implemented/accepted:
 - explicit quantity selection;
 - exact-package CAUTION acknowledgement;
 - OCO grouping and same-symbol ARM gate;
-- final direction/quantity/account confirmation;
+- ARM as the final explicit direction/quantity confirmation, with the exact account exposed in the current review package and frozen by ARM;
 - fresh final ARM revalidation;
 - durable ARM operation journal and recovery;
 - immutable ARMED provenance;
@@ -268,6 +268,8 @@ Broker writes introduced:         NONE
 
 The canonical PRETRADE→Execution E2E verifies real ingress, lifecycle, permission, review, ARM, immutable handoff, read-only transport/router ownership, partial/flat lifecycle, History, and symbol-ownership release in one synthetic path.
 
+The production build was run at `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796`; the only subsequent implementation change through accepted checkpoint `3f794538ffbe5c5875a3d671143cb33890530b1f` was the addition of the canonical PRETRADE→Execution E2E test, so production code was unchanged.
+
 ---
 
 ## EOD reporting status
@@ -275,11 +277,11 @@ The canonical PRETRADE→Execution E2E verifies real ingress, lifecycle, permiss
 EOD enrichment remains origin-aware:
 
 ```text
-V24_HANDOFF        -> authoritative V2.4 effective/managed stop semantics
+V24_HANDOFF        -> v24.effectiveStop
 LEGACY_MANUAL_V23  -> originalPlan.structuralStop
 ```
 
-V2.4 structural invalidation remains separate provenance and is not substituted for the effective stop in planned-risk calculations.
+V2.4 structural invalidation remains separate provenance and is not substituted for `v24.effectiveStop` in planned-risk calculations. Slice 7 live managed-stop changes do not rewrite the EOD planned-risk stop basis.
 
 ---
 
