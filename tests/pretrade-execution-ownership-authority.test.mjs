@@ -57,7 +57,6 @@ test("missing or stale Execution projection stays UNKNOWN and never guesses FREE
       "2026-09-06T20:00:00.000Z",
       "2026-09-06T20:00:00.000Z",
       "2026-09-06T20:00:04.001Z",
-      "2026-09-06T20:00:04.001Z",
     ]),
     maxAgeMs: 3000,
   });
@@ -98,6 +97,28 @@ test("PRETRADE derives FREE and OWNED server-side from canonical Execution store
   assert.equal(free.status, "FREE");
   assert.equal(free.authoritative, true);
   assert.equal(free.storeRevision, 7);
+});
+
+test("malformed or incomplete Execution snapshots cannot normalize missing ownership evidence into FREE", () => {
+  const missingLiveTrades = canonicalStore();
+  delete missingLiveTrades.liveTrades;
+  const invalidStores = [
+    missingLiveTrades,
+    canonicalStore({ storeSchemaVersion: 999 }),
+    canonicalStore({ storeRevision: -1 }),
+    canonicalStore({ candidates: null }),
+    canonicalStore({ v24Lifecycles: {} }),
+    canonicalStore({ draft: "not-a-draft-object" }),
+  ];
+
+  for (const store of invalidStores) {
+    const authority = new PreTradeExecutionOwnershipAuthority({ filePath: tempFile() });
+    authority.load();
+    assert.throws(
+      () => authority.publish(publication(store)),
+      (error) => error.code === "EXECUTION_OWNERSHIP_STORE_INVALID",
+    );
+  }
 });
 
 test("browser may publish canonical store evidence but may not supply FREE/OWNED derived fields", () => {
@@ -198,6 +219,28 @@ test("persisted ownership projection reloads with exact revision and derived sym
   assert.equal(result.status, "OWNED");
   assert.equal(result.storeRevision, 7);
   assert.equal(result.authoritative, true);
+});
+
+test("tampering persisted derived ownership without matching integrity hash fails closed on startup", () => {
+  const filePath = tempFile();
+  const authority = new PreTradeExecutionOwnershipAuthority({
+    filePath,
+    clock: () => "2026-09-06T20:00:00.500Z",
+  });
+  authority.load();
+  authority.publish(publication(canonicalStore({
+    candidates: [{ originalPlan: { symbol: "NVDA" }, v24: { handoffId: "h-nvda" } }],
+  })));
+
+  const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  persisted.projection.ownedSymbols = [];
+  fs.writeFileSync(filePath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
+
+  const reloaded = new PreTradeExecutionOwnershipAuthority({ filePath });
+  assert.throws(
+    () => reloaded.load(),
+    (error) => error.code === "CORRUPT_EXECUTION_OWNERSHIP_AUTHORITY",
+  );
 });
 
 test("corrupt persisted ownership authority fails closed on startup", () => {
