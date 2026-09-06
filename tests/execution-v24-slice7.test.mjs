@@ -110,20 +110,27 @@ function installation() {
 
 function brokerState(entries, currentThrough = "2026-09-06T14:01:00.000Z") {
   return {
+    status: "ARMED",
     readOnly: true,
+    source: "SCHWAB",
+    lastError: null,
     brokerWriteAuthority: false,
     accounts: [{ accountId: "acct-A" }],
     executionCoverage: {
-      status: "ESTABLISHED",
+      schemaVersion: 1,
+      status: "CONTIGUOUS",
+      source: "SCHWAB_ORDER_API_POLL",
       coverageStartedAt: "2026-09-06T13:59:00.000Z",
+      baselineCompletedAt: "2026-09-06T13:59:00.000Z",
       currentThrough,
+      lastGapAt: null,
+      lastGapReason: null,
     },
     executionOwnershipJournal: {
       schemaVersion: 1,
-      status: "ESTABLISHED",
+      source: "SCHWAB_ORDER_API_POLL",
       coverageStartedAt: "2026-09-06T13:59:00.000Z",
       currentThrough,
-      nextSequence: entries.length + 1,
       entries,
     },
   };
