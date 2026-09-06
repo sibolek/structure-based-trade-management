@@ -134,7 +134,7 @@ export default function V24LiveTradeCard({ trade, onState, onClassify, onManagem
       <div className="mt-4 grid gap-2 md:grid-cols-3">
         <button onClick={() => onState(trade.id, "VALID")} className="rounded border border-emerald-400/30 bg-emerald-400/10 p-3 text-left font-bold text-emerald-100"><CheckCircle2 className="mb-2" size={20} />VALID — HOLD</button>
         <button onClick={() => onState(trade.id, "THREATENED")} className="rounded border border-amber-400/30 bg-amber-400/10 p-3 text-left font-bold text-amber-100"><AlertTriangle className="mb-2" size={20} />THREATENED</button>
-        <button onClick={() => onState(trade.id, "INVALID")} className="rounded border border-red-400/30 bg-red-400/10 p-3 text-left font-bold text-red-100"><XCircle2 className="mb-2" size={20} />INVALID</button>
+        <button onClick={() => onState(trade.id, "INVALID")} className="rounded border border-red-400/30 bg-red-400/10 p-3 text-left font-bold text-red-100"><XCircle className="mb-2" size={20} />INVALID</button>
       </div>
 
       <V24LiveManagementPanel trade={trade} onCommand={onManagementCommand} />
