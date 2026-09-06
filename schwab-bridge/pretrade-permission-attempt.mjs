@@ -15,11 +15,15 @@ function upper(value) {
 }
 
 function finiteNumber(value) {
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  if (typeof value === "string" && !value.trim()) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
 function revision(value) {
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  if (typeof value === "string" && !value.trim()) return null;
   const number = Number(value);
   return Number.isInteger(number) && number >= 0 ? number : null;
 }
