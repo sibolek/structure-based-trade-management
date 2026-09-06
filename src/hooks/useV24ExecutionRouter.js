@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getOrCreateExecutionBoardReceiverId } from "../execution/execution-board-receiver.js";
 import { createV24HandoffTransport } from "../execution/execution-v24-handoff-transport.js";
-import { runV24ExecutionRouterCycle } from "../execution/execution-v24-runtime-router.js";
+import { runV24ManagedExecutionRouterCycle } from "../execution/execution-v24-managed-runtime-router.js";
 import {
   V24_ROUTER_LOOP_DELAY_MS,
   deriveV24RouterHealthStatus,
@@ -158,7 +158,7 @@ export default function useV24ExecutionRouter({ broker, pretrade } = {}) {
             ? createV24HandoffTransport({ pretradeUrl: current.pretrade.pretradeUrl })
             : null;
 
-          const result = await runV24ExecutionRouterCycle({
+          const result = await runV24ManagedExecutionRouterCycle({
             transport,
             receiverId,
             brokerState: current.broker.state,
