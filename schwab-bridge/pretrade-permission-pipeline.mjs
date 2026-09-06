@@ -41,10 +41,6 @@ function errorReasons(error, fallback) {
   return reasons.length ? reasons : [fallback];
 }
 
-function defaultDecisionPolicy() {
-  return { outcome: "READY", reasonCodes: [] };
-}
-
 function sameTriggerSatisfaction(left, right) {
   return permissionAttemptHash(left ?? null) === permissionAttemptHash(right ?? null);
 }
@@ -57,8 +53,8 @@ export class PreTradePermissionPipeline {
     dssPermissionService,
     riskSizingPermissionService,
     riskEvaluationRepository,
+    permissionDecisionService,
     attemptRepository,
-    decisionPolicy = defaultDecisionPolicy,
     clock = () => new Date().toISOString(),
     idFactory = () => crypto.randomUUID(),
   } = {}) {
@@ -72,10 +68,10 @@ export class PreTradePermissionPipeline {
     if (!dssPermissionService || typeof dssPermissionService.evaluate !== "function") throw new Error("permission pipeline requires DSS permission service");
     if (!riskSizingPermissionService || typeof riskSizingPermissionService.evaluate !== "function") throw new Error("permission pipeline requires Phase 4 permission service");
     if (!riskEvaluationRepository || typeof riskEvaluationRepository.getById !== "function") throw new Error("permission pipeline requires risk evaluation repository");
+    if (!permissionDecisionService || typeof permissionDecisionService.evaluate !== "function") throw new Error("permission pipeline requires permission decision service");
     if (!attemptRepository || typeof attemptRepository.record !== "function" || typeof attemptRepository.getByOperationId !== "function") {
       throw new Error("permission pipeline requires permission attempt repository");
     }
-    if (typeof decisionPolicy !== "function") throw new Error("decisionPolicy must be a function");
     if (typeof clock !== "function") throw new Error("clock must be a function");
     if (typeof idFactory !== "function") throw new Error("idFactory must be a function");
 
@@ -85,8 +81,8 @@ export class PreTradePermissionPipeline {
     this.dssPermissionService = dssPermissionService;
     this.riskSizingPermissionService = riskSizingPermissionService;
     this.riskEvaluationRepository = riskEvaluationRepository;
+    this.permissionDecisionService = permissionDecisionService;
     this.attemptRepository = attemptRepository;
-    this.decisionPolicy = decisionPolicy;
     this.clock = clock;
     this.idFactory = idFactory;
     this.busy = new Set();
@@ -112,6 +108,7 @@ export class PreTradePermissionPipeline {
         entryMode: upper(command.entryMode),
         triggerPrice: command.triggerPrice ?? null,
         operatorStructuralAssessment: command.operatorStructuralAssessment ?? null,
+        operatorPermissionAssessment: command.operatorPermissionAssessment ?? null,
       };
       const operationHash = permissionAttemptHash(operationPayload);
       const prior = this.attemptRepository.getByOperationId(operationId);
@@ -154,6 +151,7 @@ export class PreTradePermissionPipeline {
 
       let dssResult = null;
       let riskEvaluation = null;
+      let permissionDecision = null;
       let result;
       const structuralStatus = upper(structuralValidity.status);
 
@@ -263,27 +261,39 @@ export class PreTradePermissionPipeline {
                 reasonCode: "RISK_EVALUATION_UNAVAILABLE",
                 reasonCodes: ["RISK_EVALUATION_UNAVAILABLE"],
               };
+            } else if (
+              text(riskEvaluation.account?.accountId) !== operationPayload.accountId
+              || text(riskEvaluation.dss?.dssEvaluationId) !== text(dssResult.dssEvaluationId)
+            ) {
+              result = {
+                kind: "BLOCKED_INTEGRITY",
+                reasonCode: "PERMISSION_EVIDENCE_IDENTITY_MISMATCH",
+                reasonCodes: ["PERMISSION_EVIDENCE_IDENTITY_MISMATCH"],
+              };
             } else {
-              const decision = await this.decisionPolicy({
+              permissionDecision = await this.permissionDecisionService.evaluate({
                 candidate: clone(candidate),
                 structuralValidity: clone(structuralValidity),
                 dssResult: clone(dssResult),
                 riskEvaluation: clone(riskEvaluation),
+                operatorAssessment: command.operatorPermissionAssessment ?? null,
               });
-              const outcome = upper(decision?.outcome || "READY");
-              const reasonCodes = [...new Set((decision?.reasonCodes || []).map(upper).filter(Boolean))];
-              if (!["READY", "CAUTION", "PASS"].includes(outcome)) {
-                throw pipelineError("decisionPolicy returned an unsupported outcome", "INVALID_PERMISSION_DECISION_POLICY_RESULT");
+              if (upper(permissionDecision.kind) === "BLOCKED_RETRYABLE") {
+                result = {
+                  kind: "BLOCKED_RETRYABLE",
+                  reasonCode: permissionDecision.reasonCode || "PERMISSION_CONTEXT_BLOCKED",
+                  reasonCodes: permissionDecision.reasonCodes || ["PERMISSION_CONTEXT_BLOCKED"],
+                };
+              } else if (upper(permissionDecision.kind) === "OUTCOME") {
+                result = {
+                  kind: "OUTCOME",
+                  outcome: upper(permissionDecision.outcome),
+                  reasonCode: permissionDecision.reasonCode,
+                  reasonCodes: permissionDecision.reasonCodes,
+                };
+              } else {
+                throw pipelineError("permission decision service returned an unsupported result kind", "INVALID_PERMISSION_DECISION_RESULT");
               }
-              if (outcome === "CAUTION" && reasonCodes.length === 0) {
-                throw pipelineError("CAUTION requires at least one reasonCode", "INVALID_PERMISSION_DECISION_POLICY_RESULT");
-              }
-              result = {
-                kind: "OUTCOME",
-                outcome,
-                reasonCode: text(decision?.reasonCode) || (outcome === "PASS" ? "PERMISSION_POLICY_PASS" : null),
-                reasonCodes,
-              };
             }
           }
         }
@@ -299,6 +309,7 @@ export class PreTradePermissionPipeline {
         structuralValidity,
         dssResult,
         riskEvaluation,
+        permissionDecision,
         result,
         startedAt,
         completedAt,
@@ -400,6 +411,7 @@ export class PreTradePermissionPipeline {
           structuralEvaluationId: attempt.structuralValidity?.structuralEvaluationId || null,
           dssEvaluationId: attempt.dss?.dssEvaluationId || null,
           riskEvaluationId: attempt.phase4?.riskEvaluationId || null,
+          permissionDecisionId: attempt.permissionDecision?.permissionDecisionId || null,
           reasonCodes: result.reasonCodes,
         },
       });
@@ -422,6 +434,7 @@ export class PreTradePermissionPipeline {
         structuralEvaluationId: attempt.structuralValidity?.structuralEvaluationId || null,
         dssEvaluationId: attempt.dss?.dssEvaluationId || null,
         riskEvaluationId: attempt.phase4?.riskEvaluationId || null,
+        permissionDecisionId: attempt.permissionDecision?.permissionDecisionId || null,
         reasonCodes: result.reasonCodes,
       },
     });
