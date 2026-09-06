@@ -45,6 +45,11 @@ import {
 } from "./pretrade-oco-repository.mjs";
 import { PreTradeOcoService } from "./pretrade-oco-service.mjs";
 import { PreTradeExecutionOwnershipProvider } from "./pretrade-execution-ownership-provider.mjs";
+import {
+  PreTradeExecutionOwnershipAuthority,
+  DEFAULT_EXECUTION_OWNERSHIP_FILE,
+} from "./pretrade-execution-ownership-authority.mjs";
+import { createPreTradeExecutionOwnershipApiHandler } from "./pretrade-execution-ownership-api.mjs";
 import { PreTradeArmService } from "./pretrade-arm-service.mjs";
 import { createPreTradeReviewArmApiHandler } from "./pretrade-review-arm-api.mjs";
 import { createPreTradeOcoApiHandler } from "./pretrade-oco-api.mjs";
@@ -66,6 +71,7 @@ const PERMISSION_ATTEMPT_FILE = process.env.EXECUTIONOS_V24_PERMISSION_ATTEMPT_F
 const REVIEW_FILE = process.env.EXECUTIONOS_V24_REVIEW_FILE || DEFAULT_PRETRADE_REVIEW_FILE;
 const ARM_OPERATION_FILE = process.env.EXECUTIONOS_V24_ARM_OPERATION_FILE || DEFAULT_PRETRADE_ARM_OPERATION_FILE;
 const OCO_FILE = process.env.EXECUTIONOS_V24_OCO_FILE || DEFAULT_PRETRADE_OCO_FILE;
+const EXECUTION_OWNERSHIP_FILE = process.env.EXECUTIONOS_V24_EXECUTION_OWNERSHIP_FILE || DEFAULT_EXECUTION_OWNERSHIP_FILE;
 const HANDOFF_FILE = process.env.EXECUTIONOS_V24_HANDOFF_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_FILE;
 const HANDOFF_DELIVERY_FILE = process.env.EXECUTIONOS_V24_HANDOFF_DELIVERY_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_DELIVERY_FILE;
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -168,11 +174,17 @@ const armLifecycleAuthority = new PreTradeArmLifecycleAuthority({ store });
 const ocoRepository = new PreTradeOcoRepository({ filePath: OCO_FILE });
 ocoRepository.load();
 
-// Decision 55 requires authoritative Execution ownership before final ARM. The
-// accepted downstream ownership store currently lives on the Execution side,
-// so PRETRADE deliberately reports UNKNOWN until that projection is connected.
-// UNKNOWN blocks ARM; it is never interpreted as FREE.
-const executionOwnershipProvider = new PreTradeExecutionOwnershipProvider();
+// Decision 55: PRETRADE derives FREE/OWNED from a fresh server-received snapshot
+// of the canonical Execution store. The browser publishes the store snapshot;
+// it never supplies a FREE/OWNED conclusion. Missing/stale authority remains UNKNOWN.
+const executionOwnershipAuthority = new PreTradeExecutionOwnershipAuthority({ filePath: EXECUTION_OWNERSHIP_FILE });
+executionOwnershipAuthority.load();
+const executionOwnershipProvider = new PreTradeExecutionOwnershipProvider({
+  resolver: (symbol) => executionOwnershipAuthority.resolveSymbol(symbol),
+});
+const handleExecutionOwnershipApi = createPreTradeExecutionOwnershipApiHandler({
+  authority: executionOwnershipAuthority,
+});
 const ocoService = new PreTradeOcoService({
   lifecycleCoordinator,
   ocoRepository,
@@ -306,6 +318,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && pathname === "/health") {
+    const executionOwnershipHealth = executionOwnershipAuthority.health();
     json(res, 200, {
       ok: true,
       service: "executionos-v24-pretrade",
@@ -316,6 +329,7 @@ const server = http.createServer(async (req, res) => {
       reviewFile: REVIEW_FILE,
       armOperationFile: ARM_OPERATION_FILE,
       ocoFile: OCO_FILE,
+      executionOwnershipFile: EXECUTION_OWNERSHIP_FILE,
       handoffFile: HANDOFF_FILE,
       handoffDeliveryFile: HANDOFF_DELIVERY_FILE,
       candidateIngressAuthority: true,
@@ -339,7 +353,10 @@ const server = http.createServer(async (req, res) => {
       armRecoveryInspected: armRecovery.requestRecovery.length + armRecovery.operations.length,
       ocoAuthority: true,
       ocoRecoveryInspected: armRecovery.ocoRecovery.length + ocoClosedNoArmRecovery.length,
-      executionOwnershipAuthorityConnected: false,
+      executionOwnershipAuthorityConnected: executionOwnershipHealth.connected,
+      executionOwnershipAuthorityReasonCode: executionOwnershipHealth.reasonCode,
+      executionOwnershipStoreRevision: executionOwnershipHealth.storeRevision,
+      executionOwnershipProjectionAgeMs: executionOwnershipHealth.ageMs,
       lifecycleCommandApi: true,
       handoffTransportApi: true,
       brokerWriteAuthority: false,
@@ -357,6 +374,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (await handleExecutionOwnershipApi(req, res)) return;
   if (await handleTriggerApi(req, res)) return;
   if (await handlePermissionApi(req, res)) return;
   if (await handleReviewArmApi(req, res)) return;
@@ -410,6 +428,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] Review file: ${REVIEW_FILE}`);
   console.log(`[ExecutionOS V2.4] ARM operation file: ${ARM_OPERATION_FILE}`);
   console.log(`[ExecutionOS V2.4] OCO file: ${OCO_FILE}`);
+  console.log(`[ExecutionOS V2.4] Execution ownership file: ${EXECUTION_OWNERSHIP_FILE}`);
   console.log(`[ExecutionOS V2.4] Handoff file: ${HANDOFF_FILE}`);
   console.log(`[ExecutionOS V2.4] Handoff delivery file: ${HANDOFF_DELIVERY_FILE}`);
   console.log("[ExecutionOS V2.4] Candidate import is routed through authoritative ingress with immutable contract/version provenance.");
@@ -424,7 +443,7 @@ server.listen(PORT, HOST, () => {
   console.log("[ExecutionOS V2.4] Final ARM is operator-only, freshly revalidates permission, and uses durable authorization proof for recovery.");
   console.log(`[ExecutionOS V2.4] ARM startup recovery inspected ${armRecovery.requestRecovery.length + armRecovery.operations.length} operation(s); blocked=${armRecoveryBlocked}.`);
   console.log(`[ExecutionOS V2.4] OCO startup reconciliation inspected ${armRecovery.ocoRecovery.length + ocoClosedNoArmRecovery.length} group action(s).`);
-  console.log("[ExecutionOS V2.4] Execution ownership projection is not yet connected; UNKNOWN blocks final ARM rather than being treated as FREE.");
+  console.log("[ExecutionOS V2.4] Execution ownership FREE/OWNED is derived server-side from a fresh canonical Execution store snapshot; missing/stale authority is UNKNOWN and blocks ARM.");
   console.log("[ExecutionOS V2.4] Canonical READY/CAUTION/PASS and permission blockers are permission-pipeline authority only.");
   console.log("[ExecutionOS V2.4] Discretionary structural or macro/setup judgments require explicit operator assessment until a trusted evaluator is registered.");
   console.log("[ExecutionOS V2.4] Schwab permission reads are GET-only and never refresh or write OAuth tokens.");
