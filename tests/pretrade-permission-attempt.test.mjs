@@ -52,6 +52,20 @@ function riskEvaluation() {
   };
 }
 
+function permissionDecision(outcome = "READY", reasonCodes = []) {
+  return {
+    authority: "PRETRADE_PERMISSION_DECISION",
+    permissionDecisionId: "decision-1",
+    candidateId: "candidate-1",
+    contractVersion: 1,
+    candidateContentHash: "candidate-hash-1",
+    kind: "OUTCOME",
+    outcome,
+    reasonCode: reasonCodes[0] || null,
+    reasonCodes,
+  };
+}
+
 function attempt(overrides = {}) {
   const operationId = overrides.operationId || "permission-op-1";
   const operationHash = overrides.operationHash || permissionAttemptHash({ candidateId: "candidate-1", accountId: "acct-1" });
@@ -86,6 +100,7 @@ function attempt(overrides = {}) {
       evaluation: { dssEvaluationId: "dss-1", status: "VALID", effectiveStop: 179.25 },
     },
     riskEvaluation: riskEvaluation(),
+    permissionDecision: permissionDecision(),
     result: { kind: "OUTCOME", outcome: "READY", reasonCodes: [] },
     startedAt: "2026-09-05T15:00:00.000Z",
     completedAt: "2026-09-05T15:00:01.000Z",
@@ -106,6 +121,7 @@ test("permission attempt repository records and reloads immutable complete evide
   assert.equal(recorded.account.accountId, "acct-1");
   assert.equal(recorded.expectedEntry.currentExpectedEntry, 180);
   assert.equal(recorded.phase4.riskEvaluationId, "risk-1");
+  assert.equal(recorded.permissionDecision.outcome, "READY");
   assert.equal(Object.isFrozen(recorded), true);
 
   const reloaded = new PreTradePermissionAttemptRepository({ filePath });
@@ -134,7 +150,10 @@ test("operationId is idempotent only for the same immutable permission inputs", 
 test("CAUTION requires explicit reason provenance", () => {
   assert.throws(
     () => attempt({
-      build: { result: { kind: "OUTCOME", outcome: "CAUTION", reasonCodes: [] } },
+      build: {
+        permissionDecision: permissionDecision("CAUTION", []),
+        result: { kind: "OUTCOME", outcome: "CAUTION", reasonCodes: [] },
+      },
     }),
     (error) => error.code === "INVALID_PERMISSION_ATTEMPT",
   );
@@ -154,6 +173,17 @@ test("permissionStateRevision is required so recovery cannot cross permission cy
         },
       },
     }),
+    (error) => error.code === "INVALID_PERMISSION_ATTEMPT",
+  );
+});
+
+test("READY requires an authoritative matching permission context decision", () => {
+  assert.throws(
+    () => attempt({ build: { permissionDecision: null } }),
+    (error) => error.code === "INVALID_PERMISSION_ATTEMPT",
+  );
+  assert.throws(
+    () => attempt({ build: { permissionDecision: permissionDecision("CAUTION", ["ELEVATED_CONTEXT_RISK"]) } }),
     (error) => error.code === "INVALID_PERMISSION_ATTEMPT",
   );
 });
@@ -179,6 +209,7 @@ test("READY cannot be recorded without exact account and expected-entry evidence
       structuralValidity: { authority: "PRETRADE_STRUCTURAL_VALIDITY", status: "VALID" },
       dssResult: { status: "VALID", dssEvaluationId: "dss-1" },
       riskEvaluation: brokenRisk,
+      permissionDecision: permissionDecision(),
       result: { kind: "OUTCOME", outcome: "READY" },
       startedAt: "2026-09-05T15:00:00.000Z",
       completedAt: "2026-09-05T15:00:01.000Z",
