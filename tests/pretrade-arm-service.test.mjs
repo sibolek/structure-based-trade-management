@@ -256,6 +256,21 @@ function command(h) {
   };
 }
 
+function durableRequestFromCommand(value) {
+  return {
+    candidateId: value.candidateId,
+    contractVersion: value.contractVersion,
+    reviewPackageId: value.reviewPackageId,
+    selectedQuantity: value.selectedQuantity,
+    confirmedDirection: value.confirmedDirection,
+    accountId: value.accountId,
+    entryMode: value.entryMode,
+    triggerPrice: value.triggerPrice ?? null,
+    operatorStructuralAssessment: value.operatorStructuralAssessment ?? null,
+    operatorPermissionAssessment: value.operatorPermissionAssessment ?? null,
+  };
+}
+
 test("explicit ARM performs fresh permission revalidation then atomically forward-completes ARMED handoff and PENDING delivery", async () => {
   const h = harness();
   const result = await h.armService.arm(command(h));
@@ -318,4 +333,26 @@ test("durable AUTHORIZED proof forward-completes after handoff persistence outag
   assert.equal(h.armOperationRepository.getByOperationId("arm-op-1").status, "COMPLETED");
   assert.equal(h.handoffRepository.snapshot().handoffs.length, 1);
   assert.equal(h.deliveryRepository.snapshot().deliveries[0].status, "PENDING");
+});
+
+test("startup recovery retires unproven REQUESTED ARM and requires a new operator operation", async () => {
+  const h = harness();
+  const original = command(h);
+  h.armOperationRepository.beginRequest({
+    operationId: "orphan-arm",
+    request: durableRequestFromCommand({ ...original, operationId: "orphan-arm" }),
+  });
+  assert.equal(h.armOperationRepository.getByOperationId("orphan-arm").status, "REQUESTED");
+
+  const recovery = h.armService.recoverAll();
+  assert.equal(recovery.requestRecovery.length, 1);
+  assert.equal(recovery.requestRecovery[0].status, "REJECTED_UNPROVEN_REQUEST");
+  assert.equal(h.armOperationRepository.getByOperationId("orphan-arm").status, "REJECTED");
+  assert.equal(h.armOperationRepository.getByOperationId("orphan-arm").reasonCode, "ARM_AUTHORIZATION_NOT_PROVEN_AFTER_RESTART");
+  assert.equal(h.permissionCalls(), 0);
+
+  const sameOldOperation = await h.armService.arm({ ...original, operationId: "orphan-arm" });
+  assert.equal(sameOldOperation.status, "REJECTED");
+  assert.equal(h.permissionCalls(), 0);
+  assert.equal(h.coordinator.candidateSnapshot("arm-NVDA-1", 1).lifecycleState, "READY");
 });
