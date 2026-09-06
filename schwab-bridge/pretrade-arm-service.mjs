@@ -259,6 +259,19 @@ export class PreTradeArmService {
   }
 
   recoverAll() {
+    const requestRecovery = [];
+    for (const operation of this.armOperationRepository.snapshot().operations.filter((item) => item.status === "REQUESTED")) {
+      try {
+        const rejected = this.armOperationRepository.reject(operation.operationId, {
+          reasonCode: "ARM_AUTHORIZATION_NOT_PROVEN_AFTER_RESTART",
+          details: { requestedAt: operation.requestedAt },
+        });
+        requestRecovery.push({ operationId: operation.operationId, status: "REJECTED_UNPROVEN_REQUEST", operation: rejected });
+      } catch (error) {
+        requestRecovery.push({ operationId: operation.operationId, status: "RECOVERY_BLOCKED", code: error.code || "ARM_REQUEST_RECOVERY_ERROR", message: error.message });
+      }
+    }
+
     const ocoRecovery = this.ocoService.recoverCommitting(this.armOperationRepository);
     const results = [];
     for (const operation of this.armOperationRepository.snapshot().operations.filter((item) => item.status === "AUTHORIZED")) {
@@ -268,7 +281,7 @@ export class PreTradeArmService {
         results.push({ operationId: operation.operationId, status: "RECOVERY_BLOCKED", code: error.code || "ARM_RECOVERY_ERROR", message: error.message });
       }
     }
-    return { ocoRecovery, operations: results };
+    return { requestRecovery, ocoRecovery, operations: results };
   }
 
   #completeAuthorization(operation, recovery) {
