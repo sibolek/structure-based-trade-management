@@ -41,9 +41,67 @@ function auditAsFill(audit) {
   };
 }
 
+function hasFrozenInstrumentEconomics(installation) {
+  const value = installation?.compatibility?.v24?.instrumentEconomics;
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function compatibilityInstallationForManagement(installation) {
+  if (hasFrozenInstrumentEconomics(installation)) return { installation, legacyEquityCompatibility: false };
+
+  const compatible = structuredClone(installation);
+  const v24 = compatible?.compatibility?.v24;
+  if (!v24) return { installation, legacyEquityCompatibility: false };
+
+  v24.instrumentEconomics = {
+    assetType: "EQUITY",
+    minimumQuantity: 1,
+    quantityIncrement: 1,
+    pointValue: 1,
+    metadataVersion: "LEGACY_EQUITY_COMPATIBILITY",
+  };
+  if (!v24.managementPlan || typeof v24.managementPlan !== "object" || Array.isArray(v24.managementPlan)) {
+    v24.managementPlan = {
+      mode: "FLEXIBLE_WITHIN_CEILING",
+      allowReAdd: true,
+      allowFlatReEntry: false,
+    };
+  }
+  return { installation: compatible, legacyEquityCompatibility: true };
+}
+
+function createCompatibilityAwareManagement({ installation, firstExecutionTime, currentQuantity, currentAveragePrice } = {}) {
+  const compatible = compatibilityInstallationForManagement(installation);
+  const created = createV24LiveManagement({
+    installation: compatible.installation,
+    firstExecutionTime,
+    currentQuantity,
+    currentAveragePrice,
+  });
+  if (!compatible.legacyEquityCompatibility) return created;
+
+  const management = structuredClone(created);
+  management.managementContract = {
+    mode: "LEGACY_COMPATIBILITY",
+    allowReAdd: true,
+    allowFlatReEntry: false,
+    buildUntil: null,
+    source: "LEGACY_COMPATIBILITY",
+  };
+  management.instrumentEconomics = {
+    ...structuredClone(management.instrumentEconomics),
+    assetType: "EQUITY",
+    pricePointValue: 1,
+    pointValue: 1,
+    source: "LEGACY_COMPATIBILITY",
+    metadataVersion: "LEGACY_EQUITY_COMPATIBILITY",
+  };
+  return immutable(management);
+}
+
 function migrateManagementIfNeeded(lifecycle, installation) {
   if (lifecycle?.management) return lifecycle.management;
-  let management = createV24LiveManagement({
+  let management = createCompatibilityAwareManagement({
     installation,
     firstExecutionTime: lifecycle?.firstExecutionTime,
     currentQuantity: lifecycle?.currentQuantity,
@@ -61,7 +119,7 @@ function migrateManagementIfNeeded(lifecycle, installation) {
 
 export function createV24ManagedLiveLifecycle({ installation, matchedExecution, brokerState } = {}) {
   const base = createV24LiveLifecycle({ installation, matchedExecution, brokerState });
-  const management = createV24LiveManagement({
+  const management = createCompatibilityAwareManagement({
     installation,
     firstExecutionTime: base.firstExecutionTime,
     currentQuantity: base.currentQuantity,
