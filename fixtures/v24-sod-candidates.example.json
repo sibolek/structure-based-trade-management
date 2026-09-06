@@ -1,39 +1,71 @@
 {
-  "source": "SOD",
-  "bundleId": "example-2026-08-29-morning",
+  "schemaVersion": 1,
+  "source": "SOD_A_PLUS_TRADES",
+  "sourceDate": "2026-08-29",
+  "generatedAt": "2026-08-29T14:30:00.000Z",
+  "bundleId": "example-2026-08-29-morning-v1",
   "candidates": [
     {
       "candidateId": "sod-2026-08-29-NVDA-1",
       "contractVersion": 1,
       "schemaVersion": 1,
-      "source": "SOD_A_PLUS",
+      "source": "SOD_A_PLUS_TRADES",
       "sourceDate": "2026-08-29",
       "generatedAt": "2026-08-29T14:30:00.000Z",
       "symbol": "NVDA",
       "direction": "LONG",
       "setup": "Liquidity sweep reclaim continuation",
+      "decisionTimeframe": "5m",
+      "entryTimeframe": "2m",
+      "volatilityTimeframe": "2m",
       "timeframe": "2m",
       "thesis": "Sweep and reclaim at structural support with room to the next mapped target.",
       "trigger": {
-        "type": "RECLAIM_AND_HOLD",
-        "level": 225.4
+        "schemaVersion": 1,
+        "evaluatorVersion": 1,
+        "satisfaction": {
+          "nodeId": "operator-confirm-nvda-reclaim-v1",
+          "type": "MANUAL_CONFIRMATION",
+          "prompt": "Confirm NVDA has reclaimed 225.40 with valid continuation structure."
+        },
+        "persistence": {
+          "type": "ONE_SHOT"
+        }
       },
       "structuralInvalidation": {
         "price": 224.85,
-        "rule": "break below sweep low",
+        "rule": "Break below the swept structural low invalidates the long thesis.",
         "referenceType": "SWEEP_LOW",
-        "reason": "long thesis invalid below the swept structural low"
+        "reason": "Long thesis invalid below the swept structural low.",
+        "sourceTimeframe": "2m"
       },
       "plannedEntryReference": 225.45,
-      "targets": [226.4, 227.1],
-      "managementPlan": "Manage against structure.",
+      "targets": [
+        { "targetId": "T1", "label": "T1", "price": 226.4 },
+        { "targetId": "T2", "label": "T2", "price": 227.1 }
+      ],
+      "managementContract": {
+        "mode": "SINGLE_ENTRY",
+        "allowReAdd": false,
+        "allowFlatReEntry": false,
+        "source": "FIXTURE_FAIL_CLOSED"
+      },
       "context": {
-        "note": "Example fixture only; not a live trade recommendation."
+        "note": "Canonical V2.4 example fixture only; not a live trade recommendation."
       },
       "rating": "A+",
-      "validity": null,
+      "validity": {
+        "validFrom": "2026-08-29T14:30:00.000Z",
+        "validUntil": "2026-08-29T20:00:00.000Z",
+        "timezone": "America/Denver",
+        "session": "SMOKE_TEST",
+        "sourceLabel": "FIXTURE",
+        "provenance": {
+          "source": "CANONICAL_V24_FIXTURE"
+        }
+      },
       "armPolicy": {
-        "requestedMode": "AUTO"
+        "requestedMode": "MANUAL"
       }
     }
   ]
