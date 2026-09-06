@@ -55,10 +55,17 @@ export function createPretradeApiClient({
 
   const operationId = (action) => `UI:${upper(action)}:${text(idFactory(action))}`;
 
-  async function request(path, { method = "GET", body = undefined } = {}) {
-    const options = { method, cache: "no-store" };
+  async function request(path, { method = "GET", body = undefined, headers = undefined } = {}) {
+    const options = {
+      method,
+      cache: "no-store",
+      ...(headers ? { headers: { ...headers } } : {}),
+    };
     if (body !== undefined) {
-      options.headers = { "content-type": "application/json" };
+      options.headers = {
+        "content-type": "application/json",
+        ...(options.headers || {}),
+      };
       options.body = JSON.stringify(body);
     }
     const response = await fetchImpl(`${root}${path}`, options);
@@ -98,6 +105,14 @@ export function createPretradeApiClient({
 
     health() {
       return request("/health");
+    },
+
+    publishExecutionOwnership(publication) {
+      return request("/api/execution-ownership/snapshot", {
+        method: "POST",
+        headers: { "x-executionos-source": "EXECUTION_CANONICAL_STORE" },
+        body: publication,
+      });
     },
 
     activate(candidate) {
