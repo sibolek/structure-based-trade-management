@@ -82,11 +82,13 @@ export default function useExecutionOwnershipPublisher({ pretrade } = {}) {
     async function tick({ forceSnapshot = false } = {}) {
       if (!active || publishing) return;
       publishing = true;
+      let publishedFullSnapshot = false;
       try {
         const store = readExecutionBoardStore();
         let result;
         if (forceSnapshot || !acknowledged || acknowledged.storeRevision !== Number(store.storeRevision)) {
           result = await publishSnapshot(store);
+          publishedFullSnapshot = true;
         } else {
           try {
             result = await heartbeat();
@@ -98,6 +100,7 @@ export default function useExecutionOwnershipPublisher({ pretrade } = {}) {
             ].includes(error?.code)) {
               acknowledged = null;
               result = await publishSnapshot(store);
+              publishedFullSnapshot = true;
             } else {
               throw error;
             }
@@ -112,7 +115,9 @@ export default function useExecutionOwnershipPublisher({ pretrade } = {}) {
           error: "",
         });
 
-        if (pretrade?.health?.executionOwnershipAuthorityConnected !== true && typeof refreshNow === "function") {
+        // A full snapshot can change PRETRADE's ownership-connected health immediately.
+        // Heartbeats do not force duplicate candidate/health polling every second.
+        if (publishedFullSnapshot && typeof refreshNow === "function") {
           refreshNow().catch(() => {});
         }
       } catch (error) {
