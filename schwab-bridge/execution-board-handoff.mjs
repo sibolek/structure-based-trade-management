@@ -48,6 +48,76 @@ function candidateArm(candidate) {
   return candidate?.arm && typeof candidate.arm === "object" ? candidate.arm : null;
 }
 
+function structuredManagement(candidate) {
+  const raw = candidate?.managementContract ?? candidate?.managementPlan ?? null;
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
+}
+
+function firstEntryAuthorization(candidate) {
+  const validUntil = isoTimestamp(candidate?.validity?.validUntil);
+  const management = structuredManagement(candidate);
+  const supplied = management
+    ? management.entryAuthorizationUntil
+      ?? management.firstEntryAuthorizationUntil
+      ?? management.entryWindow?.validUntil
+      ?? management.entryWindow?.until
+      ?? null
+    : null;
+  const explicitlySupplied = supplied !== null && supplied !== undefined && supplied !== "";
+  const explicit = explicitlySupplied ? isoTimestamp(supplied) : null;
+  if (explicitlySupplied && !explicit) {
+    throw handoffError("management contract first-entry authorization deadline is invalid", "EXECUTION_BOARD_HANDOFF_ENTRY_AUTHORIZATION_INVALID");
+  }
+  const deadline = explicit ?? validUntil;
+  return {
+    candidateValidUntil: validUntil,
+    entryAuthorizationUntil: deadline,
+    entryAuthorizationSource: explicit ? "MANAGEMENT_CONTRACT" : validUntil ? "CANDIDATE_VALIDITY" : null,
+    entryAuthorizationExtendsCandidateValidity: Boolean(explicit && validUntil && Date.parse(explicit) > Date.parse(validUntil)),
+  };
+}
+
+function instrumentEconomics(riskEvaluation) {
+  const instrument = riskEvaluation?.instrument;
+  if (!instrument || typeof instrument !== "object") return null;
+  return {
+    assetType: upper(instrument.assetType) || null,
+    symbol: upper(instrument.symbol) || null,
+    instrumentCurrency: upper(instrument.instrumentCurrency ?? instrument.currency) || null,
+    minimumQuantity: finiteNumber(instrument.minimumQuantity),
+    quantityIncrement: finiteNumber(instrument.quantityIncrement),
+    tickSize: finiteNumber(instrument.tickSize),
+    tickValue: finiteNumber(instrument.tickValue),
+    pointValue: finiteNumber(instrument.pointValue),
+    metadataSource: upper(instrument.metadataSource) || null,
+    metadataObservedAt: isoTimestamp(instrument.metadataObservedAt),
+    metadataVersion: text(instrument.metadataVersion) || null,
+  };
+}
+
+function validateInstrumentEconomics(value, errors) {
+  if (value === null || value === undefined) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    errors.push("instrumentEconomics must be an object when present");
+    return;
+  }
+  const assetType = upper(value.assetType);
+  if (!["EQUITY", "FUTURE"].includes(assetType)) errors.push("instrumentEconomics assetType must be EQUITY or FUTURE");
+  if (positiveNumber(value.minimumQuantity) === null) errors.push("instrumentEconomics minimumQuantity must be positive");
+  if (positiveNumber(value.quantityIncrement) === null) errors.push("instrumentEconomics quantityIncrement must be positive");
+  if (assetType === "FUTURE") {
+    const tickSize = positiveNumber(value.tickSize);
+    const tickValue = positiveNumber(value.tickValue);
+    const pointValue = positiveNumber(value.pointValue);
+    if (!tickSize) errors.push("FUTURE instrumentEconomics tickSize must be positive");
+    if (!tickValue) errors.push("FUTURE instrumentEconomics tickValue must be positive");
+    if (!pointValue && !(tickSize && tickValue)) errors.push("FUTURE instrumentEconomics point/tick economics are incomplete");
+    if (pointValue && tickSize && tickValue && Math.abs(pointValue - (tickValue / tickSize)) > 1e-9) {
+      errors.push("FUTURE instrumentEconomics pointValue conflicts with tick economics");
+    }
+  }
+}
+
 export function validateExecutionBoardHandoffContract(handoff) {
   const value = handoff && typeof handoff === "object" ? handoff : {};
   const errors = [];
@@ -92,6 +162,25 @@ export function validateExecutionBoardHandoffContract(handoff) {
   if (authorizedAtMs !== null && createdAtMs !== null && createdAtMs < authorizedAtMs) {
     errors.push("createdAt cannot precede authorizedAt");
   }
+
+  const candidateValidUntil = value.candidateValidUntil === undefined || value.candidateValidUntil === null
+    ? null
+    : isoTimestamp(value.candidateValidUntil);
+  const entryAuthorizationUntil = value.entryAuthorizationUntil === undefined || value.entryAuthorizationUntil === null
+    ? null
+    : isoTimestamp(value.entryAuthorizationUntil);
+  if (value.candidateValidUntil !== undefined && value.candidateValidUntil !== null && !candidateValidUntil) errors.push("candidateValidUntil is invalid");
+  if (value.entryAuthorizationUntil !== undefined && value.entryAuthorizationUntil !== null && !entryAuthorizationUntil) errors.push("entryAuthorizationUntil is invalid");
+  if (entryAuthorizationUntil && authorizedAtIso && Date.parse(entryAuthorizationUntil) <= Date.parse(authorizedAtIso)) {
+    errors.push("entryAuthorizationUntil must be after authorizedAt");
+  }
+  if (candidateValidUntil && entryAuthorizationUntil && Date.parse(entryAuthorizationUntil) > Date.parse(candidateValidUntil) && value.entryAuthorizationExtendsCandidateValidity !== true) {
+    errors.push("entry authorization may exceed candidate validity only when explicitly frozen by the management contract");
+  }
+  if (value.entryAuthorizationSource !== undefined && value.entryAuthorizationSource !== null && !["CANDIDATE_VALIDITY", "MANAGEMENT_CONTRACT"].includes(upper(value.entryAuthorizationSource))) {
+    errors.push("entryAuthorizationSource is invalid");
+  }
+  validateInstrumentEconomics(value.instrumentEconomics, errors);
 
   return { valid: errors.length === 0, errors: Object.freeze(errors) };
 }
@@ -139,6 +228,8 @@ export function buildExecutionBoardHandoff({ handoffId, createdAt = Date.now(), 
   const authorizedExecutionAccountId = text(riskEvaluation.account?.accountId);
   const authorizedAt = isoTimestamp(arm.authorizedAt);
   const normalizedCreatedAt = isoTimestamp(createdAt);
+  const entryAuthorization = firstEntryAuthorization(candidate);
+  const frozenInstrumentEconomics = instrumentEconomics(riskEvaluation);
 
   if (!authorizedAt) throw handoffError("ARM authorizedAt is invalid", "EXECUTION_BOARD_HANDOFF_AUTHORIZED_AT_INVALID");
   if (!normalizedCreatedAt) throw handoffError("handoff createdAt is invalid", "EXECUTION_BOARD_HANDOFF_CREATED_AT_INVALID");
@@ -163,7 +254,7 @@ export function buildExecutionBoardHandoff({ handoffId, createdAt = Date.now(), 
     thesis: text(candidate.thesis),
     trigger: structuredClone(candidate.trigger),
     targets: Array.isArray(candidate.targets) ? structuredClone(candidate.targets) : [],
-    managementPlan: candidate.managementPlan ?? null,
+    managementPlan: structuredClone(candidate.managementContract ?? candidate.managementPlan ?? null),
     structuralInvalidation,
     effectiveStop,
     currentExpectedEntry,
@@ -172,6 +263,11 @@ export function buildExecutionBoardHandoff({ handoffId, createdAt = Date.now(), 
     authorizedExecutionAccountId,
     dssEvaluationId: text(arm.dssEvaluationId),
     riskEvaluationId: text(arm.riskEvaluationId),
+    candidateValidUntil: entryAuthorization.candidateValidUntil,
+    entryAuthorizationUntil: entryAuthorization.entryAuthorizationUntil,
+    entryAuthorizationSource: entryAuthorization.entryAuthorizationSource,
+    entryAuthorizationExtendsCandidateValidity: entryAuthorization.entryAuthorizationExtendsCandidateValidity,
+    instrumentEconomics: frozenInstrumentEconomics,
   };
 
   const contract = validateExecutionBoardHandoffContract(handoff);
