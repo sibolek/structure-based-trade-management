@@ -8,6 +8,26 @@ import { PreTradeTriggerEngine } from "./pretrade-trigger-engine.mjs";
 import { PreTradeTriggerPersistenceAuthority } from "./pretrade-trigger-persistence-authority.mjs";
 import { PreTradeTriggerPersistenceMonitor } from "./pretrade-trigger-persistence-monitor.mjs";
 import { createPreTradeTriggerApiHandler } from "./pretrade-trigger-api.mjs";
+import { createSchwabReadOnlyRequestJson } from "./schwab-read-only-request.mjs";
+import { SchwabMarketDataProvider } from "./schwab-market-data-provider.mjs";
+import { RegNmsEquityPriceIncrementResolver } from "./reg-nms-equity-price-increment.mjs";
+import { DssLiveInputAssembler } from "./dss-live-input-assembler.mjs";
+import { DssRuntime } from "./dss-runtime.mjs";
+import { DssPermissionService } from "./dss-permission-service.mjs";
+import { SchwabAccountRiskProvider } from "./account-risk-provider.mjs";
+import { SchwabInstrumentSizingMetadataProvider } from "./instrument-sizing-metadata-provider.mjs";
+import {
+  RiskEvaluationRepository,
+  DEFAULT_RISK_EVALUATION_FILE,
+} from "./risk-evaluation-repository.mjs";
+import { RiskSizingPermissionService } from "./risk-sizing-permission-service.mjs";
+import { PreTradeStructuralValidityService } from "./pretrade-structural-validity.mjs";
+import {
+  PreTradePermissionAttemptRepository,
+  DEFAULT_PRETRADE_PERMISSION_ATTEMPT_FILE,
+} from "./pretrade-permission-attempt-repository.mjs";
+import { PreTradePermissionPipeline } from "./pretrade-permission-pipeline.mjs";
+import { createPreTradePermissionApiHandler } from "./pretrade-permission-api.mjs";
 import {
   ExecutionBoardHandoffRepository,
   DEFAULT_EXECUTION_BOARD_HANDOFF_FILE,
@@ -21,6 +41,8 @@ import { createExecutionBoardHandoffApiHandler } from "./execution-board-handoff
 const HOST = process.env.EXECUTIONOS_V24_HOST || "127.0.0.1";
 const PORT = Number(process.env.EXECUTIONOS_V24_PORT || 8788);
 const STATE_FILE = process.env.EXECUTIONOS_V24_STATE_FILE || DEFAULT_PRETRADE_STATE_FILE;
+const RISK_EVALUATION_FILE = process.env.EXECUTIONOS_V24_RISK_EVALUATION_FILE || DEFAULT_RISK_EVALUATION_FILE;
+const PERMISSION_ATTEMPT_FILE = process.env.EXECUTIONOS_V24_PERMISSION_ATTEMPT_FILE || DEFAULT_PRETRADE_PERMISSION_ATTEMPT_FILE;
 const HANDOFF_FILE = process.env.EXECUTIONOS_V24_HANDOFF_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_FILE;
 const HANDOFF_DELIVERY_FILE = process.env.EXECUTIONOS_V24_HANDOFF_DELIVERY_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_DELIVERY_FILE;
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -46,6 +68,56 @@ const handleTriggerApi = createPreTradeTriggerApiHandler({
 });
 const handleLifecycleApi = createPreTradeLifecycleApiHandler({
   coordinator: lifecycleCoordinator,
+  maxBodyBytes: MAX_BODY_BYTES,
+});
+
+// Permission evaluation uses only read-only Schwab GET requests. Access tokens are
+// read lazily and are never refreshed or written by this service.
+const requestJson = createSchwabReadOnlyRequestJson();
+const marketDataProvider = new SchwabMarketDataProvider({ requestJson, now: () => Date.now() });
+const dssInputAssembler = new DssLiveInputAssembler({
+  marketDataProvider,
+  instrumentMetadataResolver: new RegNmsEquityPriceIncrementResolver({ now: () => Date.now() }),
+  now: () => Date.now(),
+});
+const dssRuntime = new DssRuntime({ store, now: () => Date.now() });
+const dssPermissionService = new DssPermissionService({
+  store,
+  inputAssembler: dssInputAssembler,
+  runtime: dssRuntime,
+});
+const accountRiskProvider = new SchwabAccountRiskProvider({ requestJson, now: () => Date.now() });
+const instrumentSizingMetadataProvider = new SchwabInstrumentSizingMetadataProvider({ marketDataProvider });
+const riskEvaluationRepository = new RiskEvaluationRepository({ filePath: RISK_EVALUATION_FILE });
+riskEvaluationRepository.load();
+const riskSizingPermissionService = new RiskSizingPermissionService({
+  store,
+  marketDataProvider,
+  accountRiskProvider,
+  instrumentSizingMetadataProvider,
+  riskEvaluationRepository,
+  now: () => Date.now(),
+});
+
+// No discretionary structural rule is guessed. Until a trusted deterministic
+// evaluator is registered for a candidate's structure family, the explicit
+// operator structural assessment path is the fail-closed fallback.
+const structuralValidityService = new PreTradeStructuralValidityService();
+const permissionAttemptRepository = new PreTradePermissionAttemptRepository({ filePath: PERMISSION_ATTEMPT_FILE });
+permissionAttemptRepository.load();
+const permissionPipeline = new PreTradePermissionPipeline({
+  store,
+  lifecycleCoordinator,
+  structuralValidityService,
+  dssPermissionService,
+  riskSizingPermissionService,
+  riskEvaluationRepository,
+  attemptRepository: permissionAttemptRepository,
+});
+const permissionRecovery = permissionPipeline.recoverAll();
+const handlePermissionApi = createPreTradePermissionApiHandler({
+  permissionPipeline,
+  lifecycleCoordinator,
   maxBodyBytes: MAX_BODY_BYTES,
 });
 
@@ -157,6 +229,8 @@ const server = http.createServer(async (req, res) => {
       service: "executionos-v24-pretrade",
       readOnlyBrokerBoundary: true,
       stateFile: STATE_FILE,
+      riskEvaluationFile: RISK_EVALUATION_FILE,
+      permissionAttemptFile: PERMISSION_ATTEMPT_FILE,
       handoffFile: HANDOFF_FILE,
       handoffDeliveryFile: HANDOFF_DELIVERY_FILE,
       candidateIngressAuthority: true,
@@ -167,6 +241,11 @@ const server = http.createServer(async (req, res) => {
       triggerEvidenceApi: true,
       triggerPersistenceAuthority: true,
       triggerRecoveryBlocked: triggerRecovery.filter((item) => item.status === "RECOVERY_BLOCKED").length,
+      structuralValidityAuthority: true,
+      permissionAttemptAuthority: true,
+      permissionPipelineAuthority: true,
+      permissionEvaluationApi: true,
+      permissionRecoveryBlocked: permissionRecovery.filter((item) => item.status === "RECOVERY_BLOCKED").length,
       lifecycleCommandApi: true,
       handoffTransportApi: true,
       brokerWriteAuthority: false,
@@ -184,12 +263,16 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await handleTriggerApi(req, res)) return;
+  if (await handlePermissionApi(req, res)) return;
   if (await handleLifecycleApi(req, res)) return;
   if (await handleHandoffApi(req, res)) return;
 
   if (req.method === "GET" && pathname === "/api/candidates") {
     try {
-      json(res, 200, lifecycleCoordinator.snapshot(), origin);
+      json(res, 200, {
+        ...lifecycleCoordinator.snapshot(),
+        permissionAttempts: permissionAttemptRepository.snapshot().attempts,
+      }, origin);
     } catch (error) {
       failPreTradeRequest(res, error, origin, "CANDIDATE_SNAPSHOT_ERROR");
     }
@@ -221,6 +304,8 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] Pre-trade API listening on http://${HOST}:${PORT}`);
   console.log(`[ExecutionOS V2.4] State file: ${STATE_FILE}`);
+  console.log(`[ExecutionOS V2.4] Risk evaluation file: ${RISK_EVALUATION_FILE}`);
+  console.log(`[ExecutionOS V2.4] Permission attempt file: ${PERMISSION_ATTEMPT_FILE}`);
   console.log(`[ExecutionOS V2.4] Handoff file: ${HANDOFF_FILE}`);
   console.log(`[ExecutionOS V2.4] Handoff delivery file: ${HANDOFF_DELIVERY_FILE}`);
   console.log("[ExecutionOS V2.4] Candidate import is routed through authoritative ingress with immutable contract/version provenance.");
@@ -229,6 +314,10 @@ server.listen(PORT, HOST, () => {
   console.log("[ExecutionOS V2.4] Trigger persistence is monitored separately from pre-satisfaction trigger progress.");
   console.log(`[ExecutionOS V2.4] Trigger startup recovery inspected ${triggerRecovery.length} persisted runtime record(s).`);
   console.log("[ExecutionOS V2.4] Canonical permission entry cannot bypass trigger-engine satisfaction.");
+  console.log("[ExecutionOS V2.4] Permission attempts bind structural validity, DSS, exact account/entry evidence, Phase 4, and outcome immutably.");
+  console.log(`[ExecutionOS V2.4] Permission startup recovery inspected ${permissionRecovery.length} persisted attempt record(s).`);
+  console.log("[ExecutionOS V2.4] Canonical READY/CAUTION/PASS and permission blockers are permission-pipeline authority only.");
+  console.log("[ExecutionOS V2.4] Schwab permission reads are GET-only and never refresh or write OAuth tokens.");
   console.log("[ExecutionOS V2.4] PRETRADE lifecycle mutations are exposed only as intent-specific authoritative commands.");
   console.log("[ExecutionOS V2.4] Handoff transport API enabled; browser handoff creation is not exposed.");
   console.log("[ExecutionOS V2.4] Broker boundary remains read-only; this service does not place, replace, cancel, or flatten orders.");
