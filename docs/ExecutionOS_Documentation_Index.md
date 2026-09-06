@@ -123,7 +123,7 @@ Implemented/accepted on the handoff branch:
 - explicit quantity selection;
 - exact-package CAUTION acknowledgement;
 - OCO group authority and same-symbol ARM gate;
-- final symbol/direction/quantity/account confirmation;
+- ARM as the final explicit symbol/direction/quantity confirmation, with the exact account exposed in the review package and frozen by ARM;
 - fresh ARM-time permission and risk revalidation;
 - durable ARM operation journal and recovery;
 - immutable ARMED provenance;
@@ -253,14 +253,14 @@ Reconciliation remains ownership/trade state rather than router health.
 
 ## 11. EOD semantics
 
-Current origin-aware risk-stop rule:
+Current origin-aware planned-risk stop rule:
 
 ```text
-V24_HANDOFF        -> authoritative V2.4 effective stop / managed stop semantics
+V24_HANDOFF        -> v24.effectiveStop
 LEGACY_MANUAL_V23  -> originalPlan.structuralStop
 ```
 
-Structural invalidation remains separate from the V2.4 effective stop.
+Structural invalidation remains separate from the V2.4 effective stop. Slice 7 live managed-stop changes do not rewrite the EOD planned-risk stop basis.
 
 ---
 
@@ -277,6 +277,8 @@ Production build:                PASS
 Implementation worktree:         CLEAN
 Broker-write authority:          NONE
 ```
+
+The production build was run at `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796`. The only subsequent implementation change through accepted checkpoint `3f794538ffbe5c5875a3d671143cb33890530b1f` was addition of `tests/execution-v24-pretrade-full-e2e.test.mjs`, so production code was unchanged.
 
 Dedicated tests include:
 
