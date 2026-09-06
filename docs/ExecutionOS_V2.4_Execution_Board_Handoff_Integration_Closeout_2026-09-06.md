@@ -154,7 +154,8 @@ Accepted capabilities include:
 - material `reviewPackageId`;
 - explicit selected quantity;
 - exact-package CAUTION acknowledgement;
-- final symbol/direction/quantity/account confirmation;
+- ARM as the final explicit quantity/direction confirmation;
+- exact execution account exposed in the current review package and frozen by ARM;
 - fresh ARM-time permission/risk revalidation;
 - durable ARM operation journal;
 - recovery only from durable AUTHORIZED proof;
@@ -404,11 +405,15 @@ Final repository-wide result after the new E2E was added:
 
 ## Production build
 
+The production build was run successfully at production-code checkpoint `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796`:
+
 ```text
 vite v7.3.3
 1620 modules transformed
 production build PASS
 ```
+
+The only change from `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796` to accepted checkpoint `3f794538ffbe5c5875a3d671143cb33890530b1f` was the addition of `tests/execution-v24-pretrade-full-e2e.test.mjs`; no production code changed. The build result therefore applies to the accepted production-code state.
 
 ## Worktree
 
