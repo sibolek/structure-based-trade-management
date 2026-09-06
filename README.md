@@ -106,7 +106,7 @@ Imported `WAITING` candidates remain proposals until the explicit operator/serve
 - explicit quantity selection;
 - exact-package CAUTION acknowledgement;
 - same-symbol OCO authority;
-- final direction/quantity/account confirmation;
+- ARM as the final explicit direction/quantity confirmation, with the exact account exposed in the review package and frozen by ARM;
 - fresh ARM-time revalidation;
 - durable ARM operation journal and recovery;
 - immutable ARMED provenance;
@@ -279,7 +279,14 @@ For enriched reports, export browser History from:
 http://localhost:5173/eod-export.html
 ```
 
-V2.4 structural invalidation remains separate from effective/managed stop authority in risk enrichment.
+Current EOD risk enrichment is origin-aware:
+
+```text
+V24_HANDOFF        -> v24.effectiveStop
+LEGACY_MANUAL_V23  -> originalPlan.structuralStop
+```
+
+V2.4 structural invalidation remains separate provenance. Slice 7 live managed-stop changes do not rewrite the EOD planned-risk stop basis.
 
 See `USER-GUIDE.md` and `docs/ExecutionOS_EOD_Report.md`.
 
@@ -316,6 +323,8 @@ Production build:                 PASS
 Implementation worktree:          CLEAN
 Broker writes introduced:         NONE
 ```
+
+The production build was run at `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796`; the only subsequent implementation change through accepted checkpoint `3f794538ffbe5c5875a3d671143cb33890530b1f` was the addition of the canonical PRETRADE→Execution E2E test, so production code was unchanged.
 
 ---
 
