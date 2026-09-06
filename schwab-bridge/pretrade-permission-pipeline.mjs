@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { assertCanonicalCandidateIntegrity } from "./pretrade-candidate-contract.mjs";
+import { assertCanonicalCandidateIntegrity, isCanonicalCandidate } from "./pretrade-candidate-contract.mjs";
 import { canonicalLifecycleState } from "./pretrade-state.mjs";
 import { mapRiskSizingToPermission } from "./risk-sizing-permission-handoff.mjs";
 import {
@@ -43,6 +43,10 @@ function errorReasons(error, fallback) {
 
 function defaultDecisionPolicy() {
   return { outcome: "READY", reasonCodes: [] };
+}
+
+function sameTriggerSatisfaction(left, right) {
+  return permissionAttemptHash(left ?? null) === permissionAttemptHash(right ?? null);
 }
 
 export class PreTradePermissionPipeline {
@@ -120,6 +124,9 @@ export class PreTradePermissionPipeline {
 
       const candidate = this.#candidate(candidateId, contractVersion);
       assertCanonicalCandidateIntegrity(candidate);
+      if (!isCanonicalCandidate(candidate)) {
+        throw pipelineError("authoritative permission pipeline requires a canonical candidate", "CANONICAL_PERMISSION_CANDIDATE_REQUIRED");
+      }
       candidate.lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
       if (candidate.lifecycleState !== "PERMISSION_EVALUATING") {
         throw pipelineError(`permission evaluation is not allowed while candidate is ${candidate.lifecycleState}`, "PERMISSION_NOT_ALLOWED_IN_STATE");
@@ -214,50 +221,70 @@ export class PreTradePermissionPipeline {
             };
           }
 
+          let riskRepositoryError = null;
           if (text(phase4Result.riskEvaluationId)) {
-            riskEvaluation = this.riskEvaluationRepository.getById(phase4Result.riskEvaluationId);
+            try {
+              riskEvaluation = this.riskEvaluationRepository.getById(phase4Result.riskEvaluationId);
+            } catch (error) {
+              riskRepositoryError = error;
+            }
           }
-          const mapped = mapRiskSizingToPermission(phase4Result);
-          if (mapped.consequence === "PASS") {
-            result = {
-              kind: "OUTCOME",
-              outcome: "PASS",
-              reasonCode: mapped.permissionReason || "STOP_RISK_CONFLICT",
-              reasonCodes: mapped.reasonCodes,
-            };
-          } else if (mapped.consequence === "BLOCKED") {
-            result = {
-              kind: "BLOCKED_RETRYABLE",
-              reasonCode: mapped.reasonCodes?.[0] || "PHASE4_BLOCKED",
-              reasonCodes: mapped.reasonCodes,
-            };
-          } else if (mapped.consequence === "ERROR") {
+
+          if (riskRepositoryError) {
             result = {
               kind: "BLOCKED_INTEGRITY",
-              reasonCode: mapped.reasonCodes?.[0] || "PHASE4_ERROR",
-              reasonCodes: mapped.reasonCodes,
+              reasonCode: text(riskRepositoryError.code) || "RISK_EVALUATION_UNAVAILABLE",
+              reasonCodes: [text(riskRepositoryError.code) || "RISK_EVALUATION_UNAVAILABLE"],
             };
           } else {
-            const decision = await this.decisionPolicy({
-              candidate: clone(candidate),
-              structuralValidity: clone(structuralValidity),
-              dssResult: clone(dssResult),
-              riskEvaluation: clone(riskEvaluation),
-            });
-            const outcome = upper(decision?.outcome || "READY");
-            const reasonCodes = [...new Set((decision?.reasonCodes || []).map(upper).filter(Boolean))];
-            if (!["READY", "CAUTION", "PASS"].includes(outcome)) {
-              throw pipelineError("decisionPolicy returned an unsupported outcome", "INVALID_PERMISSION_DECISION_POLICY_RESULT");
+            const mapped = mapRiskSizingToPermission(phase4Result);
+            if (mapped.consequence === "PASS") {
+              result = {
+                kind: "OUTCOME",
+                outcome: "PASS",
+                reasonCode: mapped.permissionReason || "STOP_RISK_CONFLICT",
+                reasonCodes: mapped.reasonCodes,
+              };
+            } else if (mapped.consequence === "BLOCKED") {
+              result = {
+                kind: "BLOCKED_RETRYABLE",
+                reasonCode: mapped.reasonCodes?.[0] || "PHASE4_BLOCKED",
+                reasonCodes: mapped.reasonCodes,
+              };
+            } else if (mapped.consequence === "ERROR") {
+              result = {
+                kind: "BLOCKED_INTEGRITY",
+                reasonCode: mapped.reasonCodes?.[0] || "PHASE4_ERROR",
+                reasonCodes: mapped.reasonCodes,
+              };
+            } else if (!riskEvaluation) {
+              result = {
+                kind: "BLOCKED_INTEGRITY",
+                reasonCode: "RISK_EVALUATION_UNAVAILABLE",
+                reasonCodes: ["RISK_EVALUATION_UNAVAILABLE"],
+              };
+            } else {
+              const decision = await this.decisionPolicy({
+                candidate: clone(candidate),
+                structuralValidity: clone(structuralValidity),
+                dssResult: clone(dssResult),
+                riskEvaluation: clone(riskEvaluation),
+              });
+              const outcome = upper(decision?.outcome || "READY");
+              const reasonCodes = [...new Set((decision?.reasonCodes || []).map(upper).filter(Boolean))];
+              if (!["READY", "CAUTION", "PASS"].includes(outcome)) {
+                throw pipelineError("decisionPolicy returned an unsupported outcome", "INVALID_PERMISSION_DECISION_POLICY_RESULT");
+              }
+              if (outcome === "CAUTION" && reasonCodes.length === 0) {
+                throw pipelineError("CAUTION requires at least one reasonCode", "INVALID_PERMISSION_DECISION_POLICY_RESULT");
+              }
+              result = {
+                kind: "OUTCOME",
+                outcome,
+                reasonCode: text(decision?.reasonCode) || (outcome === "PASS" ? "PERMISSION_POLICY_PASS" : null),
+                reasonCodes,
+              };
             }
-            if (outcome === "CAUTION" && reasonCodes.length === 0) {
-              throw pipelineError("CAUTION requires at least one reasonCode", "INVALID_PERMISSION_DECISION_POLICY_RESULT");
-            }
-            result = {
-              kind: "OUTCOME",
-              outcome,
-              reasonCode: text(decision?.reasonCode) || (outcome === "PASS" ? "PERMISSION_POLICY_PASS" : null),
-              reasonCodes,
-            };
           }
         }
       }
@@ -293,8 +320,22 @@ export class PreTradePermissionPipeline {
     }
     return [...latest.values()].map((attempt) => {
       try {
-        return { status: "RECOVERED", permissionAttemptId: attempt.permissionAttemptId, result: this.#completeAttempt(attempt, true) };
+        return {
+          status: "RECOVERED",
+          permissionAttemptId: attempt.permissionAttemptId,
+          result: this.#completeAttempt(attempt, true),
+        };
       } catch (error) {
+        if (error.code === "PERMISSION_ATTEMPT_STALE") {
+          return {
+            status: "STALE_NOT_APPLIED",
+            permissionAttemptId: attempt.permissionAttemptId,
+            candidateId: attempt.candidate.candidateId,
+            contractVersion: attempt.candidate.contractVersion,
+            code: error.code,
+            message: error.message,
+          };
+        }
         return {
           status: "RECOVERY_BLOCKED",
           permissionAttemptId: attempt.permissionAttemptId,
@@ -311,29 +352,44 @@ export class PreTradePermissionPipeline {
     const candidate = this.#candidate(attempt.candidate.candidateId, attempt.candidate.contractVersion);
     candidate.lifecycleState = canonicalLifecycleState(candidate.lifecycleState);
     const result = attempt.result;
+    const transitionOperationId = result.kind === "OUTCOME"
+      ? `PERMISSION_OUTCOME:${attempt.permissionAttemptId}`
+      : `PERMISSION_BLOCKER:${attempt.permissionAttemptId}`;
+    const establishedOperation = (candidate.lifecycleJournal?.operations || []).find((item) => text(item?.operationId) === transitionOperationId);
+
+    if (establishedOperation) {
+      return {
+        status: "ESTABLISHED",
+        duplicateOperation,
+        permissionAttempt: clone(attempt),
+        lifecycle: this.lifecycleCoordinator.candidateSnapshot(candidate.candidateId, candidate.contractVersion),
+      };
+    }
+
+    if (
+      candidate.lifecycleState !== "PERMISSION_EVALUATING"
+      || Number(candidate.stateRevision || 0) !== Number(attempt.candidate.permissionStateRevision)
+      || !sameTriggerSatisfaction(candidate.triggerSatisfaction, attempt.triggerSatisfaction)
+    ) {
+      throw pipelineError(
+        "persisted permission attempt no longer matches the exact permission lifecycle revision and trigger satisfaction it evaluated",
+        "PERMISSION_ATTEMPT_STALE",
+        {
+          candidateState: candidate.lifecycleState,
+          candidateRevision: Number(candidate.stateRevision || 0),
+          attemptRevision: Number(attempt.candidate.permissionStateRevision),
+        },
+      );
+    }
 
     if (result.kind === "OUTCOME") {
       const outcome = upper(result.outcome);
-      if (
-        candidate.lifecycleState === outcome
-        && text(candidate.currentPermissionOutcome?.permissionEvaluationId) === text(attempt.permissionAttemptId)
-      ) {
-        return {
-          status: "ESTABLISHED",
-          duplicateOperation,
-          permissionAttempt: clone(attempt),
-          lifecycle: this.lifecycleCoordinator.candidateSnapshot(candidate.candidateId, candidate.contractVersion),
-        };
-      }
-      if (candidate.lifecycleState !== "PERMISSION_EVALUATING") {
-        throw pipelineError(`cannot complete permission attempt while candidate is ${candidate.lifecycleState}`, "PERMISSION_ATTEMPT_STATE_CONFLICT");
-      }
       const transition = this.lifecycleCoordinator.publishPermissionOutcome({
-        operationId: `PERMISSION_OUTCOME:${attempt.permissionAttemptId}`,
+        operationId: transitionOperationId,
         candidateId: candidate.candidateId,
         contractVersion: candidate.contractVersion,
         expectedState: "PERMISSION_EVALUATING",
-        expectedRevision: Number(candidate.stateRevision || 0),
+        expectedRevision: Number(attempt.candidate.permissionStateRevision),
         outcome,
         permissionEvaluationId: attempt.permissionAttemptId,
         source: PRETRADE_PERMISSION_PIPELINE_AUTHORITY,
@@ -351,26 +407,12 @@ export class PreTradePermissionPipeline {
     }
 
     const blockerStatus = result.kind === "BLOCKED_RETRYABLE" ? "BLOCKED_RETRYABLE" : "BLOCKED_INTEGRITY";
-    if (
-      candidate.lifecycleState === "PERMISSION_EVALUATING"
-      && candidate.permissionBlocker?.provenance?.permissionAttemptId === attempt.permissionAttemptId
-    ) {
-      return {
-        status: "ESTABLISHED",
-        duplicateOperation,
-        permissionAttempt: clone(attempt),
-        lifecycle: this.lifecycleCoordinator.candidateSnapshot(candidate.candidateId, candidate.contractVersion),
-      };
-    }
-    if (candidate.lifecycleState !== "PERMISSION_EVALUATING") {
-      throw pipelineError(`cannot establish permission blocker while candidate is ${candidate.lifecycleState}`, "PERMISSION_ATTEMPT_STATE_CONFLICT");
-    }
     const transition = this.lifecycleCoordinator.setPermissionBlocker({
-      operationId: `PERMISSION_BLOCKER:${attempt.permissionAttemptId}`,
+      operationId: transitionOperationId,
       candidateId: candidate.candidateId,
       contractVersion: candidate.contractVersion,
       expectedState: "PERMISSION_EVALUATING",
-      expectedRevision: Number(candidate.stateRevision || 0),
+      expectedRevision: Number(attempt.candidate.permissionStateRevision),
       blockerStatus,
       reasonCode: result.reasonCode || result.reasonCodes?.[0] || "PERMISSION_BLOCKED",
       source: PRETRADE_PERMISSION_PIPELINE_AUTHORITY,
