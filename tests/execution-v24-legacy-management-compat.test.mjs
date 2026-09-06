@@ -88,5 +88,5 @@ test("legacy V2.4 handoff without Phase4 instrument metadata still establishes m
   assert.equal(lifecycle.management.instrumentEconomics.assetType, "EQUITY");
   assert.equal(lifecycle.management.instrumentEconomics.pricePointValue, 1);
   assert.equal(lifecycle.management.instrumentEconomics.source, "LEGACY_COMPATIBILITY");
-  assert.equal(lifecycle.management.risk.openStopRisk, 4.8);
+  assert.ok(Math.abs(lifecycle.management.risk.openStopRisk - 4.8) < 1e-9);
 });
