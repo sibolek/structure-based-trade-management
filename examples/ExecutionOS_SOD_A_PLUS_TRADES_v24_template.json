@@ -1,0 +1,92 @@
+{
+  "sourceDate": "YYYY-MM-DD",
+  "generatedAt": "YYYY-MM-DDTHH:MM:SS.sssZ",
+  "bundleId": "sod-YYYY-MM-DD-a-plus-trades-v1",
+  "validity": {
+    "validFrom": "YYYY-MM-DDTHH:MM:SSZ",
+    "validUntil": "YYYY-MM-DDTHH:MM:SSZ",
+    "timezone": "America/Denver",
+    "session": "RTH",
+    "sourceLabel": "START_OF_DAY_REPORT",
+    "provenance": {
+      "source": "SOD_A_PLUS_TRADES"
+    }
+  },
+  "candidates": [
+    {
+      "candidateId": "sod-YYYY-MM-DD-symbol-direction-setup",
+      "contractVersion": 1,
+      "symbol": "NVDA",
+      "direction": "LONG",
+      "setup": "Breakout / Continuation",
+      "decisionTimeframe": "5m",
+      "entryTimeframe": "2m",
+      "volatilityTimeframe": "2m",
+      "thesis": "Concise setup thesis.",
+      "plan": {
+        "bestLocation": "Best actionable location.",
+        "noTradeZone": "Where not to enter."
+      },
+      "trigger": {
+        "schemaVersion": 1,
+        "evaluatorVersion": 1,
+        "satisfaction": {
+          "nodeId": "operator-confirm-example",
+          "type": "MANUAL_CONFIRMATION",
+          "prompt": "Confirm the planned trigger with valid price-action structure."
+        },
+        "persistence": {
+          "type": "ONE_SHOT"
+        }
+      },
+      "structuralInvalidation": {
+        "price": 0.01,
+        "rule": "Replace with the exact structural invalidation rule.",
+        "referenceType": "PRICE",
+        "reason": "Explain why this price invalidates the setup.",
+        "sourceTimeframe": "2m"
+      },
+      "plannedEntryReference": "Planned entry reference.",
+      "entryConstraints": [
+        "Do not anticipate the trigger.",
+        "Size from the structural stop."
+      ],
+      "disqualifiers": [
+        "Structure becomes ambiguous before entry."
+      ],
+      "noTradeConditions": [
+        "Do not chase outside the planned location."
+      ],
+      "targets": [
+        {
+          "targetId": "T1",
+          "label": "T1",
+          "price": 0.02
+        }
+      ],
+      "managementContract": {
+        "mode": "SINGLE_ENTRY",
+        "allowReAdd": false,
+        "allowFlatReEntry": false,
+        "source": "SOD_A_PLUS_TRADES"
+      },
+      "bestLocation": "Best actionable location.",
+      "context": {
+        "riskPolicy": {
+          "maxPlannedLossPctOfAccountEquity": 0.5,
+          "sizeFromStructuralStop": true,
+          "tightenStopToFitRisk": false,
+          "onRiskFailure": "REDUCE_SIZE_OR_PASS"
+        }
+      },
+      "rating": "★★★★★",
+      "morningPriority": 1,
+      "sourceProvenance": {
+        "source": "START_OF_DAY_REPORT"
+      },
+      "armPolicy": {
+        "requestedMode": "MANUAL"
+      }
+    }
+  ]
+}
