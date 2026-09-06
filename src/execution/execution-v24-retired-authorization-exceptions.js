@@ -121,6 +121,7 @@ export function findV24RetiredAuthorizationExceptions({ store, installation, ret
       plausibleLaterHandoffIds: later.map((item) => text(item?.compatibility?.v24?.handoffId ?? item?.handoffId)).filter(Boolean),
       reconciledAt: null,
       reconciliationOutcome: null,
+      reconciliationAssignedHandoffId: null,
       reconciliationNote: null,
     };
   }));
@@ -162,15 +163,20 @@ export async function reconcileV24RetiredAuthorizationExceptionSerialized({
   storeKey = EXECUTION_BOARD_STORE_KEY,
   exceptionId,
   outcome,
+  assignedHandoffId = null,
   note = null,
   at = Date.now(),
   lockManager = globalThis?.navigator?.locks,
 } = {}) {
   const id = text(exceptionId);
   const normalizedOutcome = upper(outcome);
+  const assigned = text(assignedHandoffId);
   if (!id) throw error("exceptionId is required", "AUTHORIZATION_EXCEPTION_NOT_FOUND");
   if (!["BROKER_TRUTH_REVIEWED", "ASSIGNED_TO_OTHER_AUTHORIZATION"].includes(normalizedOutcome)) {
     throw error("retired authorization exception reconciliation outcome is invalid", "AUTHORIZATION_EXCEPTION_RECONCILIATION_INVALID");
+  }
+  if (normalizedOutcome === "ASSIGNED_TO_OTHER_AUTHORIZATION" && !assigned) {
+    throw error("exact assigned handoffId is required", "AUTHORIZATION_EXCEPTION_RECONCILIATION_INVALID");
   }
   const reconciledAt = iso(at);
   if (!reconciledAt) throw error("reconciliation timestamp is invalid", "AUTHORIZATION_EXCEPTION_RECONCILIATION_INVALID");
@@ -184,11 +190,18 @@ export async function reconcileV24RetiredAuthorizationExceptionSerialized({
       const exceptions = array(store.v24AuthorizationExceptions).map((item) => {
         if (text(item?.exceptionId) !== id) return item;
         if (upper(item.status) === "RECONCILED") { result = structuredClone(item); return item; }
+        if (
+          normalizedOutcome === "ASSIGNED_TO_OTHER_AUTHORIZATION"
+          && !array(item.plausibleLaterHandoffIds).map(text).includes(assigned)
+        ) {
+          throw error("assigned handoffId is not an admissible attribution candidate", "AUTHORIZATION_EXCEPTION_RECONCILIATION_INVALID");
+        }
         result = {
           ...structuredClone(item),
           status: "RECONCILED",
           reconciledAt,
           reconciliationOutcome: normalizedOutcome,
+          reconciliationAssignedHandoffId: normalizedOutcome === "ASSIGNED_TO_OTHER_AUTHORIZATION" ? assigned : null,
           reconciliationNote: text(note) || null,
         };
         return result;
