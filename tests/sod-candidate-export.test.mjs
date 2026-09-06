@@ -1,0 +1,172 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { buildCanonicalSodCandidateBundle } from "../schwab-bridge/sod-candidate-export.mjs";
+import { PreTradeStore } from "../schwab-bridge/pretrade-state.mjs";
+import { PreTradeCandidateIngress } from "../schwab-bridge/pretrade-candidate-ingress.mjs";
+
+function draft(overrides = {}) {
+  return {
+    sourceDate: "2026-09-08",
+    generatedAt: "2026-09-08T12:45:00.000Z",
+    validity: {
+      validFrom: "2026-09-08T13:25:00.000Z",
+      validUntil: "2026-09-08T20:00:00.000Z",
+      timezone: "America/Denver",
+      session: "RTH",
+      sourceLabel: "SOD_A_PLUS_TRADES",
+      provenance: { source: "START_OF_DAY_REPORT" },
+    },
+    candidates: [
+      {
+        symbol: "NVDA",
+        direction: "LONG",
+        setup: "Breakout / Continuation",
+        timeframe: "2m",
+        morningPriority: 1,
+        rating: "★★★★★",
+        thesis: "Strong relative strength near highs.",
+        plan: {
+          bestLocation: "Above 232.48 or strong reclaim of 231.20",
+          noTradeZone: "Do not chase a vertical breakout.",
+        },
+        trigger: {
+          type: "MANUAL_CONFIRMATION",
+          description: "Confirm breakout or reclaim with valid price action.",
+        },
+        structuralInvalidation: {
+          price: 229.85,
+          rule: "Break below 229.85 invalidates the long thesis.",
+          referenceType: "PRICE",
+          reason: "Continuation structure has failed.",
+          sourceTimeframe: "2m",
+        },
+        plannedEntryReference: "Above 232.48 or strong reclaim of 231.20",
+        targets: [
+          { label: "T1", priceOrZone: "234.00" },
+          { label: "T2", priceOrZone: "236.00" },
+        ],
+        riskPolicy: {
+          maxPlannedLossPctOfAccountEquity: 0.5,
+          sizeFromStructuralStop: true,
+          tightenStopToFitRisk: false,
+          onRiskFailure: "REDUCE_SIZE_OR_PASS",
+        },
+      },
+    ],
+    ...overrides,
+  };
+}
+
+test("SOD exporter builds canonical V2.4 bundle and normalizes common SOD fields", () => {
+  const bundle = buildCanonicalSodCandidateBundle(draft());
+  const candidate = bundle.candidates[0];
+
+  assert.equal(bundle.source, "SOD_A_PLUS_TRADES");
+  assert.equal(bundle.bundleId, "sod-2026-09-08-a-plus-trades-v1");
+  assert.equal(candidate.candidateId, "sod-2026-09-08-nvda-long-breakout-continuation-p1");
+  assert.equal(candidate.contractVersion, 1);
+  assert.equal(candidate.source, "SOD_A_PLUS_TRADES");
+  assert.equal(candidate.sourceDate, "2026-09-08");
+  assert.equal(candidate.generatedAt, "2026-09-08T12:45:00.000Z");
+  assert.equal(candidate.decisionTimeframe, "5m");
+  assert.equal(candidate.entryTimeframe, "2m");
+  assert.equal(candidate.trigger.satisfaction.type, "MANUAL_CONFIRMATION");
+  assert.equal(candidate.trigger.satisfaction.prompt, "Confirm breakout or reclaim with valid price action.");
+  assert.equal(candidate.structuralInvalidation.price, 229.85);
+  assert.equal(candidate.targets[0].price, 234);
+  assert.equal(candidate.targets[1].price, 236);
+  assert.equal(candidate.managementContract.mode, "SINGLE_ENTRY");
+  assert.equal(candidate.managementContract.allowReAdd, false);
+  assert.equal(candidate.context.riskPolicy.maxPlannedLossPctOfAccountEquity, 0.5);
+  assert.equal(candidate.noTradeConditions[0], "Do not chase a vertical breakout.");
+  assert.equal(candidate.validity.timezone, "America/Denver");
+  assert.equal(candidate.armPolicy.requestedMode, "MANUAL");
+  assert.equal(candidate.armPolicy.finalAuthorizationMode, "MANUAL");
+});
+
+test("exported SOD bundle is accepted by authoritative ingress as WAITING", () => {
+  const bundle = buildCanonicalSodCandidateBundle(draft());
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "executionos-sod-export-")), "state.json");
+  const store = new PreTradeStore({ filePath: statePath });
+  store.load();
+  const ingress = new PreTradeCandidateIngress({
+    store,
+    clock: () => "2026-09-08T13:30:00.000Z",
+    idFactory: () => "sod-export-ingress-event",
+  });
+
+  const result = ingress.importBundle(bundle);
+  assert.equal(result.outcomes[0].status, "ACCEPTED");
+  assert.equal(result.outcomes[0].lifecycleState, "WAITING");
+  assert.equal(store.snapshot().candidates[0].contractAuthority.authority, "CANONICAL_CANDIDATE_INGRESS");
+});
+
+test("SOD exporter fails closed instead of guessing legacy free-text invalidation structure", () => {
+  const input = draft();
+  input.candidates[0].structuralInvalidation = {
+    type: "MANUAL_CONFIRMATION",
+    description: "Below 230.40 / 229.85",
+  };
+
+  assert.throws(
+    () => buildCanonicalSodCandidateBundle(input),
+    (error) => {
+      assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
+      assert.match(error.message, /structuralInvalidation\.rule is required/);
+      assert.match(error.message, /resolved price or structured reference definition/);
+      return true;
+    },
+  );
+});
+
+test("SOD exporter requires exact finite validity and never invents a session window", () => {
+  const input = draft({
+    validity: {
+      tradeDate: "2026-09-08",
+      session: "RTH",
+      sourceSnapshot: "PREMARKET",
+    },
+  });
+
+  assert.throws(
+    () => buildCanonicalSodCandidateBundle(input),
+    (error) => {
+      assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
+      assert.match(error.message, /validity\.validFrom/);
+      assert.match(error.message, /validity\.validUntil/);
+      assert.match(error.message, /valid IANA timezone/);
+      return true;
+    },
+  );
+});
+
+test("SOD exporter refuses AUTO ARM intent", () => {
+  const input = draft();
+  input.candidates[0].armPolicy = { requestedMode: "AUTO" };
+
+  assert.throws(
+    () => buildCanonicalSodCandidateBundle(input),
+    (error) => {
+      assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
+      assert.match(error.message, /SOD_A_PLUS_TRADES.*MANUAL/);
+      return true;
+    },
+  );
+});
+
+test("SOD exporter rejects duplicate generated candidate identities", () => {
+  const first = draft().candidates[0];
+  const input = draft({ candidates: [structuredClone(first), structuredClone(first)] });
+
+  assert.throws(
+    () => buildCanonicalSodCandidateBundle(input),
+    (error) => {
+      assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
+      assert.match(error.message, /duplicate candidateId/i);
+      return true;
+    },
+  );
+});
