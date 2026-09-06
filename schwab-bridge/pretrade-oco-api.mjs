@@ -42,12 +42,17 @@ function statusFor(error) {
   const code = text(error?.code);
   if (code === "BODY_TOO_LARGE") return 413;
   if (code === "OCO_GROUP_NOT_FOUND" || code === "CANDIDATE_NOT_FOUND") return 404;
-  if (code.includes("CONFLICT") || code.includes("NOT_ALLOWED") || code.includes("NOT_MUTABLE")) return 409;
+  if (code.includes("CONFLICT") || code.includes("NOT_ALLOWED") || code.includes("NOT_MUTABLE") || code === "ARM_RECOVERY_RECONCILIATION_REQUIRED") return 409;
   if (code.startsWith("CORRUPT_") || ["EACCES", "ENOSPC", "EROFS", "EIO"].includes(code)) return 500;
   return 400;
 }
 
-export function createPreTradeOcoApiHandler({ ocoService, ocoRepository, maxBodyBytes = DEFAULT_MAX_BODY_BYTES } = {}) {
+export function createPreTradeOcoApiHandler({
+  ocoService,
+  ocoRepository,
+  recoveryBlocked = false,
+  maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
+} = {}) {
   if (!ocoService || !ocoRepository) throw new Error("OCO API dependencies are required");
   return async function handlePreTradeOcoApi(req, res) {
     const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
@@ -61,6 +66,7 @@ export function createPreTradeOcoApiHandler({ ocoService, ocoRepository, maxBody
         return true;
       }
       if (req.method !== "POST") return false;
+      if (recoveryBlocked) throw apiError("OCO mutation is blocked pending ARM recovery reconciliation", "ARM_RECOVERY_RECONCILIATION_REQUIRED");
       const payload = await readJson(req, maxBodyBytes);
       let result;
       if (parsed.action === "collection") result = ocoService.createGroup(payload);
