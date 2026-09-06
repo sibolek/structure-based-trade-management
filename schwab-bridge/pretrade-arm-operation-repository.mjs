@@ -71,7 +71,11 @@ function validAuthorization(authorization) {
   if (!text(value.dssEvaluationId) || !text(value.riskEvaluationId) || !text(value.accountId)) return false;
   if (positiveNumber(value.selectedQuantity) === null || !validIso(value.authorizedAt)) return false;
   if (!text(value.handoffId) || !validIso(value.handoffCreatedAt)) return false;
-  if (!value.executionOwnershipProof || upper(value.executionOwnershipProof.status) !== "FREE") return false;
+  if (
+    !value.executionOwnershipProof
+    || upper(value.executionOwnershipProof.status) !== "FREE"
+    || value.executionOwnershipProof.authoritative !== true
+  ) return false;
   if (Array.isArray(value.ocoSiblings)) {
     for (const sibling of value.ocoSiblings) {
       if (!text(sibling?.candidateId) || !Number.isInteger(Number(sibling?.contractVersion)) || Number(sibling.contractVersion) < 1) return false;
