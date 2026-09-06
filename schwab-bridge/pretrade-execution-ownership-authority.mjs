@@ -14,6 +14,16 @@ export const EXECUTION_OWNERSHIP_PROJECTION_SOURCE = "EXECUTION_CANONICAL_STORE"
 export const DEFAULT_EXECUTION_OWNERSHIP_FILE = ".executionos-v24-execution-ownership.json";
 export const DEFAULT_EXECUTION_OWNERSHIP_MAX_AGE_MS = 3000;
 
+const ABSOLUTE_TIMESTAMP_PATTERN = /(?:Z|[+-]\d{2}:\d{2})$/i;
+const OWNERSHIP_ARRAY_FIELDS = [
+  "candidates",
+  "liveTrades",
+  "history",
+  "v24Installations",
+  "v24Retirements",
+  "v24Lifecycles",
+];
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -46,8 +56,9 @@ function digest(value) {
 
 function absoluteTimestamp(value) {
   const raw = text(value);
+  if (!raw || !ABSOLUTE_TIMESTAMP_PATTERN.test(raw)) return null;
   const parsed = Date.parse(raw);
-  return raw && Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
 function normalizedOwnedSymbols(value) {
@@ -55,6 +66,18 @@ function normalizedOwnedSymbols(value) {
   const symbols = value.map(upper);
   if (symbols.some((symbol) => !symbol)) return null;
   return [...new Set(symbols)].sort();
+}
+
+function projectionIntegrityContent(value) {
+  return {
+    source: value.source,
+    authority: value.authority,
+    storeKey: value.storeKey,
+    storeSchemaVersion: value.storeSchemaVersion,
+    storeRevision: value.storeRevision,
+    storeHash: value.storeHash,
+    ownedSymbols: value.ownedSymbols,
+  };
 }
 
 function emptyState() {
@@ -74,14 +97,16 @@ function normalizePersistedProjection(raw) {
   const storeSchemaVersion = Number(raw.storeSchemaVersion);
   const receivedAt = absoluteTimestamp(raw.receivedAt);
   const publishedAt = absoluteTimestamp(raw.publishedAt);
-  const storeHash = text(raw.storeHash);
+  const storeHash = text(raw.storeHash).toLowerCase();
+  const projectionHash = text(raw.projectionHash).toLowerCase();
 
   if (upper(raw.source) !== EXECUTION_OWNERSHIP_PROJECTION_SOURCE
     || upper(raw.authority) !== EXECUTION_OWNERSHIP_PROJECTION_AUTHORITY
     || text(raw.storeKey) !== EXECUTION_BOARD_STORE_KEY
     || storeSchemaVersion !== EXECUTION_BOARD_STORE_SCHEMA_VERSION
     || !Number.isInteger(storeRevision) || storeRevision < 0
-    || !/^[a-f0-9]{64}$/i.test(storeHash)
+    || !/^[a-f0-9]{64}$/.test(storeHash)
+    || !/^[a-f0-9]{64}$/.test(projectionHash)
     || !ownedSymbols
     || !receivedAt
     || !publishedAt
@@ -89,14 +114,24 @@ function normalizePersistedProjection(raw) {
     throw authorityError("persisted Execution ownership projection is invalid", "CORRUPT_EXECUTION_OWNERSHIP_AUTHORITY");
   }
 
-  return Object.freeze({
+  const normalized = {
     source: EXECUTION_OWNERSHIP_PROJECTION_SOURCE,
     authority: EXECUTION_OWNERSHIP_PROJECTION_AUTHORITY,
     storeKey: EXECUTION_BOARD_STORE_KEY,
     storeSchemaVersion,
     storeRevision,
-    storeHash: storeHash.toLowerCase(),
+    storeHash,
+    ownedSymbols,
+  };
+  const expectedProjectionHash = digest(projectionIntegrityContent(normalized));
+  if (projectionHash !== expectedProjectionHash) {
+    throw authorityError("persisted Execution ownership projection integrity hash does not match", "CORRUPT_EXECUTION_OWNERSHIP_AUTHORITY");
+  }
+
+  return Object.freeze({
+    ...normalized,
     ownedSymbols: Object.freeze(ownedSymbols),
+    projectionHash,
     publisherId: text(raw.publisherId),
     publishedAt,
     receivedAt,
@@ -153,9 +188,33 @@ function validateEnvelope(payload) {
 }
 
 function normalizeCanonicalStoreSnapshot(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw authorityError("canonical Execution store snapshot must be an object", "EXECUTION_OWNERSHIP_STORE_INVALID");
+  }
+  if (Number(raw.storeSchemaVersion) !== EXECUTION_BOARD_STORE_SCHEMA_VERSION) {
+    throw authorityError("canonical Execution store schemaVersion is invalid", "EXECUTION_OWNERSHIP_STORE_INVALID");
+  }
+  const storeRevision = Number(raw.storeRevision);
+  if (!Number.isInteger(storeRevision) || storeRevision < 0) {
+    throw authorityError("canonical Execution storeRevision must be an integer >= 0", "EXECUTION_OWNERSHIP_STORE_INVALID");
+  }
+  for (const field of OWNERSHIP_ARRAY_FIELDS) {
+    if (!Array.isArray(raw[field])) {
+      throw authorityError(`canonical Execution store ${field} must be an array`, "EXECUTION_OWNERSHIP_STORE_INVALID");
+    }
+  }
+  if (raw.draft !== null && raw.draft !== undefined && (typeof raw.draft !== "object" || Array.isArray(raw.draft))) {
+    throw authorityError("canonical Execution store draft must be an object or null", "EXECUTION_OWNERSHIP_STORE_INVALID");
+  }
+
   try {
-    return normalizeExecutionBoardStore(raw);
+    const normalized = normalizeExecutionBoardStore(raw);
+    if (normalized.storeRevision !== storeRevision) {
+      throw authorityError("canonical Execution storeRevision normalization changed the supplied revision", "EXECUTION_OWNERSHIP_STORE_INVALID");
+    }
+    return normalized;
   } catch (error) {
+    if (error?.code === "EXECUTION_OWNERSHIP_STORE_INVALID") throw error;
     throw authorityError(
       `canonical Execution store snapshot is invalid: ${error.message}`,
       "EXECUTION_OWNERSHIP_STORE_INVALID",
@@ -234,14 +293,19 @@ export class PreTradeExecutionOwnershipAuthority {
       );
     }
 
-    const projection = Object.freeze({
+    const integrityContent = {
       source: EXECUTION_OWNERSHIP_PROJECTION_SOURCE,
       authority: EXECUTION_OWNERSHIP_PROJECTION_AUTHORITY,
       storeKey: EXECUTION_BOARD_STORE_KEY,
       storeSchemaVersion: EXECUTION_BOARD_STORE_SCHEMA_VERSION,
       storeRevision,
       storeHash,
+      ownedSymbols: [...ownedSymbols],
+    };
+    const projection = Object.freeze({
+      ...integrityContent,
       ownedSymbols: Object.freeze([...ownedSymbols]),
+      projectionHash: digest(projectionIntegrityContent(integrityContent)),
       publisherId: text(payload.publisherId),
       publishedAt,
       receivedAt,
@@ -323,6 +387,7 @@ export class PreTradeExecutionOwnershipAuthority {
       authoritative: true,
       storeRevision: projection.storeRevision,
       storeHash: projection.storeHash,
+      projectionHash: projection.projectionHash,
       receivedAt: projection.receivedAt,
       ageMs: health.ageMs,
     });
