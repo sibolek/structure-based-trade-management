@@ -203,8 +203,6 @@ export function createPreTradeLifecycleApiHandler({
 
     try {
       const payload = await readJson(req, maxBodyBytes);
-      const response = this?.execute ? null : null;
-      void response;
       const serviceResponse = service.execute(route.commandName, route, payload);
       json(res, 200, {
         ...serviceResponse,
