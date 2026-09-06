@@ -19,6 +19,11 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function revision(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+}
+
 function timestamp(value) {
   const parsed = Date.parse(String(value ?? ""));
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
@@ -75,6 +80,7 @@ export function buildPermissionAttempt({
       source: upper(candidate?.source),
       symbol: upper(candidate?.symbol),
       direction: upper(candidate?.direction),
+      permissionStateRevision: revision(candidate?.stateRevision),
     },
     triggerSatisfaction: triggerSatisfaction ? structuredClone(triggerSatisfaction) : null,
     structuralValidity: structuralValidity ? structuredClone(structuralValidity) : null,
@@ -136,6 +142,7 @@ export function validatePermissionAttempt(value) {
   if (!text(attempt.candidate?.source)) errors.push("candidate source is required");
   if (!text(attempt.candidate?.symbol)) errors.push("candidate symbol is required");
   if (!["LONG", "SHORT"].includes(upper(attempt.candidate?.direction))) errors.push("candidate direction is invalid");
+  if (revision(attempt.candidate?.permissionStateRevision) === null) errors.push("permissionStateRevision is invalid");
   if (!attempt.triggerSatisfaction || attempt.triggerSatisfaction.authority !== "PRETRADE_TRIGGER_ENGINE") errors.push("authoritative triggerSatisfaction is required");
   if (!attempt.structuralValidity || attempt.structuralValidity.authority !== "PRETRADE_STRUCTURAL_VALIDITY") errors.push("authoritative structuralValidity is required");
   if (!timestamp(attempt.startedAt)) errors.push("startedAt is invalid");
