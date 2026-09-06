@@ -82,6 +82,7 @@ function statusForError(error) {
     || code === "PERMISSION_EVALUATION_IN_PROGRESS"
     || code === "PERMISSION_NOT_ALLOWED_IN_STATE"
     || code === "PERMISSION_ATTEMPT_STATE_CONFLICT"
+    || code === "PERMISSION_ATTEMPT_STALE"
   ) return 409;
   if (
     code === "CANDIDATE_CONTRACT_INTEGRITY_ERROR"
