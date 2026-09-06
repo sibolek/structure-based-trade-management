@@ -1,6 +1,6 @@
 # ExecutionOS User Guide
 
-**Version:** 1.5  
+**Version:** 1.5.1  
 **Date:** 6 September 2026  
 **Status:** Living operator guide for the accepted ExecutionOS V2.4 PRETRADE → Execution Board integration  
 **Repository:** `sibolek/structure-based-trade-management`  
@@ -678,17 +678,17 @@ A materially changed package requires a new acknowledgement.
 
 ## 9.4 Final ARM confirmation
 
-ARM requires explicit confirmation of:
+ARM itself is the final explicit **quantity/direction** confirmation, for example:
 
-- exact candidate/version;
-- review package;
-- quantity;
-- direction;
-- account;
-- entry mode;
-- current structural/context assessments as required.
+```text
+ARM NVDA LONG — 25 SHARES
+```
 
-The server performs fresh permission/risk revalidation before authorization.
+The exact account is already exposed in the authoritative current review package and is carried/frozen by the ARM request. The request also binds the exact candidate/version, `reviewPackageId`, entry mode, and current structural/context assessments as applicable.
+
+There is no separate final account-confirmation control. If the account or another material authorization fact changes, final revalidation changes the review package or rejects the stale ARM rather than silently accepting the old review.
+
+The server performs fresh permission/risk revalidation before authorization. Accidental Enter-key submission is not wired to ARM.
 
 ## 9.5 Successful ARM
 
@@ -1025,11 +1025,16 @@ ExecutionOS History supplies setup/process context.
 
 ## 14.1 V2.4 stop semantics
 
-For V2.4, structural invalidation remains separate provenance.
+Current EOD planned-risk and entry-VWAP stop-risk enrichment is origin-aware:
 
-Risk enrichment should use authoritative V2.4 effective/managed stop semantics rather than silently substituting structural invalidation.
+```text
+V24_HANDOFF        -> v24.effectiveStop
+LEGACY_MANUAL_V23  -> originalPlan.structuralStop
+```
 
-Legacy/manual V2.3 continues to use its structural stop semantics.
+For V2.4, structural invalidation remains separate provenance and is not substituted for `v24.effectiveStop`.
+
+Slice 7 live managed-stop changes are management state; they do **not** currently rewrite the EOD planned-risk stop basis or replace `v24.effectiveStop` in the EOD enrichment calculation.
 
 ## 14.2 Enriched EOD procedure
 
@@ -1326,8 +1331,8 @@ A material architecture change requires a new approved future design decision.
 7. If READY/CAUTION, inspect the current review package.
 8. Select explicit quantity.
 9. If CAUTION, acknowledge the exact package.
-10. Confirm symbol, direction, quantity, account and entry mode.
-11. ARM explicitly.
+10. Verify the exact account and entry mode shown/carried by the current review state.
+11. ARM explicitly; the ARM control is the final quantity/direction confirmation.
 
 ## After ARM / before fill
 
@@ -1464,6 +1469,8 @@ Full repository regression:       734 / 734 PASS
 Production build:                 PASS
 ```
 
+The production build was run at `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796`; the only later implementation change through `3f794538ffbe5c5875a3d671143cb33890530b1f` was the E2E test file, so production code was unchanged.
+
 ---
 
 # 22. Documentation map and glossary
@@ -1491,7 +1498,7 @@ Historical approved documents remain valid approval-time evidence but do not ove
 The structure/price condition that proves the trade thesis wrong.
 
 **Effective stop**  
-The volatility-protected execution stop derived by Phase 3. In LIVE management it may change only through explicit/frozen management authority.
+The volatility-protected execution stop derived by Phase 3. In LIVE management it may change only through explicit/frozen management authority. The EOD planned-risk basis remains the frozen `v24.effectiveStop` currently exported for the trade; live managed-stop changes do not rewrite that planned-risk basis.
 
 **DSS evaluation**  
 Immutable Phase 3 evaluation identified by `dssEvaluationId`.
