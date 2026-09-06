@@ -81,6 +81,9 @@ export class PreTradeArmLifecycleAuthority {
       precondition: (candidate, committedAt) => {
         if (text(candidate.contentHash) !== text(armCommit.candidateContentHash)) throw authorityError("candidate content hash does not match ARM commit", "ARM_COMMIT_CANDIDATE_HASH_MISMATCH");
         if (upper(candidate.direction) !== upper(armCommit.direction)) throw authorityError("candidate direction does not match ARM commit", "ARM_COMMIT_DIRECTION_MISMATCH");
+        if (candidate.currentDssEvaluationStale) throw authorityError("candidate DSS became stale after durable ARM proof", "ARM_COMMIT_DSS_STALE");
+        if (text(candidate.currentDssEvaluationId) !== text(armCommit.dssEvaluationId)) throw authorityError("candidate current DSS does not match ARM commit", "ARM_COMMIT_DSS_MISMATCH");
+        if (text(candidate.currentPermissionOutcome?.permissionEvaluationId) !== text(armCommit.permissionAttemptId)) throw authorityError("candidate current permission attempt does not match ARM commit", "ARM_COMMIT_PERMISSION_MISMATCH");
         if (candidate.arm || text(candidate.authorizedRiskEvaluationId) || text(candidate.authorizedDssEvaluationId)) {
           throw authorityError("candidate already contains frozen ARM authority", "ARM_ALREADY_FROZEN");
         }
