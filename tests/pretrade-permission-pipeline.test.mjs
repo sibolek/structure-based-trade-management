@@ -91,7 +91,12 @@ function fullRiskEvaluation({ accountId = "acct-1", status = "VALID" } = {}) {
   };
 }
 
-function harness({ dssStatus = "VALID", phase4Status = "VALID", decisionPolicy = null } = {}) {
+function harness({
+  dssStatus = "VALID",
+  phase4Status = "VALID",
+  decisionPolicy = null,
+  riskRepositoryError = null,
+} = {}) {
   const stateFile = tempPath("permission-state");
   const attemptFile = tempPath("permission-attempts");
   const clock = () => NOW;
@@ -183,6 +188,7 @@ function harness({ dssStatus = "VALID", phase4Status = "VALID", decisionPolicy =
   const riskEvaluationRepository = {
     getById(id) {
       assert.equal(id, "risk-eval-1");
+      if (riskRepositoryError) throw riskRepositoryError;
       return structuredClone(riskEvaluation);
     },
   };
@@ -235,6 +241,7 @@ test("complete VALID permission attempt publishes READY with immutable DSS/accou
   assert.equal(attempts.length, 1);
   const attempt = attempts[0];
   assert.equal(attempt.result.outcome, "READY");
+  assert.equal(attempt.candidate.permissionStateRevision, 2);
   assert.equal(attempt.dss.dssEvaluationId, "dss-eval-1");
   assert.equal(attempt.phase4.riskEvaluationId, "risk-eval-1");
   assert.equal(attempt.account.accountId, "acct-1");
@@ -300,6 +307,21 @@ test("NO_AFFORDABLE_SIZE maps to terminal PASS STOP_RISK_CONFLICT", async () => 
   assert.equal(h.calls.risk, 1);
 });
 
+test("missing persisted Phase 4 evaluation becomes a durable integrity blocker", async () => {
+  const missing = new Error("risk evaluation missing after Phase 4 returned its id");
+  missing.code = "RISK_EVALUATION_NOT_FOUND";
+  const h = harness({ riskRepositoryError: missing });
+  const result = await h.pipeline.evaluate(command());
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.permissionAttempt.result.kind, "BLOCKED_INTEGRITY");
+  assert.equal(result.permissionAttempt.result.reasonCode, "RISK_EVALUATION_NOT_FOUND");
+  assert.equal(result.permissionAttempt.phase4, null);
+  const candidate = h.coordinator.candidateSnapshot("permission-NVDA-1", 1);
+  assert.equal(candidate.lifecycleState, "PERMISSION_EVALUATING");
+  assert.equal(candidate.permissionBlocker.status, "BLOCKED_INTEGRITY");
+  assert.equal(h.attemptRepository.snapshot().attempts.length, 1);
+});
+
 test("identical operation retry after READY returns established result without reevaluation", async () => {
   const h = harness();
   const first = await h.pipeline.evaluate(command());
@@ -348,4 +370,35 @@ test("persisted permission attempt forward-completes after lifecycle publication
   assert.equal(h.coordinator.candidateSnapshot("permission-NVDA-1", 1).lifecycleState, "READY");
   assert.equal(h.calls.dss, 1);
   assert.equal(h.calls.risk, 1);
+});
+
+test("old persisted attempt is not replayed onto a later trigger satisfaction cycle", async () => {
+  const h = harness();
+  h.coordinator.publishPermissionOutcome = () => {
+    const error = new Error("simulated outage before lifecycle publication");
+    error.code = "EIO";
+    throw error;
+  };
+  await assert.rejects(h.pipeline.evaluate(command()), /simulated outage/);
+  assert.equal(h.attemptRepository.snapshot().attempts.length, 1);
+
+  const candidate = h.store.state.candidates[0];
+  candidate.lifecycleState = "PERMISSION_EVALUATING";
+  candidate.stateRevision = 5;
+  candidate.triggerSatisfaction = {
+    authority: "PRETRADE_TRIGGER_ENGINE",
+    evaluatorVersion: 1,
+    evidenceId: "trigger-evidence-2",
+    evidenceTimestamp: "2026-09-05T15:05:00.000Z",
+    satisfiedAt: "2026-09-05T15:05:00.000Z",
+  };
+  h.store.save();
+
+  const recovery = h.pipeline.recoverAll();
+  assert.equal(recovery[0].status, "STALE_NOT_APPLIED");
+  assert.equal(recovery[0].code, "PERMISSION_ATTEMPT_STALE");
+  const after = h.coordinator.candidateSnapshot("permission-NVDA-1", 1);
+  assert.equal(after.lifecycleState, "PERMISSION_EVALUATING");
+  assert.equal(after.stateRevision, 5);
+  assert.equal(after.triggerSatisfaction.evidenceId, "trigger-evidence-2");
 });
