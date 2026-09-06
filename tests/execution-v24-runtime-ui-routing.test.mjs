@@ -158,7 +158,7 @@ test("runtime router epoch cleanup aborts pending leadership and preserves in-fl
   );
   assert.match(
     hook,
-    /const result = await runV24ExecutionRouterCycle\([\s\S]*?\);/,
+    /const result = await runV24ManagedExecutionRouterCycle\([\s\S]*?\);/,
   );
   assert.match(
     hook,
@@ -170,7 +170,7 @@ test("runtime router epoch cleanup aborts pending leadership and preserves in-fl
   );
   assert.doesNotMatch(
     hook,
-    /epochAbort\.abort\(\);[\s\S]*?runV24ExecutionRouterCycle/,
+    /epochAbort\.abort\(\);[\s\S]*?runV24ManagedExecutionRouterCycle/,
   );
 });
 
