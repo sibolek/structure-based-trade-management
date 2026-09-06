@@ -6,6 +6,7 @@ import V24LiveExecutionBoard from "./components/V24LiveExecutionBoard.jsx";
 import V24RouterHealthPanel from "./components/V24RouterHealthPanel.jsx";
 import WorkspaceNav from "./components/WorkspaceNav.jsx";
 import useBrokerState from "./hooks/useBrokerState.js";
+import useExecutionOwnershipPublisher from "./hooks/useExecutionOwnershipPublisher.js";
 import usePretradeState from "./hooks/usePretradeState.js";
 import useV24ExecutionRouter from "./hooks/useV24ExecutionRouter.js";
 import ExecutionV23 from "./pages/ExecutionV23.jsx";
@@ -13,6 +14,7 @@ import ExecutionV23 from "./pages/ExecutionV23.jsx";
 export default function App() {
   const broker = useBrokerState();
   const pretrade = usePretradeState();
+  useExecutionOwnershipPublisher({ pretrade });
   const v24Router = useV24ExecutionRouter({ broker, pretrade });
   const [workspace, setWorkspace] = useState("PRETRADE");
 
