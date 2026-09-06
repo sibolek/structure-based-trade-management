@@ -8,6 +8,17 @@ import {
 
 export const SOD_EXPORT_SCHEMA_VERSION = 1;
 
+const FORBIDDEN_RUNTIME_AUTHORITY_FIELDS = [
+  "arm",
+  "handoff",
+  "permissionOutcome",
+  "riskEvaluation",
+  "authorizedDssEvaluationId",
+  "authorizedRiskEvaluationId",
+  "selectedQuantity",
+  "executionState",
+];
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -18,6 +29,10 @@ function upper(value) {
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
+}
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object ?? {}, key);
 }
 
 function slug(value) {
@@ -107,10 +122,14 @@ function candidateIdFor(candidate, sourceDate, index) {
   const setupSlug = slug(candidate.setup) || `candidate-${index + 1}`;
   const symbol = slug(upper(candidate.symbol)) || "symbol";
   const direction = slug(upper(candidate.direction)) || "direction";
+  const priority = Number(candidate.morningPriority);
   const qualifier = text(candidate.candidateKey)
     ? `-${slug(candidate.candidateKey)}`
-    : Number.isInteger(Number(candidate.morningPriority))
-      ? `-p${Number(candidate.morningPriority)}`
+    : candidate.morningPriority !== null
+      && candidate.morningPriority !== undefined
+      && Number.isInteger(priority)
+      && priority >= 1
+      ? `-p${priority}`
       : "";
   return `sod-${sourceDate}-${symbol}-${direction}-${setupSlug}${qualifier}`;
 }
@@ -122,24 +141,88 @@ function exportError(message, details = null) {
   return error;
 }
 
+function meaningfulAuthorityValue(value) {
+  return value !== undefined && value !== null && value !== false && value !== "";
+}
+
+function assertNoRuntimeAuthority(candidate, index) {
+  const violations = [];
+  const lifecycle = upper(candidate.lifecycleState || candidate.status);
+  if (lifecycle && lifecycle !== "WAITING") {
+    violations.push(`lifecycle/status ${lifecycle} is runtime authority; only WAITING proposal intent is permitted`);
+  }
+  if (candidate.armAuthorized === true || candidate.armPolicy?.armAuthorized === true) {
+    violations.push("ARM authorization may not be supplied by SOD export input");
+  }
+  for (const field of FORBIDDEN_RUNTIME_AUTHORITY_FIELDS) {
+    if (hasOwn(candidate, field) && meaningfulAuthorityValue(candidate[field])) {
+      violations.push(`${field} is runtime authority/review state and may not be supplied by SOD export input`);
+    }
+  }
+  if (violations.length) {
+    throw exportError(
+      `SOD candidate at index ${index} contains forbidden runtime authority: ${violations.join("; ")}`,
+      { index, violations },
+    );
+  }
+}
+
+function resolvedManagementContract(candidate, candidateId) {
+  if (candidate.managementPlan !== undefined && (
+    !candidate.managementPlan
+    || typeof candidate.managementPlan !== "object"
+    || Array.isArray(candidate.managementPlan)
+  )) {
+    throw exportError(
+      `SOD candidate ${candidateId} has legacy managementPlan that is not a structured object; provide managementContract or omit it for the fail-closed default`,
+      { candidateId },
+    );
+  }
+
+  const managementContract = candidate.managementContract
+    ?? candidate.managementPlan
+    ?? defaultManagementContract();
+
+  if (!managementContract || typeof managementContract !== "object" || Array.isArray(managementContract)) {
+    throw exportError(`SOD candidate ${candidateId} managementContract must be a structured object`, { candidateId });
+  }
+  if (!text(managementContract.mode)) {
+    throw exportError(`SOD candidate ${candidateId} managementContract.mode is required`, { candidateId });
+  }
+  return clone(managementContract);
+}
+
 function buildCandidate(candidate, {
   sourceDate,
   generatedAt,
   bundleValidity,
   index,
 }) {
+  assertNoRuntimeAuthority(candidate, index);
+
+  if (candidate.source && upper(candidate.source) !== SOD_A_PLUS_TRADES_SOURCE) {
+    throw exportError(
+      `SOD candidate at index ${index} source must be ${SOD_A_PLUS_TRADES_SOURCE}`,
+      { index, candidateSource: candidate.source },
+    );
+  }
+  if (candidate.sourceDate && text(candidate.sourceDate) !== sourceDate) {
+    throw exportError(
+      `SOD candidate at index ${index} sourceDate ${text(candidate.sourceDate)} conflicts with bundle sourceDate ${sourceDate}`,
+      { index, candidateSourceDate: text(candidate.sourceDate), bundleSourceDate: sourceDate },
+    );
+  }
+
   const candidateId = candidateIdFor(candidate, sourceDate, index);
-  const validity = candidate.validity?.validFrom ? clone(candidate.validity) : clone(bundleValidity);
-  const managementContract = candidate.managementContract
-    ?? candidate.managementPlan
-    ?? defaultManagementContract();
+  const validity = hasOwn(candidate, "validity") ? clone(candidate.validity) : clone(bundleValidity);
+  const managementContract = resolvedManagementContract(candidate, candidateId);
 
   const proposal = {
     candidateId,
     contractVersion: Number(candidate.contractVersion ?? 1),
     schemaVersion: Number(candidate.schemaVersion ?? 1),
     source: SOD_A_PLUS_TRADES_SOURCE,
-    sourceDate: text(candidate.sourceDate || sourceDate),
+    sourceDate,
     generatedAt: text(candidate.generatedAt || generatedAt),
     symbol: upper(candidate.symbol),
     direction: upper(candidate.direction),
@@ -159,7 +242,8 @@ function buildCandidate(candidate, {
     noTradeConditions: clone(candidate.noTradeConditions)
       ?? (text(candidate.plan?.noTradeZone) ? [text(candidate.plan.noTradeZone)] : null),
     targets: normalizedTargets(candidate.targets),
-    managementContract: clone(managementContract),
+    managementContract,
+    ...(candidate.managementPlan !== undefined ? { managementPlan: clone(candidate.managementPlan) } : {}),
     bestLocation: clone(candidate.bestLocation ?? candidate.plan?.bestLocation) ?? null,
     context: clone(candidate.context)
       ?? (candidate.riskPolicy ? { riskPolicy: clone(candidate.riskPolicy) } : null),
