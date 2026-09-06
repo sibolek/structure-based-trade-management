@@ -1,39 +1,71 @@
 {
-  "source": "SOD",
+  "schemaVersion": 1,
+  "source": "SOD_A_PLUS_TRADES",
+  "sourceDate": "2026-08-29",
+  "generatedAt": "2026-08-29T15:55:00.000Z",
   "bundleId": "example-2026-08-29-morning-v2",
   "candidates": [
     {
       "candidateId": "sod-2026-08-29-NVDA-1",
       "contractVersion": 2,
       "schemaVersion": 1,
-      "source": "SOD_A_PLUS",
+      "source": "SOD_A_PLUS_TRADES",
       "sourceDate": "2026-08-29",
       "generatedAt": "2026-08-29T15:55:00.000Z",
       "symbol": "NVDA",
       "direction": "LONG",
       "setup": "Liquidity sweep reclaim continuation",
+      "decisionTimeframe": "5m",
+      "entryTimeframe": "2m",
+      "volatilityTimeframe": "2m",
       "timeframe": "2m",
       "thesis": "Updated proposal: sweep and reclaim at structural support, requiring a firmer hold before continuation.",
       "trigger": {
-        "type": "RECLAIM_AND_HOLD",
-        "level": 225.55
+        "schemaVersion": 1,
+        "evaluatorVersion": 1,
+        "satisfaction": {
+          "nodeId": "operator-confirm-nvda-reclaim-v2",
+          "type": "MANUAL_CONFIRMATION",
+          "prompt": "Confirm NVDA has reclaimed 225.55 and is holding the revised continuation structure."
+        },
+        "persistence": {
+          "type": "ONE_SHOT"
+        }
       },
       "structuralInvalidation": {
         "price": 224.8,
-        "rule": "break below updated sweep low",
+        "rule": "Break below the revised swept structural low invalidates the updated long thesis.",
         "referenceType": "SWEEP_LOW",
-        "reason": "updated long thesis invalid below the revised swept structural low"
+        "reason": "Updated long thesis invalid below the revised swept structural low.",
+        "sourceTimeframe": "2m"
       },
       "plannedEntryReference": 225.6,
-      "targets": [226.5, 227.2],
-      "managementPlan": "Manage against structure.",
+      "targets": [
+        { "targetId": "T1", "label": "T1", "price": 226.5 },
+        { "targetId": "T2", "label": "T2", "price": 227.2 }
+      ],
+      "managementContract": {
+        "mode": "SINGLE_ENTRY",
+        "allowReAdd": false,
+        "allowFlatReEntry": false,
+        "source": "FIXTURE_FAIL_CLOSED"
+      },
       "context": {
-        "note": "Version-supersession fixture only; not a live trade recommendation."
+        "note": "Canonical V2.4 version-supersession fixture only; not a live trade recommendation."
       },
       "rating": "A+",
-      "validity": null,
+      "validity": {
+        "validFrom": "2026-08-29T15:55:00.000Z",
+        "validUntil": "2026-08-29T20:00:00.000Z",
+        "timezone": "America/Denver",
+        "session": "SMOKE_TEST",
+        "sourceLabel": "FIXTURE",
+        "provenance": {
+          "source": "CANONICAL_V24_FIXTURE"
+        }
+      },
       "armPolicy": {
-        "requestedMode": "AUTO"
+        "requestedMode": "MANUAL"
       }
     }
   ]
