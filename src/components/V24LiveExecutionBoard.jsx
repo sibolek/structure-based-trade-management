@@ -56,13 +56,13 @@ function RetiredAuthorizationExceptions({ exceptions, onReconcile }) {
             )}
             {item.status !== "RECONCILED" ? (
               <div className="mt-3 flex flex-wrap gap-2">
-                <button onClick={() => onReconcile(item.exceptionId, "BROKER_TRUTH_REVIEWED")} className="rounded border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-semibold text-sky-100">Reviewed — Keep Outside Expired Auth</button>
-                {item.code === "FILL_ATTRIBUTION_UNRESOLVED" && item.plausibleLaterHandoffIds?.length > 0 && (
-                  <button onClick={() => onReconcile(item.exceptionId, "ASSIGNED_TO_OTHER_AUTHORIZATION")} className="rounded border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100">Assign to Other Authorization</button>
-                )}
+                <button onClick={() => onReconcile(item.exceptionId, "BROKER_TRUTH_REVIEWED", null)} className="rounded border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-semibold text-sky-100">Reviewed — Keep Outside Expired Auth</button>
+                {item.code === "FILL_ATTRIBUTION_UNRESOLVED" && item.plausibleLaterHandoffIds?.map((handoffId) => (
+                  <button key={handoffId} onClick={() => onReconcile(item.exceptionId, "ASSIGNED_TO_OTHER_AUTHORIZATION", handoffId)} className="rounded border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100">Assign → {handoffId}</button>
+                ))}
               </div>
             ) : (
-              <p className="mt-2 text-xs text-emerald-300">Reconciled: {item.reconciliationOutcome}</p>
+              <p className="mt-2 text-xs text-emerald-300">Reconciled: {item.reconciliationOutcome}{item.reconciliationAssignedHandoffId ? ` → ${item.reconciliationAssignedHandoffId}` : ""}</p>
             )}
           </div>
         ))}
@@ -130,11 +130,12 @@ export default function V24LiveExecutionBoard() {
     });
   };
 
-  const reconcileRetiredException = async (exceptionId, outcome) => reconcileV24RetiredAuthorizationExceptionSerialized({
+  const reconcileRetiredException = async (exceptionId, outcome, assignedHandoffId = null) => reconcileV24RetiredAuthorizationExceptionSerialized({
     exceptionId,
     outcome,
+    assignedHandoffId,
     note: outcome === "ASSIGNED_TO_OTHER_AUTHORIZATION"
-      ? "Operator reviewed broker truth and assigned attribution to a later authorization."
+      ? `Operator reviewed broker truth and assigned attribution to ${assignedHandoffId}.`
       : "Operator reviewed broker truth; the fill remains outside the expired authorization.",
     at: nowIso(),
   });
