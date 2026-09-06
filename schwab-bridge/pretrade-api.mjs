@@ -194,7 +194,8 @@ const armService = new PreTradeArmService({
 });
 const armRecovery = armService.recoverAll();
 const ocoClosedNoArmRecovery = ocoService.reconcileClosedNoArm();
-const armRecoveryBlocked = armRecovery.operations.some((item) => item.status === "RECOVERY_BLOCKED");
+const armRecoveryBlocked = armRecovery.requestRecovery.some((item) => item.status === "RECOVERY_BLOCKED")
+  || armRecovery.operations.some((item) => item.status === "RECOVERY_BLOCKED");
 
 const handleReviewArmApi = createPreTradeReviewArmApiHandler({
   reviewService,
@@ -335,7 +336,7 @@ const server = http.createServer(async (req, res) => {
       reviewArmApi: true,
       armOperationAuthority: true,
       armRecoveryBlocked,
-      armRecoveryInspected: armRecovery.operations.length,
+      armRecoveryInspected: armRecovery.requestRecovery.length + armRecovery.operations.length,
       ocoAuthority: true,
       ocoRecoveryInspected: armRecovery.ocoRecovery.length + ocoClosedNoArmRecovery.length,
       executionOwnershipAuthorityConnected: false,
@@ -421,7 +422,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] Permission startup recovery inspected ${permissionRecovery.length} persisted attempt record(s).`);
   console.log("[ExecutionOS V2.4] Review state is server-side, package-bound, and keeps selected quantity unset until explicit operator selection.");
   console.log("[ExecutionOS V2.4] Final ARM is operator-only, freshly revalidates permission, and uses durable authorization proof for recovery.");
-  console.log(`[ExecutionOS V2.4] ARM startup recovery inspected ${armRecovery.operations.length} authorized operation(s); blocked=${armRecoveryBlocked}.`);
+  console.log(`[ExecutionOS V2.4] ARM startup recovery inspected ${armRecovery.requestRecovery.length + armRecovery.operations.length} operation(s); blocked=${armRecoveryBlocked}.`);
   console.log(`[ExecutionOS V2.4] OCO startup reconciliation inspected ${armRecovery.ocoRecovery.length + ocoClosedNoArmRecovery.length} group action(s).`);
   console.log("[ExecutionOS V2.4] Execution ownership projection is not yet connected; UNKNOWN blocks final ARM rather than being treated as FREE.");
   console.log("[ExecutionOS V2.4] Canonical READY/CAUTION/PASS and permission blockers are permission-pipeline authority only.");
