@@ -43,6 +43,7 @@ function authorization(overrides = {}) {
     authorizedAt: NOW,
     handoffId: "handoff-1",
     handoffCreatedAt: NOW,
+    executionOwnershipProof: { status: "FREE", source: "TEST_EXECUTION_AUTHORITY", revision: 9 },
     ...overrides,
   };
 }
@@ -92,10 +93,28 @@ test("AUTHORIZED freezes exact recovery payload and COMPLETED preserves it", () 
   const proof = armAuthorizationProof(authorized);
   assert.equal(proof.authority, "PRETRADE_ARM_OPERATION");
   assert.equal(proof.status, "AUTHORIZED");
+  assert.equal(proof.permissionState, "READY");
   assert.equal(proof.selectedQuantity, 25);
   assert.equal(proof.handoffId, "handoff-1");
+  assert.equal(proof.executionOwnershipProof.status, "FREE");
 
   const completed = repo.markCompleted("arm-op-1");
   assert.equal(completed.status, "COMPLETED");
   assert.deepEqual(armAuthorizationProof(completed), proof);
+});
+
+test("durable authorization proof rejects invalid permission state, direction, or unresolved Execution ownership", () => {
+  for (const [name, override] of [
+    ["permission state", { permissionState: "PERMISSION_EVALUATING" }],
+    ["direction", { direction: "SIDEWAYS" }],
+    ["ownership", { executionOwnershipProof: { status: "UNKNOWN" } }],
+  ]) {
+    const repo = new PreTradeArmOperationRepository({ filePath: tempFile(), clock: () => NOW });
+    repo.load();
+    repo.beginRequest({ operationId: `invalid-${name}`, request: request() });
+    assert.throws(
+      () => repo.authorize(`invalid-${name}`, authorization(override)),
+      (error) => error.code === "INVALID_ARM_AUTHORIZATION_PROOF",
+    );
+  }
 });
