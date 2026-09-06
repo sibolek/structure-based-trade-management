@@ -7,10 +7,13 @@ import { advanceV24HandoffActivation } from "./execution-v24-handoff-activation.
 import { evaluateV24InitialFillOwnership } from "./execution-v24-initial-fill-matcher.js";
 import { buildV23CandidateFromListeningInstallation } from "./execution-v24-local-installation.js";
 import {
-  advanceV24LiveLifecycle,
-  createV24LiveLifecycle,
-} from "./execution-v24-live-lifecycle.js";
-import { resolveV24RetirementSerialized } from "./execution-v24-retirement.js";
+  advanceV24ManagedLiveLifecycle,
+  createV24ManagedLiveLifecycle,
+} from "./execution-v24-managed-lifecycle.js";
+import {
+  requestV24RetirementSerialized,
+  resolveV24RetirementSerialized,
+} from "./execution-v24-retirement.js";
 import { isV24RouterGlobalStoreFailure } from "./execution-v24-router-telemetry.js";
 
 export const V24_RUNTIME_ROUTER_SCHEMA_VERSION = 1;
@@ -177,6 +180,7 @@ export function projectV24LifecycleToExecutionTrade({
       actualStopRisk: lifecycle.actualStopRisk,
       lastProcessedLifecycleSequence: lifecycle.lastProcessedSequence,
       lastProjectedLifecycleSequence: lifecycle.lastProcessedSequence,
+      liveManagement: lifecycle.management ? structuredClone(lifecycle.management) : base?.broker?.liveManagement ?? null,
     },
     decisions,
   });
@@ -223,7 +227,7 @@ export async function promoteV24FirstFillAtomically({
         throw routerError("V2.4 first-fill promotion collided with newer durable ownership", "V24_FIRST_FILL_PROMOTION_CONFLICT");
       }
 
-      promotedLifecycle = createV24LiveLifecycle({ installation, matchedExecution, brokerState });
+      promotedLifecycle = createV24ManagedLiveLifecycle({ installation, matchedExecution, brokerState });
       promotedTrade = projectV24LifecycleToExecutionTrade({
         installation,
         lifecycle: promotedLifecycle,
@@ -262,6 +266,7 @@ export async function advanceV24OwnedLifecycleAtomically({
   storeKey = EXECUTION_BOARD_STORE_KEY,
   handoffId,
   brokerState,
+  now = Date.now(),
   lockManager = globalThis?.navigator?.locks,
 } = {}) {
   const id = text(handoffId);
@@ -285,7 +290,7 @@ export async function advanceV24OwnedLifecycleAtomically({
     });
   }
 
-  const preview = advanceV24LiveLifecycle({ lifecycle, installation, brokerState });
+  const preview = advanceV24ManagedLiveLifecycle({ lifecycle, installation, brokerState, now });
   const projectedPreview = projectV24LifecycleToExecutionTrade({
     installation,
     lifecycle: preview,
@@ -310,10 +315,11 @@ export async function advanceV24OwnedLifecycleAtomically({
         throw routerError("V2.4 LIVE ownership projection disappeared during lifecycle transaction", "V24_LIVE_PROJECTION_MISSING");
       }
 
-      advanced = advanceV24LiveLifecycle({
+      advanced = advanceV24ManagedLiveLifecycle({
         lifecycle: latestLifecycle,
         installation: latestInstallation,
         brokerState,
+        now,
       });
       projected = projectV24LifecycleToExecutionTrade({
         installation: latestInstallation,
@@ -391,6 +397,7 @@ export async function runV24ExecutionRouterCycle({
 
   const activate = dependencies.advanceActivation || advanceV24HandoffActivation;
   const matchFill = dependencies.evaluateInitialFill || evaluateV24InitialFillOwnership;
+  const requestRetirement = dependencies.requestRetirement || requestV24RetirementSerialized;
   const resolveRetirement = dependencies.resolveRetirement || resolveV24RetirementSerialized;
   const promote = dependencies.promoteFirstFill || promoteV24FirstFillAtomically;
   const advanceLifecycle = dependencies.advanceLifecycle || advanceV24OwnedLifecycleAtomically;
@@ -399,9 +406,6 @@ export async function runV24ExecutionRouterCycle({
   const results = [];
   let envelopes = [];
 
-  // Decision 22C: transport/activation availability is independent from
-  // already-durable broker-ownership work. Missing or failing pretrade
-  // discovery must not prevent retirement, first-fill, or lifecycle processing.
   if (!transport || typeof transport.discover !== "function") {
     results.push(routerResult(
       "TRANSPORT",
@@ -422,8 +426,6 @@ export async function runV24ExecutionRouterCycle({
       envelopes = [];
     }
 
-    // Decision 20: activation envelopes are always processed serially in server order.
-    // Decision 22I: one handoff failure must not prevent unrelated safe handoffs.
     for (const envelope of envelopes) {
       const handoffId = text(envelope?.handoff?.handoffId);
       if (!handoffId) continue;
@@ -461,8 +463,6 @@ export async function runV24ExecutionRouterCycle({
     }
   }
 
-  // Delivered handoffs disappear from discovery, so local LISTENING authorization
-  // remains the durable source for retirement and first-fill ownership.
   let store = readStore({ storage, storeKey });
   const installations = [...(Array.isArray(store.v24Installations) ? store.v24Installations : [])]
     .sort((a, b) => Date.parse(a?.preparedAt || 0) - Date.parse(b?.preparedAt || 0) || text(a?.handoffId).localeCompare(text(b?.handoffId)));
@@ -475,6 +475,36 @@ export async function runV24ExecutionRouterCycle({
     store = readStore({ storage, storeKey });
     let retirement = retirementByHandoff(store, handoffId);
     let lifecycle = lifecycleByHandoff(store, handoffId);
+
+    const entryAuthorizationUntil = isoTimestamp(installation?.compatibility?.v24?.entryAuthorizationUntil);
+    if (!lifecycle && !retirement && entryAuthorizationUntil) {
+      const observedNow = isoTimestamp(now());
+      if (observedNow && Date.parse(observedNow) >= Date.parse(entryAuthorizationUntil)) {
+        try {
+          retirement = await requestRetirement({
+            storage,
+            storeKey,
+            handoffId,
+            receiverId: receiver,
+            requestedAt: entryAuthorizationUntil,
+            reason: "ENTRY_AUTHORIZATION_EXPIRED",
+            lockManager,
+          });
+          results.push(routerResult("ENTRY_AUTHORIZATION", handoffId, retirement.status, {
+            reason: "ENTRY_AUTHORIZATION_EXPIRED",
+            entryAuthorizationUntil,
+          }));
+          store = readStore({ storage, storeKey });
+        } catch (error) {
+          rethrowGlobalStoreFailure(error);
+          results.push(routerResult("ENTRY_AUTHORIZATION", handoffId, "ERROR", {
+            reason: errorReason(error),
+            entryAuthorizationUntil,
+          }));
+          continue;
+        }
+      }
+    }
 
     if (retirement && upper(retirement.status) === "REQUESTED") {
       try {
@@ -557,7 +587,6 @@ export async function runV24ExecutionRouterCycle({
     }
   }
 
-  // Lifecycle processing is independent of discovery and continues through LIVE/EXIT.
   store = readStore({ storage, storeKey });
   const lifecycles = [...(Array.isArray(store.v24Lifecycles) ? store.v24Lifecycles : [])]
     .sort((a, b) => text(a?.handoffId).localeCompare(text(b?.handoffId)));
@@ -567,11 +596,13 @@ export async function runV24ExecutionRouterCycle({
     if (!handoffId) continue;
 
     try {
+      const cycleNow = now();
       const advanced = await advanceLifecycle({
         storage,
         storeKey,
         handoffId,
         brokerState,
+        now: cycleNow,
         lockManager,
       });
       results.push(routerResult("LIFECYCLE", handoffId, advanced.status, {
