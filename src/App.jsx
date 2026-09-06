@@ -1,6 +1,6 @@
 import { useState } from "react";
 import BrokerStatusPanel from "./components/BrokerStatusPanel.jsx";
-import PreTradeWaitingBoard from "./components/PreTradeWaitingBoard.jsx";
+import PreTradeWorkspace from "./components/PreTradeWorkspace.jsx";
 import V24AuthorizedTradesBoard from "./components/V24AuthorizedTradesBoard.jsx";
 import V24LiveExecutionBoard from "./components/V24LiveExecutionBoard.jsx";
 import V24RouterHealthPanel from "./components/V24RouterHealthPanel.jsx";
@@ -25,7 +25,7 @@ export default function App() {
 
       <div className={workspace === "PRETRADE" ? "block" : "hidden"}>
         <div className="mx-auto max-w-7xl px-3 py-4 md:px-5">
-          <PreTradeWaitingBoard pretrade={pretrade} />
+          <PreTradeWorkspace pretrade={pretrade} broker={broker} />
         </div>
       </div>
 
