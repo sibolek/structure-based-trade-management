@@ -83,6 +83,7 @@ function statusForError(error) {
     || code === "CANDIDATE_NOT_YET_VALID"
     || code === "CANDIDATE_VALIDITY_EXPIRED"
     || code === "TRIGGER_ENGINE_AUTHORITY_REQUIRED"
+    || code === "PERMISSION_PIPELINE_AUTHORITY_REQUIRED"
   ) return 409;
   if (
     code === "EACCES"
@@ -125,6 +126,12 @@ const COMMANDS = new Map([
   ["clear-recovery-gate", "clearRecoveryGate"],
 ]);
 
+const PERMISSION_PIPELINE_ONLY_COMMANDS = new Set([
+  "publish-permission",
+  "set-permission-blocker",
+  "clear-permission-blocker",
+]);
+
 export class PreTradeLifecycleApiService {
   constructor({ coordinator } = {}) {
     if (!coordinator || typeof coordinator.candidateSnapshot !== "function") {
@@ -149,14 +156,18 @@ export class PreTradeLifecycleApiService {
       throw apiError("contractVersion in body conflicts with path identity", "CANDIDATE_IDENTITY_CONFLICT");
     }
 
-    if (commandName === "begin-permission") {
-      const candidate = this.coordinator.candidateSnapshot(pathIdentity.candidateId, pathIdentity.contractVersion);
-      if (isCanonicalCandidate(candidate)) {
-        throw apiError(
-          "canonical candidates may begin permission only from authoritative trigger-engine satisfaction",
-          "TRIGGER_ENGINE_AUTHORITY_REQUIRED",
-        );
-      }
+    const candidate = this.coordinator.candidateSnapshot(pathIdentity.candidateId, pathIdentity.contractVersion);
+    if (commandName === "begin-permission" && isCanonicalCandidate(candidate)) {
+      throw apiError(
+        "canonical candidates may begin permission only from authoritative trigger-engine satisfaction",
+        "TRIGGER_ENGINE_AUTHORITY_REQUIRED",
+      );
+    }
+    if (PERMISSION_PIPELINE_ONLY_COMMANDS.has(commandName) && isCanonicalCandidate(candidate)) {
+      throw apiError(
+        "canonical permission outcomes and blockers may be established only by the authoritative permission pipeline",
+        "PERMISSION_PIPELINE_AUTHORITY_REQUIRED",
+      );
     }
 
     const result = this.coordinator[methodName]({
@@ -192,9 +203,11 @@ export function createPreTradeLifecycleApiHandler({
 
     try {
       const payload = await readJson(req, maxBodyBytes);
-      const response = service.execute(route.commandName, route, payload);
+      const response = this?.execute ? null : null;
+      void response;
+      const serviceResponse = service.execute(route.commandName, route, payload);
       json(res, 200, {
-        ...response,
+        ...serviceResponse,
         brokerWriteAuthority: false,
       }, origin);
     } catch (error) {
