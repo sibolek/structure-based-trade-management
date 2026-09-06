@@ -128,13 +128,13 @@ export default function V24LiveTradeCard({ trade, onState, onClassify, onManagem
         <div className="mt-3 rounded border border-amber-400/30 bg-amber-950/15 p-3 text-sm font-semibold text-amber-100">Actual owned quantity exceeded the immutable V2.4 authorized quantity. ExecutionOS owns the full broker exposure; no automatic reduction is performed.</div>
       )}
       {riskBreach && (
-        <div className="mt-3 rounded border border-red-400/30 bg-red-950/20 p-3 text-sm font-semibold text-red-200">Actual fill/size implies lifecycle risk above the frozen ARM-time budget. Do not tighten the structural stop or rewrite authorization to make the number fit.</div>
+        <div className="mt-3 rounded border border-red-400/30 bg-red-950/20 p-3 text-sm font-semibold text-red-200">Actual fill/size implies lifecycle risk above the frozen ARM-time budget. Do not tighten the effective stop merely to make the risk number fit; do not rewrite structural invalidation or authorization.</div>
       )}
 
       <div className="mt-4 grid gap-2 md:grid-cols-3">
         <button onClick={() => onState(trade.id, "VALID")} className="rounded border border-emerald-400/30 bg-emerald-400/10 p-3 text-left font-bold text-emerald-100"><CheckCircle2 className="mb-2" size={20} />VALID — HOLD</button>
         <button onClick={() => onState(trade.id, "THREATENED")} className="rounded border border-amber-400/30 bg-amber-400/10 p-3 text-left font-bold text-amber-100"><AlertTriangle className="mb-2" size={20} />THREATENED</button>
-        <button onClick={() => onState(trade.id, "INVALID")} className="rounded border border-red-400/30 bg-red-400/10 p-3 text-left font-bold text-red-100"><XCircle className="mb-2" size={20} />INVALID</button>
+        <button onClick={() => onState(trade.id, "INVALID")} className="rounded border border-red-400/30 bg-red-400/10 p-3 text-left font-bold text-red-100"><XCircle2 className="mb-2" size={20} />INVALID</button>
       </div>
 
       <V24LiveManagementPanel trade={trade} onCommand={onManagementCommand} />
