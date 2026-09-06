@@ -1,9 +1,12 @@
 import { Activity, Radio, ShieldCheck, WifiOff } from "lucide-react";
+import { PRETRADE_UI_ACTIVE_STATES } from "../pretrade/pretrade-ui-projection.js";
 
 const WORKSPACES = [
   { id: "PRETRADE", label: "PRE-TRADE" },
   { id: "EXECUTION", label: "EXECUTION" },
 ];
+
+const ACTIVE_PRETRADE_STATES = new Set(PRETRADE_UI_ACTIVE_STATES);
 
 function StatusChip({ connected, label, offlineLabel }) {
   return (
@@ -16,7 +19,7 @@ function StatusChip({ connected, label, offlineLabel }) {
 
 export default function WorkspaceNav({ workspace, onChange, broker, pretrade }) {
   const candidates = Array.isArray(pretrade?.state?.candidates) ? pretrade.state.candidates : [];
-  const waiting = candidates.filter((candidate) => candidate.lifecycleState === "WAITING").length;
+  const active = candidates.filter((candidate) => ACTIVE_PRETRADE_STATES.has(String(candidate.lifecycleState || "").toUpperCase())).length;
   const positions = Array.isArray(broker?.state?.positions) ? broker.state.positions.length : 0;
 
   return (
@@ -28,20 +31,20 @@ export default function WorkspaceNav({ workspace, onChange, broker, pretrade }) 
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <StatusChip connected={broker?.connected} label={`SCHWAB · ${positions} POS`} offlineLabel="SCHWAB OFFLINE" />
-          <StatusChip connected={pretrade?.connected} label={`PRE-TRADE · WAITING ${waiting}`} offlineLabel="PRE-TRADE OFFLINE" />
+          <StatusChip connected={pretrade?.connected} label={`PRE-TRADE · ACTIVE ${active}`} offlineLabel="PRE-TRADE OFFLINE" />
         </div>
       </div>
 
       <nav className="grid grid-cols-2" aria-label="ExecutionOS workspaces">
         {WORKSPACES.map((item) => {
-          const active = workspace === item.id;
+          const selected = workspace === item.id;
           const Icon = item.id === "PRETRADE" ? Radio : Activity;
           return (
             <button
               key={item.id}
               type="button"
               onClick={() => onChange(item.id)}
-              className={`flex items-center justify-center gap-2 border-r border-white/10 px-3 py-3 text-xs font-bold tracking-wide last:border-r-0 ${active ? "bg-sky-400/10 text-sky-100" : "text-zinc-500 hover:bg-white/[0.025] hover:text-zinc-300"}`}
+              className={`flex items-center justify-center gap-2 border-r border-white/10 px-3 py-3 text-xs font-bold tracking-wide last:border-r-0 ${selected ? "bg-sky-400/10 text-sky-100" : "text-zinc-500 hover:bg-white/[0.025] hover:text-zinc-300"}`}
             >
               <Icon size={14} />
               {item.label}
