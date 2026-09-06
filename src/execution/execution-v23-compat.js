@@ -46,6 +46,34 @@ function deepFreeze(value) {
 function immutable(value) { return deepFreeze(structuredClone(value)); }
 function compatibilityError(message, code) { const error = new Error(message); error.code = code; return error; }
 
+function normalizeInstrumentEconomics(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const assetType = upper(raw.assetType);
+  if (!["EQUITY", "FUTURE"].includes(assetType)) throw compatibilityError("handoff instrument economics asset type is invalid", "INVALID_V24_EXECUTION_PROVENANCE");
+  const minimumQuantity = positiveNumber(raw.minimumQuantity);
+  const quantityIncrement = positiveNumber(raw.quantityIncrement);
+  if (!minimumQuantity || !quantityIncrement) throw compatibilityError("handoff instrument quantity economics are incomplete", "INVALID_V24_EXECUTION_PROVENANCE");
+  const tickSize = positiveNumber(raw.tickSize);
+  const tickValue = positiveNumber(raw.tickValue);
+  const explicitPointValue = positiveNumber(raw.pointValue);
+  const derivedPointValue = tickSize && tickValue ? tickValue / tickSize : null;
+  if (assetType === "FUTURE" && !explicitPointValue && !derivedPointValue) throw compatibilityError("handoff futures point/tick economics are incomplete", "INVALID_V24_EXECUTION_PROVENANCE");
+  if (assetType === "FUTURE" && explicitPointValue && derivedPointValue && Math.abs(explicitPointValue - derivedPointValue) > 1e-9) throw compatibilityError("handoff futures point/tick economics conflict", "INVALID_V24_EXECUTION_PROVENANCE");
+  return {
+    assetType,
+    symbol: upper(raw.symbol) || null,
+    instrumentCurrency: upper(raw.instrumentCurrency) || null,
+    minimumQuantity,
+    quantityIncrement,
+    tickSize,
+    tickValue,
+    pointValue: assetType === "EQUITY" ? (explicitPointValue ?? 1) : (explicitPointValue ?? derivedPointValue),
+    metadataSource: upper(raw.metadataSource) || null,
+    metadataObservedAt: isoTimestamp(raw.metadataObservedAt),
+    metadataVersion: text(raw.metadataVersion) || null,
+  };
+}
+
 function normalizeHandoffForV23(handoff) {
   if (!handoff || typeof handoff !== "object") throw compatibilityError("immutable V2.4 handoff is required", "V24_HANDOFF_REQUIRED");
   for (const field of V24_REQUIRED_TEXT_FIELDS) {
@@ -61,6 +89,9 @@ function normalizeHandoffForV23(handoff) {
   const authorizedAt = isoTimestamp(handoff.authorizedAt);
   const createdAt = isoTimestamp(handoff.createdAt);
   const direction = upper(handoff.direction);
+  const candidateValidUntil = handoff.candidateValidUntil === undefined || handoff.candidateValidUntil === null ? null : isoTimestamp(handoff.candidateValidUntil);
+  const entryAuthorizationUntil = handoff.entryAuthorizationUntil === undefined || handoff.entryAuthorizationUntil === null ? null : isoTimestamp(handoff.entryAuthorizationUntil);
+  const instrumentEconomics = normalizeInstrumentEconomics(handoff.instrumentEconomics);
 
   if (!Number.isInteger(contractVersion) || contractVersion < 1) throw compatibilityError("handoff contractVersion is invalid", "INVALID_V24_EXECUTION_PROVENANCE");
   if (!["LONG", "SHORT"].includes(direction)) throw compatibilityError("handoff direction must be LONG or SHORT", "INVALID_V24_EXECUTION_PROVENANCE");
@@ -72,8 +103,12 @@ function normalizeHandoffForV23(handoff) {
   if (handoff.authorizedMaxDollarRisk !== undefined && handoff.authorizedMaxDollarRisk !== null && authorizedMaxDollarRisk === null) {
     throw compatibilityError("handoff authorizedMaxDollarRisk is invalid", "INVALID_V24_EXECUTION_PROVENANCE");
   }
+  if (handoff.candidateValidUntil !== undefined && handoff.candidateValidUntil !== null && !candidateValidUntil) throw compatibilityError("handoff candidateValidUntil is invalid", "INVALID_V24_EXECUTION_PROVENANCE");
+  if (handoff.entryAuthorizationUntil !== undefined && handoff.entryAuthorizationUntil !== null && !entryAuthorizationUntil) throw compatibilityError("handoff entryAuthorizationUntil is invalid", "INVALID_V24_EXECUTION_PROVENANCE");
   if (!authorizedAt || !createdAt) throw compatibilityError("handoff timestamps are invalid", "INVALID_V24_EXECUTION_PROVENANCE");
   if (Date.parse(createdAt) < Date.parse(authorizedAt)) throw compatibilityError("handoff createdAt cannot precede authorizedAt", "INVALID_V24_EXECUTION_PROVENANCE");
+  if (entryAuthorizationUntil && Date.parse(entryAuthorizationUntil) <= Date.parse(authorizedAt)) throw compatibilityError("handoff entry authorization expired before ARM", "INVALID_V24_EXECUTION_PROVENANCE");
+  if (candidateValidUntil && entryAuthorizationUntil && Date.parse(entryAuthorizationUntil) > Date.parse(candidateValidUntil) && handoff.entryAuthorizationExtendsCandidateValidity !== true) throw compatibilityError("handoff entry authorization exceeds candidate validity without explicit frozen authority", "INVALID_V24_EXECUTION_PROVENANCE");
   if (direction === "LONG" && !(currentExpectedEntry > effectiveStop)) throw compatibilityError("LONG expected entry must be above effective stop", "INVALID_V24_EXECUTION_PROVENANCE");
   if (direction === "SHORT" && !(currentExpectedEntry < effectiveStop)) throw compatibilityError("SHORT expected entry must be below effective stop", "INVALID_V24_EXECUTION_PROVENANCE");
 
@@ -101,6 +136,11 @@ function normalizeHandoffForV23(handoff) {
     riskEvaluationId: text(handoff.riskEvaluationId),
     authorizedAt,
     handoffCreatedAt: createdAt,
+    candidateValidUntil,
+    entryAuthorizationUntil,
+    entryAuthorizationSource: upper(handoff.entryAuthorizationSource) || null,
+    entryAuthorizationExtendsCandidateValidity: handoff.entryAuthorizationExtendsCandidateValidity === true,
+    instrumentEconomics: instrumentEconomics ? structuredClone(instrumentEconomics) : null,
   };
 }
 
@@ -142,7 +182,8 @@ export function plannedExecutionRisk(trade) {
   const stop = executionStop(trade);
   const quantity = executionAuthorizedQuantity(trade);
   if ([entry, stop, quantity].some((value) => value === null)) return null;
-  return Math.abs(entry - stop) * quantity;
+  const pointValue = isV24Origin(trade) ? positiveNumber(trade.v24.instrumentEconomics?.pointValue) ?? 1 : 1;
+  return Math.abs(entry - stop) * quantity * pointValue;
 }
 
 export function assertV24AuthorizationImmutable(before, after) {
