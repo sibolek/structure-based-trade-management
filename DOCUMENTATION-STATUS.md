@@ -1,14 +1,16 @@
 # ExecutionOS Documentation Status
 
-**Updated:** 2026-09-04
+**Updated:** 2026-09-06
 
 This file distinguishes current authoritative project records from historical planning snapshots and dated approval artifacts.
+
+---
 
 ## Current authoritative records
 
 ### `USER-GUIDE.md`
 
-The living operator guide for the accepted V2.4 Execution Board handoff branch.
+Living operator guide for the accepted V2.4 Execution Board handoff branch.
 
 Current integration branch:
 
@@ -16,33 +18,24 @@ Current integration branch:
 v24-execution-board-handoff
 ```
 
-Important release distinction:
+Release distinction:
 
 - V2.4 Phases 1–4 are merged to `main`;
-- the accepted Execution Board handoff/runtime/recovery implementation is still on `v24-execution-board-handoff` and has not yet been merged to `main`;
-- therefore operators expecting Decision 22 behavior must remain on the handoff branch until an explicit merge occurs.
+- the accepted PRETRADE→ARM→Execution Board integration is closed on `v24-execution-board-handoff`;
+- the integration must not be assumed to exist on `main` until an explicit merge occurs.
 
-### Approved design authority
+### Current frozen design authority
 
-Top-level V2.4:
+- `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md` — consolidated V2.4 PRETRADE→ARM architecture and Decisions 22–97.
+- `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` — approved 76/76 Decision 22–97 traceability companion.
 
-- `docs/ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md`.
-- `docs/ExecutionOS_V2.4_Phase4_Effective_Stop_Risk_Sizing_Design_Baseline_v0.1_APPROVED.md`.
-
-Execution Board handoff:
-
-- `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Design_Baseline_v0.1_APPROVED.md`.
-- approved handoff addenda v0.1 through v1.0 — Decisions 10–20.
-- `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v1.1_APPROVED.md` — Decision 21, Full Trade Specification Inspector.
-- `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Design_Addendum_v1.2_APPROVED.md` — Decision 22, Normal Router Enablement & Recovery Hardening.
-
-Historical approved baselines remain frozen approval-time evidence. Do not rewrite them merely because implementation status advanced later.
+The v0.5 baseline supersedes conflicting earlier top-level design assumptions. Earlier approved baselines/addenda remain frozen historical approval-time evidence and should not be rewritten to simulate later state.
 
 ### Accepted implementation / closeout records
 
 - `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md`.
 - `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md`.
-- Execution Board handoff accepted implementation is represented by the current handoff branch code, approved Decisions 10–22, deterministic/browser acceptance suites, and the living operator/status documentation.
+- `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` — Slices 1–7 accepted implementation and final validation evidence.
 
 ---
 
@@ -55,7 +48,7 @@ v2.3.0
 baabb75f36050599f20e6c89e8db2f1f7d7769a1
 ```
 
-Legacy/manual V2.3 behavior remains the frozen downstream reference. V2.4-origin trades use the accepted exact-account ownership/lifecycle path and may not be routed through legacy symbol-only / `detectedAt` ownership logic.
+Legacy/manual V2.3 remains the frozen downstream reference. V2.4-origin trades use the accepted exact-account ownership/lifecycle path and do not use the legacy symbol-only / `detectedAt` ownership path.
 
 ### V2.4 merged state on `main`
 
@@ -64,13 +57,92 @@ Legacy/manual V2.3 behavior remains the frozen downstream reference. V2.4-origin
 - Phase 3 DSS / Micro-Volatility Buffer — **COMPLETE / ACCEPTED / MERGED**;
 - Phase 4 Effective-Stop Risk Sizing — **COMPLETE / ACCEPTED / MERGED via PR #14**.
 
-### Accepted handoff integration branch
+### Accepted integration branch
 
 ```text
 v24-execution-board-handoff
 ```
 
-Implemented/accepted capabilities include:
+Accepted implementation checkpoint before documentation-only closeout commits:
+
+```text
+3f794538ffbe5c5875a3d671143cb33890530b1f
+```
+
+Status:
+
+```text
+SLICES 1–7: ACCEPTED / CLOSED
+DECISIONS 22–97: FROZEN
+BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
+```
+
+---
+
+## Accepted end-to-end lifecycle
+
+```text
+CANDIDATE SOURCE
+→ CANONICAL INGRESS
+→ WAITING
+→ PRETRADE_TRIGGER_EVALUATING
+→ PERMISSION_EVALUATING
+→ READY / CAUTION / PASS
+→ OPERATOR REVIEW
+→ ARM
+→ IMMUTABLE EXECUTION BOARD HANDOFF
+→ PENDING
+→ CLAIMED
+→ PREPARED
+→ LISTENING
+→ EXACT-ACCOUNT OPENING FILL
+→ LIVE
+→ PARTIAL / SCALE / MANAGEMENT
+→ FLAT
+→ EXIT
+→ OPERATOR EXIT CLASSIFICATION
+→ HISTORY
+→ SYMBOL OWNERSHIP RELEASE
+```
+
+Governing invariant:
+
+> **V2.4 authorizes; the handoff transfers; V2.3-compatible execution infrastructure owns execution.**
+
+The browser is presentation/operator-intent only. Server-side PRETRADE services remain authoritative for lifecycle, trigger, permission, review, OCO, and ARM. Downstream canonical store authorities remain separate and serialized.
+
+---
+
+## Accepted PRETRADE / ARM capabilities
+
+Implemented/accepted:
+
+- canonical candidate import, validity, hashing, versioning and supersession;
+- trigger relevance/satisfaction separation and durable trigger evidence;
+- immutable permission attempts;
+- structural-validity authority;
+- Phase 3 DSS + Phase 4 risk integration;
+- `READY / CAUTION / PASS` permission outcomes;
+- retryable/integrity blockers;
+- material review-package identity;
+- explicit quantity selection;
+- exact-package CAUTION acknowledgement;
+- OCO grouping and same-symbol ARM gate;
+- final direction/quantity/account confirmation;
+- fresh final ARM revalidation;
+- durable ARM operation journal and recovery;
+- immutable ARMED provenance;
+- immutable handoff + PENDING delivery creation;
+- PRETRADE Active, Authorized/Execution, and History projections;
+- no generic browser lifecycle or ARM authority.
+
+Imported WAITING candidates remain proposals until the explicit operator/server workflow advances them. They are not auto-ARMED by the runtime router.
+
+---
+
+## Accepted downstream/runtime capabilities
+
+Implemented/accepted:
 
 - immutable V2.4 authorization/handoff provenance;
 - handoff persistence and delivery state machine;
@@ -88,37 +160,53 @@ Implemented/accepted capabilities include:
 - default-on router with negative emergency pause only;
 - router health/telemetry;
 - reload/HMR/remount/takeover recovery;
-- deterministic and real-browser Web Lock acceptance tests;
 - no broker-write authority.
 
-### Current operator-surface boundary
+---
 
-The downstream handoff receiver/router/ownership path is implemented and accepted.
+## Accepted Slice 7 live-management capabilities
 
-The current PRE-TRADE browser/API surface does **not yet expose the complete**:
+- immutable first-entry authorization deadline;
+- no deadline extension due to delay/restart/recovery;
+- late opening fill preserved as broker truth + authorization exception, never retroactive authorization;
+- immutable ARM quantity ceiling;
+- finite position-build window;
+- explicit Complete Position Build;
+- downward-only live ceiling after unused capacity is relinquished/expired;
+- re-add gating within authorized identity and live ceiling;
+- exposure-increase risk checks;
+- finite lifecycle loss budget;
+- realized losses consume capacity; profits do not replenish it;
+- explicit live effective-stop authority and audit trail;
+- tighter stop can free risk only within existing ceilings;
+- wider stop cannot manufacture capacity;
+- structured target observations;
+- discretionary notes with no machine authority;
+- durable CRITICAL Authorization Exceptions;
+- explicit Authorization Exception reconciliation;
+- retired-authorization late-fill recovery/attribution;
+- managed router recovery;
+- narrow legacy V2.4 management compatibility.
 
-```text
-WAITING → permission → READY/CAUTION → ARM → create/register handoff
-```
+---
 
-workflow as one normal operator action path. Imported WAITING candidates remain proposals only until a valid handoff is created through the implemented internal authorization/handoff services.
+## Current intentionally incomplete / deferred areas
 
-### Current intentionally incomplete areas
-
-- complete upstream browser/API permission→ARM→handoff orchestration;
-- explicit reconciliation-resolution workflow;
-- broker writes/order placement/modification/cancellation/flattening;
-- buying-power/margin and portfolio-heat gates;
-- live NinjaTrader binding;
+- broker order placement/replacement/cancellation/modification/flattening;
+- a general broker-write Governor;
+- buying-power/margin eligibility and aggregate portfolio-heat gates;
+- live NinjaTrader execution binding;
+- cloud/multi-device authority;
+- a general reconciliation-resolution workflow for every possible broker coverage/provenance failure beyond the implemented Authorization Exception reconciliation path;
 - V3 Management Governor.
 
 V3 has not started.
 
 ---
 
-## Decision 22 accepted runtime model
+## Runtime router model
 
-The runtime router is default-on on the accepted handoff branch.
+The runtime router is default-on on the accepted branch.
 
 Emergency negative switch:
 
@@ -149,30 +237,60 @@ BLOCKED
 ERROR
 ```
 
-Reconciliation is durable trade/ownership state, not router health.
+Reconciliation remains durable trade/ownership state, not router health.
+
+---
+
+## Broker safety boundary
+
+```text
+readOnly === true
+brokerWriteAuthority === false
+```
+
+ExecutionOS does not place, replace, cancel, modify, reduce, or flatten broker orders.
+
+Actual equity order entry remains in thinkorswim/Schwab.
+
+---
+
+## Final acceptance evidence
+
+```text
+Focused Slice 7:                  26 / 26 PASS
+Downstream lifecycle E2E:          1 / 1 PASS
+Canonical PRETRADE→Execution E2E:  1 / 1 PASS
+Full repository regression:       734 / 734 PASS
+Production Vite build:            PASS
+Implementation worktree:          CLEAN
+Broker writes introduced:         NONE
+```
+
+The canonical PRETRADE→Execution E2E verifies real ingress, lifecycle, permission, review, ARM, immutable handoff, read-only transport/router ownership, partial/flat lifecycle, History, and symbol-ownership release in one synthetic path.
 
 ---
 
 ## EOD reporting status
 
-EOD enrichment is origin-aware:
+EOD enrichment remains origin-aware:
 
 ```text
-V24_HANDOFF        -> v24.effectiveStop is risk-stop authority
-LEGACY_MANUAL_V23  -> originalPlan.structuralStop is risk-stop authority
+V24_HANDOFF        -> authoritative V2.4 effective/managed stop semantics
+LEGACY_MANUAL_V23  -> originalPlan.structuralStop
 ```
 
-V2.4 structural invalidation remains separate provenance and is not substituted for `effectiveStop` in planned-risk/R calculations.
+V2.4 structural invalidation remains separate provenance and is not substituted for the effective stop in planned-risk calculations.
 
 ---
 
 ## Other current references
 
 - `README.md` — current repository overview.
-- `docs/ExecutionOS_EOD_Report.md` — authoritative EOD technical/operational reference.
-- `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` — authoritative dated V2.3-era architecture record.
+- `USER-GUIDE.md` — current operator procedure.
+- `docs/ExecutionOS_Documentation_Index.md` — authority/status map.
+- `docs/ExecutionOS_EOD_Report.md` — EOD technical/operational reference.
+- `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` — dated V2.3-era architecture record.
 - `research/30-day-management-study/methodology.md` — historical analytics provenance.
-- `docs/ExecutionOS_Documentation_Index.md` — cross-document authority/status map.
 
 ---
 
@@ -183,12 +301,12 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - PR #12 — V2.4 Phase 3 DSS implementation; merged.
 - PR #13 — Phase 3 documentation cleanup; merged.
 - PR #14 — V2.4 Phase 4 Effective-Stop Risk Sizing; merged.
-- Execution Board handoff integration — accepted branch work; merge status must be checked explicitly before treating `main` as containing it.
+- Execution Board handoff integration — **accepted/closed on branch**; merge status must be checked explicitly before treating `main` as containing it.
 
 ---
 
 ## Documentation rule
 
-Current validated code/runtime defines what the system actually does. `USER-GUIDE.md` translates that into operator procedure. Approved dated documents preserve frozen architecture/approval-time context and should not be rewritten to simulate later state.
+Current validated code/runtime defines what the system actually does. `USER-GUIDE.md` translates that into operator procedure. The v0.5 baseline and traceability audit preserve frozen architecture. The 2026-09-06 handoff-integration closeout preserves final accepted implementation evidence.
 
-When accepted implementation status changes, synchronize this file, `USER-GUIDE.md`, `README.md`, and `docs/ExecutionOS_Documentation_Index.md` so current records do not contradict one another.
+Do not rewrite frozen approved design records merely because implementation advanced. When accepted implementation status changes, synchronize this file, `USER-GUIDE.md`, `README.md`, and `docs/ExecutionOS_Documentation_Index.md` so current records do not contradict one another.
