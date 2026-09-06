@@ -8,6 +8,7 @@ import { PreTradeStore } from "../schwab-bridge/pretrade-state.mjs";
 import { PreTradeCandidateIngress } from "../schwab-bridge/pretrade-candidate-ingress.mjs";
 import { PreTradeLifecycleCoordinator } from "../schwab-bridge/pretrade-lifecycle-coordinator.mjs";
 import { PreTradeStructuralValidityService } from "../schwab-bridge/pretrade-structural-validity.mjs";
+import { PreTradePermissionDecisionService } from "../schwab-bridge/pretrade-permission-decision.mjs";
 import { PreTradePermissionAttemptRepository } from "../schwab-bridge/pretrade-permission-attempt-repository.mjs";
 import { PreTradePermissionPipeline } from "../schwab-bridge/pretrade-permission-pipeline.mjs";
 
@@ -36,6 +37,7 @@ function proposal(overrides = {}) {
       referenceType: "SWING_LOW",
       reason: "thesis fails below structure",
     },
+    context: { regime: "TRENDING" },
     managementContract: { mode: "FLEXIBLE_WITHIN_CEILING" },
     targets: [181, 182],
     validity: {
@@ -94,8 +96,8 @@ function fullRiskEvaluation({ accountId = "acct-1", status = "VALID" } = {}) {
 function harness({
   dssStatus = "VALID",
   phase4Status = "VALID",
-  decisionPolicy = null,
   riskRepositoryError = null,
+  permissionEvaluator = null,
 } = {}) {
   const stateFile = tempPath("permission-state");
   const attemptFile = tempPath("permission-attempts");
@@ -125,6 +127,11 @@ function harness({
   const structuralValidityService = new PreTradeStructuralValidityService({
     clock,
     idFactory: () => "structure-eval-1",
+  });
+  const permissionDecisionService = new PreTradePermissionDecisionService({
+    evaluator: permissionEvaluator,
+    clock,
+    idFactory: () => "permission-decision-1",
   });
 
   const calls = { dss: 0, risk: 0 };
@@ -202,8 +209,8 @@ function harness({
     dssPermissionService,
     riskSizingPermissionService,
     riskEvaluationRepository,
+    permissionDecisionService,
     attemptRepository,
-    decisionPolicy: decisionPolicy || undefined,
     clock,
     idFactory: () => `permission-attempt-${++id}`,
   });
@@ -225,11 +232,16 @@ function command(overrides = {}) {
       actor: "OPERATOR",
       evidenceReference: "chart-observation-1",
     },
+    operatorPermissionAssessment: {
+      outcome: "READY",
+      actor: "OPERATOR",
+      note: "macro/setup context remains acceptable",
+    },
     ...overrides,
   };
 }
 
-test("complete VALID permission attempt publishes READY with immutable DSS/account/entry/Phase4 provenance", async () => {
+test("complete VALID permission attempt publishes READY with immutable DSS/account/entry/Phase4/context provenance", async () => {
   const h = harness();
   const result = await h.pipeline.evaluate(command());
   assert.equal(result.status, "COMPLETED");
@@ -247,19 +259,54 @@ test("complete VALID permission attempt publishes READY with immutable DSS/accou
   assert.equal(attempt.account.accountId, "acct-1");
   assert.equal(attempt.expectedEntry.currentExpectedEntry, 180);
   assert.equal(attempt.market.quoteSource, "SCHWAB");
+  assert.equal(attempt.permissionDecision.outcome, "READY");
+  assert.equal(attempt.permissionDecision.source, "OPERATOR");
 
   const candidate = h.coordinator.candidateSnapshot("permission-NVDA-1", 1);
   assert.equal(candidate.lifecycleState, "READY");
   assert.equal(candidate.currentPermissionOutcome.permissionEvaluationId, attempt.permissionAttemptId);
+  assert.equal(candidate.currentPermissionOutcome.provenance.permissionDecisionId, "permission-decision-1");
 });
 
-test("CAUTION can come only from server decision policy and carries explicit reasons", async () => {
-  const h = harness({
-    decisionPolicy: () => ({ outcome: "CAUTION", reasonCodes: ["ELEVATED_CONTEXT_RISK"] }),
-  });
-  const result = await h.pipeline.evaluate(command());
+test("CAUTION comes from explicit context decision and carries warning reasons", async () => {
+  const h = harness();
+  const result = await h.pipeline.evaluate(command({
+    operatorPermissionAssessment: {
+      outcome: "CAUTION",
+      reasonCodes: ["ELEVATED_CONTEXT_RISK"],
+      actor: "OPERATOR",
+    },
+  }));
   assert.equal(result.transition.lifecycleState, "CAUTION");
   assert.deepEqual(result.permissionAttempt.result.reasonCodes, ["ELEVATED_CONTEXT_RISK"]);
+  assert.equal(result.permissionAttempt.permissionDecision.outcome, "CAUTION");
+});
+
+test("VALID Phase 4 does not silently grant READY when macro/setup context is unresolved", async () => {
+  const h = harness();
+  const result = await h.pipeline.evaluate(command({ operatorPermissionAssessment: null }));
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.permissionAttempt.result.kind, "BLOCKED_RETRYABLE");
+  assert.equal(result.permissionAttempt.result.reasonCode, "PERMISSION_CONTEXT_ASSESSMENT_REQUIRED");
+  assert.equal(result.permissionAttempt.permissionDecision.kind, "BLOCKED_RETRYABLE");
+  const candidate = h.coordinator.candidateSnapshot("permission-NVDA-1", 1);
+  assert.equal(candidate.lifecycleState, "PERMISSION_EVALUATING");
+  assert.equal(candidate.permissionBlocker.status, "BLOCKED_RETRYABLE");
+});
+
+test("trusted permission evaluator may publish PASS after all earlier permission evidence is valid", async () => {
+  const h = harness({
+    permissionEvaluator: async () => ({
+      outcome: "PASS",
+      reasonCode: "BROAD_MARKET_DISQUALIFIER",
+      reasonCodes: ["BROAD_MARKET_DISQUALIFIER"],
+      provenance: { evaluatorVersion: 1 },
+    }),
+  });
+  const result = await h.pipeline.evaluate(command({ operatorPermissionAssessment: null }));
+  assert.equal(result.transition.lifecycleState, "PASS");
+  assert.equal(result.permissionAttempt.result.reasonCode, "BROAD_MARKET_DISQUALIFIER");
+  assert.equal(result.permissionAttempt.permissionDecision.source, "TRUSTED_EVALUATOR");
 });
 
 test("affirmative structural INVALID becomes terminal PASS before DSS or Phase 4", async () => {
@@ -273,6 +320,7 @@ test("affirmative structural INVALID becomes terminal PASS before DSS or Phase 4
   }));
   assert.equal(result.transition.lifecycleState, "PASS");
   assert.equal(result.permissionAttempt.result.reasonCode, "STRUCTURAL_INVALID");
+  assert.equal(result.permissionAttempt.permissionDecision, null);
   assert.equal(h.calls.dss, 0);
   assert.equal(h.calls.risk, 0);
 });
@@ -304,6 +352,7 @@ test("NO_AFFORDABLE_SIZE maps to terminal PASS STOP_RISK_CONFLICT", async () => 
   const result = await h.pipeline.evaluate(command());
   assert.equal(result.transition.lifecycleState, "PASS");
   assert.equal(result.permissionAttempt.result.reasonCode, "STOP_RISK_CONFLICT");
+  assert.equal(result.permissionAttempt.permissionDecision, null);
   assert.equal(h.calls.risk, 1);
 });
 
