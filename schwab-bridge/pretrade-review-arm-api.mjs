@@ -66,6 +66,7 @@ function statusFor(error) {
   const code = text(error?.code);
   if (code === "BODY_TOO_LARGE") return 413;
   if (code === "CANDIDATE_NOT_FOUND") return 404;
+  if (code === "CANDIDATE_IDENTITY_CONFLICT") return 400;
   if (
     code.includes("STALE")
     || code.includes("CONFLICT")
