@@ -163,9 +163,13 @@ function harness({ materialChange = false, ownershipStatus = "FREE" } = {}) {
   reviewService.selectQuantity({ operationId: "initial-quantity", candidateId: "arm-NVDA-1", contractVersion: 1, reviewPackageId: initialReview.currentPackage.reviewPackageId, selectedQuantity: 25 });
 
   let permissionCalls = 0;
+  let lastPermissionCommand = null;
   const permissionPipeline = {
-    async evaluate({ candidateId, contractVersion, operationId, expectedRevision }) {
+    async evaluate(command) {
+      const { candidateId, contractVersion, operationId, expectedRevision, operatorPermissionAssessment } = command;
       permissionCalls += 1;
+      lastPermissionCommand = structuredClone(command);
+      assert.equal(operatorPermissionAssessment?.outcome, "READY");
       const candidate = coordinator.candidateSnapshot(candidateId, contractVersion);
       assert.equal(candidate.lifecycleState, "PERMISSION_EVALUATING");
       assert.equal(candidate.stateRevision, expectedRevision);
@@ -202,7 +206,7 @@ function harness({ materialChange = false, ownershipStatus = "FREE" } = {}) {
     lifecycleCoordinator: coordinator,
     ocoRepository,
     armLifecycleAuthority,
-    executionOwnershipProvider: { async checkSymbol(symbol) { return { status: ownershipStatus, symbol, source: "TEST_EXECUTION_OWNERSHIP", revision: 9 }; } },
+    executionOwnershipProvider: { async checkSymbol(symbol) { return { status: ownershipStatus, symbol, source: "TEST_EXECUTION_OWNERSHIP", revision: 9, authoritative: true }; } },
   });
   const handoffRepository = new ExecutionBoardHandoffRepository({ filePath: tmp("handoffs"), clock });
   handoffRepository.load();
@@ -222,7 +226,19 @@ function harness({ materialChange = false, ownershipStatus = "FREE" } = {}) {
     ocoService,
     clock,
   });
-  return { coordinator, store, reviewService, reviewRepository, armOperationRepository, handoffRepository, deliveryRepository, armService, initialReview, permissionCalls: () => permissionCalls };
+  return {
+    coordinator,
+    store,
+    reviewService,
+    reviewRepository,
+    armOperationRepository,
+    handoffRepository,
+    deliveryRepository,
+    armService,
+    initialReview,
+    permissionCalls: () => permissionCalls,
+    lastPermissionCommand: () => structuredClone(lastPermissionCommand),
+  };
 }
 
 function command(h) {
@@ -236,7 +252,7 @@ function command(h) {
     accountId: "acct-1",
     entryMode: "MARKETABLE_NOW",
     operatorStructuralAssessment: { status: "VALID", actor: "OPERATOR", evidenceReference: "chart-now" },
-    operatorContextAssessment: { outcome: "READY", actor: "OPERATOR", evidenceReference: "context-now" },
+    operatorPermissionAssessment: { outcome: "READY", actor: "OPERATOR", evidenceReference: "context-now" },
   };
 }
 
@@ -245,6 +261,7 @@ test("explicit ARM performs fresh permission revalidation then atomically forwar
   const result = await h.armService.arm(command(h));
   assert.equal(result.status, "COMPLETED");
   assert.equal(h.permissionCalls(), 1);
+  assert.equal(h.lastPermissionCommand().operatorPermissionAssessment.outcome, "READY");
   assert.equal(result.candidate.lifecycleState, "ARMED");
   assert.equal(result.candidate.arm.selectedQuantity, 25);
   assert.equal(result.handoff.authorizedExecutionAccountId, "acct-1");
@@ -296,6 +313,7 @@ test("durable AUTHORIZED proof forward-completes after handoff persistence outag
 
   const recovery = h.armService.recoverAll();
   assert.equal(recovery.operations[0].status, "RECOVERED");
+  assert.equal(recovery.operations[0].result.armTransition.recoveredExistingAuthorization, true);
   assert.equal(h.permissionCalls(), 1);
   assert.equal(h.armOperationRepository.getByOperationId("arm-op-1").status, "COMPLETED");
   assert.equal(h.handoffRepository.snapshot().handoffs.length, 1);
