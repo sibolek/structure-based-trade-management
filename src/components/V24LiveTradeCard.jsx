@@ -4,6 +4,7 @@ import {
   executionStop,
   executionStructuralInvalidation,
 } from "../execution/execution-v23-compat.js";
+import V24LiveManagementPanel from "./V24LiveManagementPanel.jsx";
 
 function price(value) {
   const n = Number(value);
@@ -31,14 +32,19 @@ function StatePill({ state }) {
   return <span className={`rounded-full border px-3 py-1 font-mono text-[11px] font-bold ${cls}`}>{state}</span>;
 }
 
-export default function V24LiveTradeCard({ trade, onState, onClassify }) {
+export default function V24LiveTradeCard({ trade, onState, onClassify, onManagementCommand }) {
   const plan = trade.originalPlan || {};
   const broker = trade.broker || {};
-  const effectiveStop = executionStop(trade);
+  const management = broker.liveManagement || null;
+  const armEffectiveStop = executionStop(trade);
+  const effectiveStop = management?.currentEffectiveStop?.price ?? armEffectiveStop;
   const structuralInvalidation = executionStructuralInvalidation(trade);
-  const authorizedMaxRisk = executionAuthorizedMaxDollarRisk(trade);
+  const authorizedMaxRisk = management?.risk?.authorizedMaxDollarRisk ?? executionAuthorizedMaxDollarRisk(trade);
   const lifecycleStatus = broker.lifecycleStatus || "LIVE";
   const warnings = Array.isArray(broker.lifecycleWarnings) ? broker.lifecycleWarnings : [];
+  const openCriticalExceptions = Array.isArray(management?.authorizationExceptions)
+    ? management.authorizationExceptions.filter((item) => item.severity === "CRITICAL" && item.status !== "RECONCILED")
+    : [];
 
   if (trade.phase === "EXIT") {
     const reversed = broker.terminalEvent === "REVERSAL";
@@ -47,7 +53,7 @@ export default function V24LiveTradeCard({ trade, onState, onClassify }) {
         <p className="section-label">V2.4 · {reversed ? "Broker Reversal Detected" : "Broker Exit Detected"}</p>
         <h3 className="text-2xl font-bold">{reversed ? `${plan.symbol} ${plan.direction} ended by REVERSAL` : `${plan.symbol} is FLAT`}</h3>
         <p className="mt-1 text-sm text-zinc-400">Entry {price(broker.entryPrice)} · Exit VWAP {price(broker.exitPrice)} · Peak qty {broker.peakQuantity}</p>
-        <p className="mt-1 text-xs text-zinc-500">Effective stop {price(effectiveStop)} · Structural invalidation {price(structuralInvalidation)}</p>
+        <p className="mt-1 text-xs text-zinc-500">Final live stop {price(effectiveStop)} · ARM stop {price(armEffectiveStop)} · Structural invalidation {price(structuralInvalidation)}</p>
         {reversed && (
           <div className="mt-3 rounded border border-amber-400/25 bg-amber-950/15 p-3 text-sm text-amber-100">
             Broker now {broker.reversalSide} {broker.reversalQuantity} @ {price(broker.reversalAveragePrice)}. Opposite-side broker exposure is not owned by the original V2.4 authorization.
@@ -66,15 +72,20 @@ export default function V24LiveTradeCard({ trade, onState, onClassify }) {
 
   const qty = Number(broker.currentQuantity);
   const avg = Number(broker.currentAveragePrice ?? broker.entryPrice);
-  const actualRisk = Number.isFinite(Number(broker.actualStopRisk))
-    ? Number(broker.actualStopRisk)
-    : ([avg, Number(effectiveStop), qty].every(Number.isFinite) ? Math.abs(avg - Number(effectiveStop)) * qty : null);
+  const actualRisk = Number.isFinite(Number(management?.risk?.openStopRisk))
+    ? Number(management.risk.openStopRisk)
+    : Number.isFinite(Number(broker.actualStopRisk))
+      ? Number(broker.actualStopRisk)
+      : ([avg, Number(effectiveStop), qty].every(Number.isFinite) ? Math.abs(avg - Number(effectiveStop)) * qty : null);
+  const aggregateWorstCase = Number.isFinite(Number(management?.risk?.aggregateWorstCaseLoss))
+    ? Number(management.risk.aggregateWorstCaseLoss)
+    : actualRisk;
   const riskBreach = warnings.includes("ACTUAL_STOP_RISK_EXCEEDS_AUTHORIZED_BUDGET")
-    || (Number.isFinite(actualRisk) && Number.isFinite(Number(authorizedMaxRisk)) && actualRisk > Number(authorizedMaxRisk));
+    || (Number.isFinite(aggregateWorstCase) && Number.isFinite(Number(authorizedMaxRisk)) && aggregateWorstCase > Number(authorizedMaxRisk));
   const reconciliation = lifecycleStatus === "LIVE_RECONCILIATION_REQUIRED";
 
   return (
-    <article className={`rounded border bg-ink-850 p-4 shadow-terminal ${reconciliation ? "border-red-400/35" : "border-emerald-400/20"}`}>
+    <article className={`rounded border bg-ink-850 p-4 shadow-terminal ${reconciliation || openCriticalExceptions.length ? "border-red-400/35" : "border-emerald-400/20"}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="section-label">V2.4 · Exact-Account Broker-Bound Trade</p>
@@ -95,12 +106,21 @@ export default function V24LiveTradeCard({ trade, onState, onClassify }) {
         </div>
       )}
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+      {openCriticalExceptions.length > 0 && (
+        <div className="mt-3 rounded border border-red-400/35 bg-red-950/20 p-3 text-sm text-red-100">
+          <div className="flex items-center gap-2 font-semibold"><AlertTriangle size={16} />CRITICAL AUTHORIZATION EXCEPTION</div>
+          <p className="mt-1">Further exposure increases remain blocked until explicit reconciliation.</p>
+          <p className="mt-1 font-mono text-xs">{openCriticalExceptions.map((item) => item.code).join(" · ")}</p>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
         <div className="compact-card"><p className="section-label">Actual Avg</p><p className="text-lg font-semibold">{price(avg)}</p></div>
         <div className="compact-card"><p className="section-label">Current Qty</p><p className="text-lg font-semibold">{Number.isFinite(qty) ? qty : "—"}</p></div>
-        <div className="compact-card"><p className="section-label">Effective Stop</p><p className="text-lg font-semibold text-red-200">{price(effectiveStop)}</p></div>
+        <div className="compact-card"><p className="section-label">Live Stop</p><p className="text-lg font-semibold text-red-200">{price(effectiveStop)}</p><p className="text-[11px] text-zinc-500">ARM {price(armEffectiveStop)}</p></div>
         <div className="compact-card"><p className="section-label">Structural Invalid.</p><p className="text-lg font-semibold text-amber-100">{price(structuralInvalidation)}</p></div>
-        <div className="compact-card"><p className="section-label">Actual Stop Risk</p><p className={`text-lg font-semibold ${riskBreach ? "text-red-300" : "text-zinc-100"}`}>{money(actualRisk)}</p></div>
+        <div className="compact-card"><p className="section-label">Open Stop Risk</p><p className={`text-lg font-semibold ${riskBreach ? "text-red-300" : "text-zinc-100"}`}>{money(actualRisk)}</p></div>
+        <div className="compact-card"><p className="section-label">Lifecycle Worst Case</p><p className={`text-lg font-semibold ${riskBreach ? "text-red-300" : "text-zinc-100"}`}>{money(aggregateWorstCase)}</p></div>
         <div className="compact-card"><p className="section-label">Frozen Max Risk</p><p className="text-lg font-semibold text-sky-100">{money(authorizedMaxRisk)}</p></div>
       </div>
 
@@ -108,7 +128,7 @@ export default function V24LiveTradeCard({ trade, onState, onClassify }) {
         <div className="mt-3 rounded border border-amber-400/30 bg-amber-950/15 p-3 text-sm font-semibold text-amber-100">Actual owned quantity exceeded the immutable V2.4 authorized quantity. ExecutionOS owns the full broker exposure; no automatic reduction is performed.</div>
       )}
       {riskBreach && (
-        <div className="mt-3 rounded border border-red-400/30 bg-red-950/20 p-3 text-sm font-semibold text-red-200">Actual fill/size implies stop risk above the frozen ARM-time budget. Do not tighten the effective stop to fix sizing.</div>
+        <div className="mt-3 rounded border border-red-400/30 bg-red-950/20 p-3 text-sm font-semibold text-red-200">Actual fill/size implies lifecycle risk above the frozen ARM-time budget. Do not tighten the structural stop or rewrite authorization to make the number fit.</div>
       )}
 
       <div className="mt-4 grid gap-2 md:grid-cols-3">
@@ -116,6 +136,8 @@ export default function V24LiveTradeCard({ trade, onState, onClassify }) {
         <button onClick={() => onState(trade.id, "THREATENED")} className="rounded border border-amber-400/30 bg-amber-400/10 p-3 text-left font-bold text-amber-100"><AlertTriangle className="mb-2" size={20} />THREATENED</button>
         <button onClick={() => onState(trade.id, "INVALID")} className="rounded border border-red-400/30 bg-red-400/10 p-3 text-left font-bold text-red-100"><XCircle className="mb-2" size={20} />INVALID</button>
       </div>
+
+      <V24LiveManagementPanel trade={trade} onCommand={onManagementCommand} />
     </article>
   );
 }
