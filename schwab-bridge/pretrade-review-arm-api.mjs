@@ -73,6 +73,7 @@ function statusFor(error) {
     || code === "ARM_OPERATION_ID_CONFLICT"
     || code === "REVIEW_OPERATION_ID_CONFLICT"
     || code === "OCO_ARM_COMMIT_IN_PROGRESS"
+    || code === "ARM_RECOVERY_RECONCILIATION_REQUIRED"
   ) return 409;
   if (code.startsWith("CORRUPT_") || ["EACCES", "ENOSPC", "EROFS", "EIO"].includes(code)) return 500;
   return 400;
@@ -83,6 +84,7 @@ export function createPreTradeReviewArmApiHandler({
   reviewRepository,
   armService,
   lifecycleCoordinator,
+  recoveryBlocked = false,
   maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
 } = {}) {
   if (!reviewService || !reviewRepository || !armService || !lifecycleCoordinator) throw new Error("review/ARM API dependencies are required");
@@ -117,6 +119,7 @@ export function createPreTradeReviewArmApiHandler({
       } else if (parsed.action === "review/caution-ack") {
         result = reviewService.acknowledgeCaution({ ...payload, candidateId: parsed.candidateId, contractVersion: parsed.contractVersion });
       } else if (parsed.action === "arm") {
+        if (recoveryBlocked) throw apiError("ARM is blocked pending startup recovery reconciliation", "ARM_RECOVERY_RECONCILIATION_REQUIRED");
         if (payload.confirmArm !== true) throw apiError("ARM requires explicit confirmArm=true intent", "ARM_EXPLICIT_CONFIRMATION_REQUIRED");
         result = await armService.arm({ ...payload, candidateId: parsed.candidateId, contractVersion: parsed.contractVersion });
       } else {
