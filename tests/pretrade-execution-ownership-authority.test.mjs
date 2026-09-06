@@ -51,13 +51,10 @@ function clockSequence(values) {
 }
 
 test("missing or stale Execution projection stays UNKNOWN and never guesses FREE", async () => {
+  let now = "2026-09-06T20:00:00.000Z";
   const authority = new PreTradeExecutionOwnershipAuthority({
     filePath: tempFile(),
-    clock: clockSequence([
-      "2026-09-06T20:00:00.000Z",
-      "2026-09-06T20:00:00.000Z",
-      "2026-09-06T20:00:04.001Z",
-    ]),
+    clock: () => now,
     maxAgeMs: 3000,
   });
   authority.load();
@@ -69,6 +66,7 @@ test("missing or stale Execution projection stays UNKNOWN and never guesses FREE
   assert.equal(missing.authoritative, false);
 
   authority.publish(publication());
+  now = "2026-09-06T20:00:04.001Z";
   const stale = await provider.checkSymbol("NVDA");
   assert.equal(stale.status, "UNKNOWN");
   assert.equal(stale.reasonCode, "EXECUTION_OWNERSHIP_AUTHORITY_STALE");
