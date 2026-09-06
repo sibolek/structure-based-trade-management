@@ -112,7 +112,7 @@ export class PreTradeArmService {
         entryMode: upper(command.entryMode),
         triggerPrice: command.triggerPrice ?? null,
         operatorStructuralAssessment: command.operatorStructuralAssessment ?? null,
-        operatorContextAssessment: command.operatorContextAssessment ?? null,
+        operatorPermissionAssessment: command.operatorPermissionAssessment ?? null,
       };
       let operation = this.armOperationRepository.beginRequest({ operationId, request });
       if (["AUTHORIZED", "COMPLETED"].includes(operation.status)) return this.#completeAuthorization(operation, true);
@@ -168,12 +168,12 @@ export class PreTradeArmService {
         entryMode: upper(command.entryMode),
         triggerPrice: command.triggerPrice ?? null,
         operatorStructuralAssessment: command.operatorStructuralAssessment ?? null,
-        operatorContextAssessment: command.operatorContextAssessment ?? null,
+        operatorPermissionAssessment: command.operatorPermissionAssessment ?? null,
       });
 
       const postPermissionCandidate = this.lifecycleCoordinator.candidateSnapshot(candidateId, contractVersion);
       const postState = canonicalLifecycleState(postPermissionCandidate.lifecycleState);
-      if (!['READY', 'CAUTION'].includes(postState)) {
+      if (!["READY", "CAUTION"].includes(postState)) {
         const reasonCode = postState === "PASS" ? "ARM_REVALIDATION_PASS" : permission.permissionAttempt?.result?.reasonCode || "ARM_REVALIDATION_BLOCKED";
         operation = this.armOperationRepository.reject(operationId, { reasonCode, details: { lifecycleState: postState, permissionStatus: permission.status } });
         return { status: "REJECTED", operation, candidate: postPermissionCandidate };
@@ -276,7 +276,6 @@ export class PreTradeArmService {
     if (!proof) throw armError("ARM operation has no durable authorization proof", "ARM_AUTHORIZATION_NOT_PROVEN");
     const current = this.lifecycleCoordinator.candidateSnapshot(proof.candidateId, proof.contractVersion);
     const currentState = canonicalLifecycleState(current.lifecycleState);
-    const alreadyArmed = currentState === "ARMED";
     const expectedState = recovery && currentState === "EXPIRED" ? "EXPIRED" : proof.permissionState;
     const expectedRevision = recovery && currentState === "EXPIRED" ? current.stateRevision : proof.permissionStateRevision;
 
@@ -293,7 +292,7 @@ export class PreTradeArmService {
     });
 
     const armedCandidate = this.lifecycleCoordinator.candidateSnapshot(proof.candidateId, proof.contractVersion);
-    if (!alreadyArmed && armedCandidate.lifecycleState !== "ARMED") throw armError("candidate ARM transition did not establish ARMED", "ARM_CANDIDATE_COMMIT_FAILED");
+    if (armedCandidate.lifecycleState !== "ARMED") throw armError("candidate ARM transition did not establish ARMED", "ARM_CANDIDATE_COMMIT_FAILED");
     const riskEvaluation = this.riskEvaluationRepository.getById(proof.riskEvaluationId);
     const expectedHandoff = buildExecutionBoardHandoff({
       handoffId: proof.handoffId,
