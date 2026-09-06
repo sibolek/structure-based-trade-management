@@ -43,7 +43,7 @@ function authorization(overrides = {}) {
     authorizedAt: NOW,
     handoffId: "handoff-1",
     handoffCreatedAt: NOW,
-    executionOwnershipProof: { status: "FREE", source: "TEST_EXECUTION_AUTHORITY", revision: 9 },
+    executionOwnershipProof: { status: "FREE", source: "TEST_EXECUTION_AUTHORITY", revision: 9, authoritative: true },
     ...overrides,
   };
 }
@@ -97,17 +97,19 @@ test("AUTHORIZED freezes exact recovery payload and COMPLETED preserves it", () 
   assert.equal(proof.selectedQuantity, 25);
   assert.equal(proof.handoffId, "handoff-1");
   assert.equal(proof.executionOwnershipProof.status, "FREE");
+  assert.equal(proof.executionOwnershipProof.authoritative, true);
 
   const completed = repo.markCompleted("arm-op-1");
   assert.equal(completed.status, "COMPLETED");
   assert.deepEqual(armAuthorizationProof(completed), proof);
 });
 
-test("durable authorization proof rejects invalid permission state, direction, or unresolved Execution ownership", () => {
+test("durable authorization proof rejects invalid permission state, direction, unresolved ownership, or non-authoritative FREE", () => {
   for (const [name, override] of [
     ["permission state", { permissionState: "PERMISSION_EVALUATING" }],
     ["direction", { direction: "SIDEWAYS" }],
-    ["ownership", { executionOwnershipProof: { status: "UNKNOWN" } }],
+    ["ownership", { executionOwnershipProof: { status: "UNKNOWN", authoritative: false } }],
+    ["unproven-free", { executionOwnershipProof: { status: "FREE", source: "UNTRUSTED", authoritative: false } }],
   ]) {
     const repo = new PreTradeArmOperationRepository({ filePath: tempFile(), clock: () => NOW });
     repo.load();
