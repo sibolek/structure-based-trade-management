@@ -52,7 +52,29 @@ export class PreTradeOcoService {
   }
 
   setAccount(command = {}) {
-    return this.ocoRepository.setAccount(command);
+    const before = this.ocoRepository.getById(command.groupId);
+    const updated = this.ocoRepository.setAccount(command);
+    if (before.accountId === updated.accountId) return updated;
+    for (const member of updated.members) {
+      const candidate = this.lifecycleCoordinator.candidateSnapshot(member.candidateId, member.contractVersion);
+      const state = canonicalLifecycleState(candidate.lifecycleState);
+      if (!["READY", "CAUTION"].includes(state)) continue;
+      this.lifecycleCoordinator.revalidatePermission({
+        operationId: `OCO_ACCOUNT_REVALIDATE:${updated.groupId}:r${updated.accountRevision}:${key(member)}`,
+        candidateId: member.candidateId,
+        contractVersion: member.contractVersion,
+        expectedState: state,
+        expectedRevision: candidate.stateRevision,
+        source: "OPERATOR",
+        reason: "OCO_EXECUTION_ACCOUNT_CHANGED",
+        provenance: {
+          groupId: updated.groupId,
+          accountId: updated.accountId,
+          accountRevision: updated.accountRevision,
+        },
+      });
+    }
+    return updated;
   }
 
   dissolve(command = {}) {
