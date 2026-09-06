@@ -30,6 +30,7 @@ function upper(value) {
 }
 
 function price(value) {
+  if (value === null || value === undefined || text(value) === "") return "—";
   const number = Number(value);
   if (!Number.isFinite(number)) return "—";
   return number.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
@@ -103,12 +104,80 @@ function targetLabel(targets) {
   }).join(" · ");
 }
 
+function triggerNodeLabel(node) {
+  if (!node || typeof node !== "object") return "";
+
+  const type = upper(node.type);
+
+  if (type === "MANUAL_CONFIRMATION") {
+    return text(node.prompt) || "Manual confirmation";
+  }
+
+  if (type === "QUOTE_COMPARISON" || type === "BAR_CLOSE_COMPARISON") {
+    const subject = type === "BAR_CLOSE_COMPARISON"
+      ? `${text(node.timeframe) || "Bar"} close`
+      : upper(node.side || "LAST");
+    const operator = {
+      GT: ">",
+      GTE: "≥",
+      LT: "<",
+      LTE: "≤",
+    }[upper(node.operator)] || upper(node.operator);
+    const value = node.value ?? node.level;
+    return [subject, operator, price(value)].filter(Boolean).join(" ");
+  }
+
+  if (type === "ALL_OF" || type === "ANY_OF") {
+    const children = Array.isArray(node.children)
+      ? node.children.map(triggerNodeLabel).filter(Boolean)
+      : [];
+    if (!children.length) return type.replaceAll("_", " ");
+    return children.join(type === "ALL_OF" ? " AND " : " OR ");
+  }
+
+  return text(node.type).replaceAll("_", " ");
+}
+
 function triggerLabel(trigger) {
   if (!trigger || typeof trigger !== "object") return "—";
-  const parts = [text(trigger.type).replaceAll("_", " ")];
-  if (Number.isFinite(Number(trigger.level))) parts.push(`@ ${price(trigger.level)}`);
-  if (trigger.direction) parts.push(upper(trigger.direction));
-  return parts.filter(Boolean).join(" ") || "Structured trigger";
+  const node = trigger.satisfaction && typeof trigger.satisfaction === "object"
+    ? trigger.satisfaction
+    : trigger;
+  return triggerNodeLabel(node) || "Structured trigger";
+}
+
+function structuralInvalidationLabel(invalidation) {
+  if (!invalidation || typeof invalidation !== "object") return "—";
+
+  if (
+    invalidation.price !== null
+    && invalidation.price !== undefined
+    && text(invalidation.price) !== ""
+    && Number.isFinite(Number(invalidation.price))
+  ) {
+    return price(invalidation.price);
+  }
+
+  const reference = invalidation.reference && typeof invalidation.reference === "object"
+    ? invalidation.reference
+    : null;
+
+  if (reference) {
+    const originalText = text(reference.originalText);
+    if (originalText) return originalText;
+
+    const upperPrice = reference.upper ?? reference.high ?? reference.max;
+    const lowerPrice = reference.lower ?? reference.low ?? reference.min;
+    if (Number.isFinite(Number(upperPrice)) && Number.isFinite(Number(lowerPrice))) {
+      return `${price(upperPrice)}–${price(lowerPrice)} zone`;
+    }
+
+    const referencePrice = reference.price ?? reference.value ?? reference.level;
+    if (Number.isFinite(Number(referencePrice))) return price(referencePrice);
+  }
+
+  const referenceType = text(invalidation.referenceType).replaceAll("_", " ");
+  return referenceType || "Resolve in PRETRADE";
 }
 
 function selectedQuantity(review) {
@@ -193,7 +262,7 @@ function ReadOnlyPlan({ candidate }) {
         <p className="section-label">Trigger</p>
         <p className="font-semibold text-violet-100">{triggerLabel(candidate.trigger)}</p>
         <p className="mt-3 section-label">Structural Invalidation</p>
-        <p className="font-semibold text-red-200">{price(candidate.structuralInvalidation?.price)}</p>
+        <p className="font-semibold text-red-200">{structuralInvalidationLabel(candidate.structuralInvalidation)}</p>
         <p className="mt-1 text-xs text-zinc-500">{candidate.structuralInvalidation?.rule || "—"}</p>
       </div>
       <div>
@@ -207,9 +276,22 @@ function ReadOnlyPlan({ candidate }) {
 }
 
 function PermissionControls({ candidate, draft, setDraft, accounts, busy, onEvaluate }) {
-  const { structural, permission } = assessmentInputs(draft);
-  const needsPermissionReasons = ["CAUTION", "PASS"].includes(upper(draft.permissionOutcome));
-  const reasonMissing = needsPermissionReasons && reasonCodes(draft.permissionReasons).length === 0;
+  const exactCandidateStop = (
+    candidate?.structuralInvalidation?.price !== null
+    && candidate?.structuralInvalidation?.price !== undefined
+    && Number.isFinite(Number(candidate.structuralInvalidation.price))
+    && Number(candidate.structuralInvalidation.price) > 0
+  ) ? String(candidate.structuralInvalidation.price) : "";
+
+  const effectiveDraft = {
+    ...draft,
+    accountId: draft.accountId || (accounts.length === 1 ? accounts[0].accountId : ""),
+    resolvedPrice: draft.resolvedPrice || exactCandidateStop,
+  };
+
+  const { structural, permission } = assessmentInputs(effectiveDraft);
+  const needsPermissionReasons = ["CAUTION", "PASS"].includes(upper(effectiveDraft.permissionOutcome));
+  const reasonMissing = needsPermissionReasons && reasonCodes(effectiveDraft.permissionReasons).length === 0;
   return (
     <div className="space-y-3 border-t border-white/10 p-4">
       <div className="flex items-center justify-between gap-2">
@@ -221,61 +303,113 @@ function PermissionControls({ candidate, draft, setDraft, accounts, busy, onEval
       </div>
 
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        <label className="text-xs text-zinc-500">
-          Exact account
-          <select value={draft.accountId} onChange={(event) => setDraft({ accountId: event.target.value })} className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200">
-            <option value="">Select account</option>
-            {accounts.map((account) => <option key={account.accountId} value={account.accountId}>{account.label}</option>)}
-          </select>
-        </label>
+        <div className="text-xs text-zinc-500">
+          <p>Exact account</p>
+          {accounts.length === 1 ? (
+            <div className="mt-1 rounded border border-emerald-400/20 bg-emerald-950/10 px-2 py-2 font-mono text-zinc-200">
+              {accounts[0].label}
+            </div>
+          ) : (
+            <select value={effectiveDraft.accountId} onChange={(event) => setDraft({ accountId: event.target.value })} className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200">
+              <option value="">Select account</option>
+              {accounts.map((account) => <option key={account.accountId} value={account.accountId}>{account.label}</option>)}
+            </select>
+          )}
+        </div>
+
         <label className="text-xs text-zinc-500">
           Entry mode
-          <select value={draft.entryMode} onChange={(event) => setDraft({ entryMode: event.target.value })} className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200">
+          <select value={effectiveDraft.entryMode} onChange={(event) => setDraft({ entryMode: event.target.value })} className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200">
             <option value="MARKETABLE_NOW">MARKETABLE NOW</option>
             <option value="STOP_TRIGGER">STOP TRIGGER</option>
           </select>
         </label>
+
+        {effectiveDraft.entryMode === "STOP_TRIGGER" ? (
+          <label className="text-xs text-zinc-500">
+            Trigger price
+            <input value={effectiveDraft.triggerPrice} onChange={(event) => setDraft({ triggerPrice: event.target.value })} inputMode="decimal" className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200" placeholder="Required" />
+          </label>
+        ) : (
+          <div className="text-xs text-zinc-500">
+            <p>Trigger price</p>
+            <div className="mt-1 rounded border border-white/10 bg-black/10 px-2 py-2 text-zinc-500">Not required</div>
+          </div>
+        )}
+
         <label className="text-xs text-zinc-500">
-          Trigger price {draft.entryMode === "STOP_TRIGGER" ? "(required)" : "(optional)"}
-          <input value={draft.triggerPrice} onChange={(event) => setDraft({ triggerPrice: event.target.value })} inputMode="decimal" className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200" placeholder="Price" />
-        </label>
-        <label className="text-xs text-zinc-500">
-          Resolved structure price
-          <input value={draft.resolvedPrice} onChange={(event) => setDraft({ resolvedPrice: event.target.value })} inputMode="decimal" className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200" placeholder="Only if dynamic" />
+          Structural stop
+          <input
+            value={effectiveDraft.resolvedPrice}
+            onChange={(event) => setDraft({ resolvedPrice: event.target.value })}
+            inputMode="decimal"
+            readOnly={Boolean(exactCandidateStop)}
+            className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200 read-only:text-emerald-200"
+            placeholder="Resolve if dynamic"
+          />
         </label>
       </div>
 
       <div className="grid gap-2 lg:grid-cols-2">
         <div className="rounded border border-white/10 bg-black/10 p-3">
-          <label className="text-xs text-zinc-500">Operator structural assessment
-            <select value={draft.structuralStatus} onChange={(event) => setDraft({ structuralStatus: event.target.value })} className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200">
-              <option value="">No operator assessment</option>
-              <option value="VALID">VALID</option>
-              <option value="INVALID">INVALID</option>
-              <option value="BLOCKED">BLOCKED</option>
-            </select>
-          </label>
-          <input value={draft.structuralEvidence} onChange={(event) => setDraft({ structuralEvidence: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="Evidence reference / chart note" />
-          <input value={draft.structuralReasons} onChange={(event) => setDraft({ structuralReasons: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="Reason codes, comma separated" />
+          <p className="section-label">Structure</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {["VALID", "INVALID", "BLOCKED"].map((status) => (
+              <button
+                key={status}
+                type="button"
+                onClick={() => setDraft({ structuralStatus: status })}
+                className={`rounded border px-3 py-2 text-xs font-bold ${
+                  upper(effectiveDraft.structuralStatus) === status
+                    ? status === "VALID"
+                      ? "border-emerald-400/40 bg-emerald-400/15 text-emerald-100"
+                      : "border-red-400/40 bg-red-400/10 text-red-200"
+                    : "border-white/10 text-zinc-500"
+                }`}
+              >
+                {status}
+              </button>
+            ))}
+          </div>
+          <input value={effectiveDraft.structuralEvidence} onChange={(event) => setDraft({ structuralEvidence: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="Optional chart/evidence note" />
+          {["INVALID", "BLOCKED"].includes(upper(effectiveDraft.structuralStatus)) && (
+            <input value={effectiveDraft.structuralReasons} onChange={(event) => setDraft({ structuralReasons: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="Reason codes" />
+          )}
         </div>
+
         <div className="rounded border border-white/10 bg-black/10 p-3">
-          <label className="text-xs text-zinc-500">Operator macro / setup assessment
-            <select value={draft.permissionOutcome} onChange={(event) => setDraft({ permissionOutcome: event.target.value })} className="mt-1 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-200">
-              <option value="">No operator assessment</option>
-              <option value="READY">READY</option>
-              <option value="CAUTION">CAUTION</option>
-              <option value="PASS">PASS</option>
-            </select>
-          </label>
-          <input value={draft.permissionEvidence} onChange={(event) => setDraft({ permissionEvidence: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="Context note / evidence reference" />
-          <input value={draft.permissionReasons} onChange={(event) => setDraft({ permissionReasons: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="CAUTION/PASS reason codes" />
+          <p className="section-label">Setup / Context</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {["READY", "CAUTION", "PASS"].map((outcome) => (
+              <button
+                key={outcome}
+                type="button"
+                onClick={() => setDraft({ permissionOutcome: outcome })}
+                className={`rounded border px-3 py-2 text-xs font-bold ${
+                  upper(effectiveDraft.permissionOutcome) === outcome
+                    ? outcome === "READY"
+                      ? "border-emerald-400/40 bg-emerald-400/15 text-emerald-100"
+                      : outcome === "CAUTION"
+                        ? "border-amber-400/40 bg-amber-400/10 text-amber-100"
+                        : "border-red-400/40 bg-red-400/10 text-red-200"
+                    : "border-white/10 text-zinc-500"
+                }`}
+              >
+                {outcome}
+              </button>
+            ))}
+          </div>
+          <input value={effectiveDraft.permissionEvidence} onChange={(event) => setDraft({ permissionEvidence: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="Optional context/evidence note" />
+          {["CAUTION", "PASS"].includes(upper(effectiveDraft.permissionOutcome)) && (
+            <input value={effectiveDraft.permissionReasons} onChange={(event) => setDraft({ permissionReasons: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="Required reason codes" />
+          )}
         </div>
       </div>
 
       <button
         type="button"
-        disabled={busy || !draft.accountId || !draft.entryMode || reasonMissing}
-        onClick={() => onEvaluate({ structural, permission })}
+        disabled={busy || !effectiveDraft.accountId || !effectiveDraft.entryMode || !effectiveDraft.structuralStatus || !effectiveDraft.permissionOutcome || reasonMissing}
+        onClick={() => onEvaluate({ structural, permission, effectiveDraft })}
         className="flex items-center gap-2 rounded border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-bold text-sky-100 disabled:opacity-35"
       >
         <ShieldCheck size={14} /> EVALUATE PERMISSION
@@ -287,6 +421,10 @@ function PermissionControls({ candidate, draft, setDraft, accounts, busy, onEval
 function ReviewControls({ candidate, review, draft, setDraft, pretrade, busy, run }) {
   const pkg = currentReviewPackage(review);
   const quantity = selectedQuantity(review);
+  const rawMaxQuantity = Number(pkg?.material?.maxAffordableQuantity);
+  const maxRiskSizedQuantity = Number.isFinite(rawMaxQuantity) && rawMaxQuantity > 0
+    ? rawMaxQuantity
+    : null;
   const cautionRequired = upper(candidate.lifecycleState) === "CAUTION";
   const cautionAcked = Boolean(review?.cautionAcknowledgment && text(review.cautionAcknowledgment.reviewPackageId) === text(pkg?.reviewPackageId));
   const ownershipConnected = pretrade?.health?.executionOwnershipAuthorityConnected === true;
@@ -332,12 +470,53 @@ function ReviewControls({ candidate, review, draft, setDraft, pretrade, busy, ru
         </div>
       )}
 
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="text-xs text-zinc-500">Selected quantity
-          <input value={draft.quantity} onChange={(event) => setDraft({ quantity: event.target.value })} inputMode="decimal" className="mt-1 w-32 rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-100" placeholder={quantity ? String(quantity) : "Qty"} />
-        </label>
-        <button type="button" disabled={busy || !draft.quantity} onClick={() => run(() => pretrade.client.selectQuantity(candidate, pkg.reviewPackageId, draft.quantity))} className="rounded border border-white/15 px-3 py-2 text-xs font-bold text-zinc-200 disabled:opacity-35">SET QUANTITY</button>
-        <button type="button" disabled={busy} onClick={() => run(() => pretrade.client.refreshReview(candidate))} className="flex items-center gap-1 rounded border border-white/15 px-3 py-2 text-xs font-bold text-zinc-400 disabled:opacity-35"><RefreshCw size={13} /> REFRESH REVIEW</button>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <button
+            type="button"
+            disabled={busy || !maxRiskSizedQuantity}
+            onClick={() => {
+              setDraft({ quantity: String(maxRiskSizedQuantity) });
+              run(() => pretrade.client.selectQuantity(candidate, pkg.reviewPackageId, maxRiskSizedQuantity));
+            }}
+            className="rounded border border-emerald-400/35 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100 disabled:opacity-35"
+          >
+            USE MAX RISK-SIZED QTY — {maxRiskSizedQuantity || "—"} {unitLabel(review, maxRiskSizedQuantity)}
+          </button>
+
+          <label className="text-xs text-zinc-500">
+            Or choose smaller quantity
+            <input
+              value={draft.quantity}
+              onChange={(event) => setDraft({ quantity: event.target.value })}
+              inputMode="decimal"
+              className="mt-1 w-32 rounded border border-white/10 bg-ink-900 px-2 py-2 text-zinc-100"
+              placeholder={quantity ? String(quantity) : "Qty"}
+            />
+          </label>
+
+          <button
+            type="button"
+            disabled={busy || !draft.quantity}
+            onClick={() => run(() => pretrade.client.selectQuantity(candidate, pkg.reviewPackageId, draft.quantity))}
+            className="rounded border border-white/15 px-3 py-2 text-xs font-bold text-zinc-200 disabled:opacity-35"
+          >
+            SET CUSTOM QTY
+          </button>
+
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(() => pretrade.client.refreshReview(candidate))}
+            className="flex items-center gap-1 rounded border border-white/15 px-3 py-2 text-xs font-bold text-zinc-400 disabled:opacity-35"
+          >
+            <RefreshCw size={13} /> REFRESH REVIEW
+          </button>
+        </div>
+
+        <p className="text-[11px] text-zinc-600">
+          Max risk-sized quantity is the largest quantity permitted by the current authorized risk calculation. It is not a trade recommendation.
+        </p>
       </div>
 
       {!ownershipConnected && (
@@ -379,6 +558,12 @@ function ActiveCard({ item, pretrade, broker, drafts, updateDraft, busyKey, runF
   const state = upper(candidate.lifecycleState);
   const manualNodes = state === "PRETRADE_TRIGGER_EVALUATING" ? manualTriggerNodeIds(candidate) : [];
   const blocker = candidate.permissionBlocker || candidate.recoveryGate || null;
+  const blockerReasons = blocker ? [...new Set([
+    ...(Array.isArray(blocker.reasonCodes) ? blocker.reasonCodes : []),
+    ...(Array.isArray(blocker.provenance?.reasonCodes) ? blocker.provenance.reasonCodes : []),
+    blocker.reasonCode,
+    blocker.code,
+  ].map(upper).filter(Boolean))] : [];
   const busy = busyKey === key;
   const setDraft = (patch) => updateDraft(key, patch);
   const run = (action) => runFor(key, action);
@@ -400,8 +585,16 @@ function ActiveCard({ item, pretrade, broker, drafts, updateDraft, busyKey, runF
 
       {blocker && (
         <div className="mx-4 mb-4 rounded border border-amber-400/25 bg-amber-950/15 p-3 text-xs text-amber-100">
-          <p className="font-bold">{blocker.reasonCode || blocker.code || "BLOCKED"}</p>
-          <p className="mt-1 opacity-70">{blocker.message || (blocker.retryable === false ? "Not retryable." : "Retry only after the prerequisite is resolved.")}</p>
+          <div className="space-y-1">
+            {blockerReasons.length ? blockerReasons.map((reason, index) => (
+              <p key={reason} className={index === 0 ? "font-bold" : "font-mono text-[11px] opacity-80"}>
+                {reason}
+              </p>
+            )) : (
+              <p className="font-bold">BLOCKED</p>
+            )}
+          </div>
+          <p className="mt-2 opacity-70">{blocker.message || (blocker.retryable === false ? "Not retryable." : "Retry only after the prerequisite is resolved.")}</p>
         </div>
       )}
 
@@ -431,10 +624,10 @@ function ActiveCard({ item, pretrade, broker, drafts, updateDraft, busyKey, runF
           setDraft={setDraft}
           accounts={accounts}
           busy={busy}
-          onEvaluate={({ structural, permission }) => run(() => pretrade.client.evaluatePermission(candidate, {
-            accountId: draft.accountId,
-            entryMode: draft.entryMode,
-            triggerPrice: draft.triggerPrice ? Number(draft.triggerPrice) : null,
+          onEvaluate={({ structural, permission, effectiveDraft }) => run(() => pretrade.client.evaluatePermission(candidate, {
+            accountId: effectiveDraft.accountId,
+            entryMode: effectiveDraft.entryMode,
+            triggerPrice: effectiveDraft.triggerPrice ? Number(effectiveDraft.triggerPrice) : null,
             operatorStructuralAssessment: structural,
             operatorPermissionAssessment: permission,
           }))}
