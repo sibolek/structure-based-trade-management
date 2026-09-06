@@ -276,20 +276,33 @@ export class PreTradeArmService {
     if (!proof) throw armError("ARM operation has no durable authorization proof", "ARM_AUTHORIZATION_NOT_PROVEN");
     const current = this.lifecycleCoordinator.candidateSnapshot(proof.candidateId, proof.contractVersion);
     const currentState = canonicalLifecycleState(current.lifecycleState);
-    const expectedState = recovery && currentState === "EXPIRED" ? "EXPIRED" : proof.permissionState;
-    const expectedRevision = recovery && currentState === "EXPIRED" ? current.stateRevision : proof.permissionStateRevision;
 
-    const armTransition = this.armLifecycleAuthority.authorizeFromCommit({
-      operationId: `${proof.operationId}:CANDIDATE_ARM`,
-      candidateId: proof.candidateId,
-      contractVersion: proof.contractVersion,
-      expectedState,
-      expectedRevision,
-      recovery,
-      armCommit: proof,
-      reason: recovery ? "ARM_RECOVERY_FORWARD_COMPLETE" : "OPERATOR_ARM",
-      provenance: { armOperationId: proof.operationId, reviewPackageId: proof.reviewPackageId },
-    });
+    let armTransition;
+    if (currentState === "ARMED") {
+      this.#assertExistingArmMatchesProof(current, proof);
+      armTransition = {
+        operationId: `${proof.operationId}:CANDIDATE_ARM`,
+        candidateId: proof.candidateId,
+        contractVersion: proof.contractVersion,
+        lifecycleState: "ARMED",
+        stateRevision: current.stateRevision,
+        recoveredExistingAuthorization: true,
+      };
+    } else {
+      const expectedState = recovery && currentState === "EXPIRED" ? "EXPIRED" : proof.permissionState;
+      const expectedRevision = recovery && currentState === "EXPIRED" ? current.stateRevision : proof.permissionStateRevision;
+      armTransition = this.armLifecycleAuthority.authorizeFromCommit({
+        operationId: `${proof.operationId}:CANDIDATE_ARM`,
+        candidateId: proof.candidateId,
+        contractVersion: proof.contractVersion,
+        expectedState,
+        expectedRevision,
+        recovery,
+        armCommit: proof,
+        reason: recovery ? "ARM_RECOVERY_FORWARD_COMPLETE" : "OPERATOR_ARM",
+        provenance: { armOperationId: proof.operationId, reviewPackageId: proof.reviewPackageId },
+      });
+    }
 
     const armedCandidate = this.lifecycleCoordinator.candidateSnapshot(proof.candidateId, proof.contractVersion);
     if (armedCandidate.lifecycleState !== "ARMED") throw armError("candidate ARM transition did not establish ARMED", "ARM_CANDIDATE_COMMIT_FAILED");
@@ -333,6 +346,25 @@ export class PreTradeArmService {
       ocoGroup,
       brokerWriteAuthority: false,
     };
+  }
+
+  #assertExistingArmMatchesProof(candidate, proof) {
+    const arm = candidate?.arm;
+    if (
+      text(candidate?.contentHash) !== text(proof.candidateContentHash)
+      || upper(candidate?.direction) !== upper(proof.direction)
+      || text(candidate?.authorizedDssEvaluationId) !== text(proof.dssEvaluationId)
+      || text(candidate?.authorizedRiskEvaluationId) !== text(proof.riskEvaluationId)
+      || !arm
+      || text(arm.armOperationId) !== text(proof.operationId)
+      || text(arm.reviewPackageId) !== text(proof.reviewPackageId)
+      || text(arm.handoffId) !== text(proof.handoffId)
+      || text(arm.executionAccountId) !== text(proof.accountId)
+      || Number(arm.selectedQuantity) !== Number(proof.selectedQuantity)
+      || timestampMs(arm.authorizedAt) !== timestampMs(proof.authorizedAt)
+    ) {
+      throw armError("existing ARMED candidate conflicts with durable ARM authorization proof", "ARM_RECOVERY_EXISTING_AUTHORIZATION_CONFLICT");
+    }
   }
 
   #assertFreshRisk(riskEvaluation) {
