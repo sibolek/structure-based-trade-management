@@ -20,6 +20,8 @@ export const MARKET_SESSION_STATUS = Object.freeze({
 const RTH_OPEN_MINUTE = 9 * 60 + 30;
 const NORMAL_RTH_CLOSE_MINUTE = 16 * 60;
 
+// Published 2026 NYSE/Nasdaq core-market calendar. These dates are stable
+// annual exchange closures/early closes rather than inferred from bar data.
 const US_EQUITY_CLOSED_2026 = new Set([
   "2026-01-01",
   "2026-01-19",
@@ -38,9 +40,10 @@ const US_EQUITY_EARLY_CLOSE_2026 = Object.freeze({
   "2026-12-24": 13 * 60,
 });
 
-// CME dates that require an exchange-specific holiday schedule rather than a
-// normal weekday assumption. Dates not explicitly verified for a supported
-// product profile fail closed as UNVERIFIED.
+// CME explicitly warns that holiday schedules are product-specific and are
+// usually finalized only shortly before each holiday. Therefore an annual
+// weekday assumption is not trusted on these dates. A CME holiday date must
+// have an explicit verified product-family override below or it fails closed.
 const CME_HOLIDAY_DATES_2026 = new Set([
   "2026-01-01",
   "2026-01-19",
@@ -57,43 +60,19 @@ const CME_HOLIDAY_DATES_2026 = new Set([
   "2026-12-31",
 ]);
 
-// Verified/operational schedules for the futures families supported by V2.4.
-// Labor Day 2026 is additionally corroborated by the live Schwab bar stream:
-// CME equity-index RTH produced 210 one-minute bars from 09:30-12:59 ET.
-const CME_EQUITY_INDEX_2026 = Object.freeze({
-  "2026-01-01": { status: MARKET_SESSION_STATUS.CLOSED, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-01-19": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 13 * 60, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-02-16": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 13 * 60, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  // Good Friday has a special abbreviated schedule. Keep it fail-closed until
-  // the exact product-family RTH boundary is registered rather than guessing.
-  "2026-04-03": { status: MARKET_SESSION_STATUS.UNVERIFIED, source: "CME_2026_GOOD_FRIDAY_SPECIAL" },
-  "2026-05-25": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 13 * 60, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-06-19": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 13 * 60, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-07-03": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 13 * 60, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-09-07": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 13 * 60, source: "CME_2026_LABOR_DAY_CONFIRMED" },
-  "2026-11-26": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 13 * 60, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  // The day after Thanksgiving and Christmas Eve use product-specific closes.
-  // Do not infer them from NYSE hours.
-  "2026-11-27": { status: MARKET_SESSION_STATUS.UNVERIFIED, source: "CME_2026_PRODUCT_SPECIFIC_CLOSE_REQUIRED" },
-  "2026-12-24": { status: MARKET_SESSION_STATUS.UNVERIFIED, source: "CME_2026_PRODUCT_SPECIFIC_CLOSE_REQUIRED" },
-  "2026-12-25": { status: MARKET_SESSION_STATUS.CLOSED, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-12-31": { status: MARKET_SESSION_STATUS.NORMAL, source: "CME_2026_HOLIDAY_SCHEDULE" },
-});
-
-const CME_ENERGY_2026 = Object.freeze({
-  "2026-01-01": { status: MARKET_SESSION_STATUS.CLOSED, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-01-19": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 14 * 60 + 30, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-02-16": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 14 * 60 + 30, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-04-03": { status: MARKET_SESSION_STATUS.UNVERIFIED, source: "CME_2026_GOOD_FRIDAY_SPECIAL" },
-  "2026-05-25": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 14 * 60 + 30, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-06-19": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 14 * 60 + 30, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-07-03": { status: MARKET_SESSION_STATUS.UNVERIFIED, source: "CME_2026_PRODUCT_SPECIFIC_CLOSE_REQUIRED" },
-  "2026-09-07": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 14 * 60 + 30, source: "CME_2026_LABOR_DAY_CONFIRMED" },
-  "2026-11-26": { status: MARKET_SESSION_STATUS.EARLY_CLOSE, closeMinute: 14 * 60 + 30, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-11-27": { status: MARKET_SESSION_STATUS.UNVERIFIED, source: "CME_2026_PRODUCT_SPECIFIC_CLOSE_REQUIRED" },
-  "2026-12-24": { status: MARKET_SESSION_STATUS.UNVERIFIED, source: "CME_2026_PRODUCT_SPECIFIC_CLOSE_REQUIRED" },
-  "2026-12-25": { status: MARKET_SESSION_STATUS.CLOSED, source: "CME_2026_HOLIDAY_SCHEDULE" },
-  "2026-12-31": { status: MARKET_SESSION_STATUS.NORMAL, source: "CME_2026_HOLIDAY_SCHEDULE" },
+// V2.4 has directly verified the CME equity-index RTH boundary for Labor Day
+// 2026 against the live Schwab /MESU26 stream: 210 one-minute bars from
+// 09:30 through 12:59 ET, i.e. a 13:00 ET scheduled RTH close. MES/MNQ/ES/NQ
+// share the same CME equity-index holiday family. Other CME holiday dates are
+// deliberately not pre-authorized here; they remain UNVERIFIED until the
+// final product schedule is checked.
+const CME_EQUITY_INDEX_VERIFIED_2026 = Object.freeze({
+  "2026-09-07": {
+    status: MARKET_SESSION_STATUS.EARLY_CLOSE,
+    openMinute: RTH_OPEN_MINUTE,
+    closeMinute: 13 * 60,
+    source: "CME_2026_LABOR_DAY_PLUS_LIVE_SCHWAB_MES_CONFIRMATION",
+  },
 });
 
 function text(value) {
@@ -144,6 +123,8 @@ export function resolveMarketSessionProfile({ symbol, assetMainType = null } = {
       return MARKET_SESSION_PROFILE.CME_EQUITY_INDEX;
     }
     if (["MCL", "CL", "NG", "RB", "HO", "BZ"].includes(root)) {
+      // Kept distinct so the blocker is diagnostic. V2.4 must not borrow
+      // equity-index 09:30-16:00 RTH semantics for NYMEX energy products.
       return MARKET_SESSION_PROFILE.CME_ENERGY;
     }
     return MARKET_SESSION_PROFILE.UNSUPPORTED;
@@ -156,19 +137,30 @@ export function resolveMarketSessionProfile({ symbol, assetMainType = null } = {
   return MARKET_SESSION_PROFILE.UNSUPPORTED;
 }
 
-function finalizedSchedule({ date, profile, status, closeMinute = null, source }) {
-  const effectiveCloseMinute = status === MARKET_SESSION_STATUS.CLOSED || status === MARKET_SESSION_STATUS.UNVERIFIED
-    ? null
-    : (Number.isFinite(Number(closeMinute)) ? Number(closeMinute) : NORMAL_RTH_CLOSE_MINUTE);
-  const openMinute = status === MARKET_SESSION_STATUS.CLOSED || status === MARKET_SESSION_STATUS.UNVERIFIED
-    ? null
-    : RTH_OPEN_MINUTE;
-  const minuteCount = openMinute === null || effectiveCloseMinute === null
+function finalizedSchedule({
+  date,
+  profile,
+  status,
+  openMinute = null,
+  closeMinute = null,
+  source,
+}) {
+  const schedulable = ![
+    MARKET_SESSION_STATUS.CLOSED,
+    MARKET_SESSION_STATUS.UNVERIFIED,
+  ].includes(status);
+  const effectiveOpenMinute = schedulable
+    ? (Number.isFinite(Number(openMinute)) ? Number(openMinute) : RTH_OPEN_MINUTE)
+    : null;
+  const effectiveCloseMinute = schedulable
+    ? (Number.isFinite(Number(closeMinute)) ? Number(closeMinute) : NORMAL_RTH_CLOSE_MINUTE)
+    : null;
+  const minuteCount = effectiveOpenMinute === null || effectiveCloseMinute === null
     ? 0
-    : Math.max(0, effectiveCloseMinute - openMinute);
+    : Math.max(0, effectiveCloseMinute - effectiveOpenMinute);
   const completeTwoMinuteBars = Math.floor(minuteCount / 2);
   const lastCompleteTwoMinuteStartMinute = completeTwoMinuteBars > 0
-    ? openMinute + (completeTwoMinuteBars - 1) * 2
+    ? effectiveOpenMinute + (completeTwoMinuteBars - 1) * 2
     : null;
 
   return Object.freeze({
@@ -177,7 +169,7 @@ function finalizedSchedule({ date, profile, status, closeMinute = null, source }
     date,
     profile,
     status,
-    openMinute,
+    openMinute: effectiveOpenMinute,
     closeMinute: effectiveCloseMinute,
     minuteCount,
     completeTwoMinuteBars,
@@ -234,6 +226,7 @@ export function sessionScheduleForDate(date, { profile } = {}) {
         date: normalizedDate,
         profile: normalizedProfile,
         status: MARKET_SESSION_STATUS.EARLY_CLOSE,
+        openMinute: RTH_OPEN_MINUTE,
         closeMinute: earlyClose,
         source: "NYSE_NASDAQ_2026_EARLY_CLOSE_CALENDAR",
       });
@@ -242,48 +235,56 @@ export function sessionScheduleForDate(date, { profile } = {}) {
       date: normalizedDate,
       profile: normalizedProfile,
       status: MARKET_SESSION_STATUS.NORMAL,
+      openMinute: RTH_OPEN_MINUTE,
+      closeMinute: NORMAL_RTH_CLOSE_MINUTE,
       source: "NYSE_NASDAQ_2026_CORE_HOURS",
     });
   }
 
-  const cmeMap = normalizedProfile === MARKET_SESSION_PROFILE.CME_EQUITY_INDEX
-    ? CME_EQUITY_INDEX_2026
-    : normalizedProfile === MARKET_SESSION_PROFILE.CME_ENERGY
-      ? CME_ENERGY_2026
-      : null;
-
-  if (!cmeMap) {
-    return finalizedSchedule({
-      date: normalizedDate,
-      profile: normalizedProfile || MARKET_SESSION_PROFILE.UNSUPPORTED,
-      status: MARKET_SESSION_STATUS.UNVERIFIED,
-      source: "UNSUPPORTED_MARKET_SESSION_PROFILE",
-    });
-  }
-
-  const override = cmeMap[normalizedDate];
-  if (override) {
-    return finalizedSchedule({
-      date: normalizedDate,
-      profile: normalizedProfile,
-      ...override,
-    });
-  }
-
-  if (CME_HOLIDAY_DATES_2026.has(normalizedDate)) {
+  if (normalizedProfile === MARKET_SESSION_PROFILE.CME_EQUITY_INDEX) {
+    const verified = CME_EQUITY_INDEX_VERIFIED_2026[normalizedDate];
+    if (verified) {
+      return finalizedSchedule({
+        date: normalizedDate,
+        profile: normalizedProfile,
+        ...verified,
+      });
+    }
+    if (CME_HOLIDAY_DATES_2026.has(normalizedDate)) {
+      return finalizedSchedule({
+        date: normalizedDate,
+        profile: normalizedProfile,
+        status: MARKET_SESSION_STATUS.UNVERIFIED,
+        source: "CME_PRODUCT_HOLIDAY_SCHEDULE_REQUIRES_VERIFICATION",
+      });
+    }
     return finalizedSchedule({
       date: normalizedDate,
       profile: normalizedProfile,
+      status: MARKET_SESSION_STATUS.NORMAL,
+      openMinute: RTH_OPEN_MINUTE,
+      closeMinute: NORMAL_RTH_CLOSE_MINUTE,
+      source: "CME_EQUITY_INDEX_NORMAL_RTH_PROFILE",
+    });
+  }
+
+  if (normalizedProfile === MARKET_SESSION_PROFILE.CME_ENERGY) {
+    // NYMEX energy RTH boundaries differ from the cash-equity/equity-index
+    // profile and are not yet an accepted V2.4 authority. Fail closed on both
+    // ordinary and holiday dates until that product-family schedule is added.
+    return finalizedSchedule({
+      date: normalizedDate,
+      profile: normalizedProfile,
       status: MARKET_SESSION_STATUS.UNVERIFIED,
-      source: "CME_HOLIDAY_SCHEDULE_NOT_REGISTERED_FOR_PROFILE",
+      source: "CME_ENERGY_RTH_PROFILE_NOT_YET_VERIFIED",
     });
   }
 
   return finalizedSchedule({
     date: normalizedDate,
-    profile: normalizedProfile,
-    status: MARKET_SESSION_STATUS.NORMAL,
-    source: "CME_2026_NORMAL_RTH_PROFILE",
+    profile: normalizedProfile || MARKET_SESSION_PROFILE.UNSUPPORTED,
+    status: MARKET_SESSION_STATUS.UNVERIFIED,
+    source: "UNSUPPORTED_MARKET_SESSION_PROFILE",
   });
 }
 
