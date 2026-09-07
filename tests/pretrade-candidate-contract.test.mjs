@@ -97,6 +97,24 @@ test("dynamic structural invalidation may be accepted with a structured unresolv
   assert.equal(normalized.structuralInvalidation.reference.type, "OPENING_RANGE_LOW");
 });
 
+test("explicit null structural invalidation price remains unresolved and is never coerced to zero", () => {
+  const dynamic = proposal({
+    structuralInvalidation: {
+      price: null,
+      rule: "acceptance above the operator-defined invalidation zone",
+      referenceType: "PRICE_ZONE",
+      reference: { lower: 180.25, upper: 180.75 },
+      reason: "structure fails above the zone",
+    },
+  });
+  const { normalized, errors } = normalizeCanonicalCandidateProposal(dynamic, {
+    bundleSource: "SOD_A_PLUS_TRADES",
+  });
+  assert.deepEqual(errors, []);
+  assert.equal(normalized.structuralInvalidation.price, null);
+  assert.deepEqual(normalized.structuralInvalidation.reference, { lower: 180.25, upper: 180.75 });
+});
+
 test("candidate validity is left-closed and right-open at exact boundaries", () => {
   const candidate = acceptedCandidate();
   assert.equal(candidateValidityStatusAt(candidate, "2026-09-05T13:29:59.999Z").status, "NOT_YET_VALID");
