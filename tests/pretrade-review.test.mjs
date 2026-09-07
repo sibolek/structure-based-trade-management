@@ -118,6 +118,35 @@ test("review repository preserves selection across equivalent refresh but clears
   assert.equal(replaced.cautionAcknowledgment, null);
 });
 
+test("review repository reload keeps persisted review records mutable", () => {
+  const filePath = tempFile();
+  const first = new PreTradeReviewRepository({ filePath, clock: () => NOW });
+  first.load();
+  const base = buildPreTradeReviewPackage({ candidate: candidate(), permissionAttempt: attempt(), generatedAt: NOW });
+  first.syncPackage({ operationId: "sync-before-restart", reviewPackage: base });
+
+  const reloaded = new PreTradeReviewRepository({ filePath, clock: () => "2026-09-06T13:00:01.000Z" });
+  reloaded.load();
+  const nextCandidate = candidate();
+  nextCandidate.currentPermissionOutcome.permissionEvaluationId = "attempt-2";
+  const equivalent = buildPreTradeReviewPackage({
+    candidate: nextCandidate,
+    permissionAttempt: attempt({ id: "attempt-2", riskEvaluation: risk({ riskEvaluationId: "risk-2", dssEvaluationId: "dss-2" }) }),
+    generatedAt: "2026-09-06T13:00:01.000Z",
+  });
+  const refreshed = reloaded.syncPackage({ operationId: "sync-after-restart", reviewPackage: equivalent });
+  assert.equal(refreshed.currentPackage.evidence.permissionAttemptId, "attempt-2");
+
+  const selected = reloaded.selectQuantity({
+    operationId: "qty-after-restart",
+    candidateId: equivalent.candidateId,
+    contractVersion: 1,
+    reviewPackageId: equivalent.reviewPackageId,
+    selectedQuantity: 25,
+  });
+  assert.equal(selected.selectedQuantity.value, 25);
+});
+
 test("CAUTION acknowledgment is required and remains bound to the exact caution package", () => {
   const repo = new PreTradeReviewRepository({ filePath: tempFile(), clock: () => NOW });
   repo.load();
