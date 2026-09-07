@@ -49,8 +49,8 @@ function normalizeState(raw) {
   return {
     schemaVersion: PRETRADE_REVIEW_REPOSITORY_SCHEMA_VERSION,
     updatedAt: text(source.updatedAt) || null,
-    reviews: Array.isArray(source.reviews) ? source.reviews.filter(Boolean).map(immutable) : [],
-    operations: Array.isArray(source.operations) ? source.operations.filter(Boolean).map(immutable) : [],
+    reviews: Array.isArray(source.reviews) ? source.reviews.filter(Boolean).map((item) => structuredClone(item)) : [],
+    operations: Array.isArray(source.operations) ? source.operations.filter(Boolean).map((item) => structuredClone(item)) : [],
   };
 }
 
