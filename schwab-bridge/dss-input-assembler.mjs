@@ -2,17 +2,21 @@ import crypto from "node:crypto";
 import { DSS_POLICY_VERSION, dssPolicyForVersion } from "./dss-policy.mjs";
 import { DSS_CALCULATOR_VERSION } from "./dss-evaluator.mjs";
 import {
-  EASTERN_TIME_ZONE,
   aggregateMinuteBars,
   minuteContinuity,
   selectSessionBars,
   tradingDateKey,
 } from "./market-data-provider.mjs";
+import {
+  MARKET_SESSION_STATUS,
+  marketMinuteOfDay,
+  resolveMarketSessionProfile,
+  sessionScheduleForDate,
+  sessionStateAt,
+} from "./market-session-calendar.mjs";
 
 const ONE_MINUTE_MS = 60_000;
 const TWO_MINUTES_MS = 120_000;
-const FULL_RTH_MINUTES = 390;
-const FULL_RTH_TWO_MINUTE_BARS = 195;
 
 function text(value) {
   return String(value ?? "").trim();
@@ -37,33 +41,6 @@ function deepFreeze(value) {
 
 function clone(value) {
   return value == null ? value : structuredClone(value);
-}
-
-function easternSession(timestamp) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: EASTERN_TIME_ZONE,
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(timestamp));
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  if (["Sat", "Sun"].includes(values.weekday)) return "CLOSED";
-  const minuteOfDay = Number(values.hour) * 60 + Number(values.minute);
-  if (minuteOfDay < 9 * 60 + 30) return "PREMARKET";
-  if (minuteOfDay < 16 * 60) return "RTH";
-  return "AFTER_HOURS";
-}
-
-function easternMinuteOfDay(timestamp) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: EASTERN_TIME_ZONE,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(timestamp));
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return Number(values.hour) * 60 + Number(values.minute);
 }
 
 function broadDateWindow(date) {
@@ -108,50 +85,73 @@ function validateCandidateIdentity(candidate) {
   return null;
 }
 
+function barsWithinSchedule(bars, schedule) {
+  if (!schedule || schedule.status === MARKET_SESSION_STATUS.CLOSED) return [];
+  if (schedule.status === MARKET_SESSION_STATUS.UNVERIFIED) return [];
+  return (Array.isArray(bars) ? bars : []).filter((bar) => {
+    const minute = marketMinuteOfDay(bar?.timestamp);
+    return Number.isFinite(minute)
+      && minute >= schedule.openMinute
+      && minute < schedule.closeMinute;
+  });
+}
+
 function sessionIntegrity(rthMinuteBars, {
   date,
+  schedule,
   nowMs,
   isCurrentSession,
   evaluationSession,
 } = {}) {
-  const closed = (Array.isArray(rthMinuteBars) ? rthMinuteBars : [])
-    .filter((bar) => !isCurrentSession || Number(bar.timestamp) + ONE_MINUTE_MS <= nowMs)
-    .slice()
-    .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
-  const aggregated = aggregateMinuteBars(rthMinuteBars, { minutes: 2, nowMs });
-  const complete = aggregated.filter((bar) => bar.complete);
-
-  if (!isCurrentSession) {
-    const continuity = minuteContinuity(closed);
-    const firstMinute = closed[0]?.timestamp;
-    const lastMinute = closed.at(-1)?.timestamp;
-    const valid = closed.length === FULL_RTH_MINUTES
-      && continuity.missingSlots === 0
-      && continuity.duplicates === 0
-      && easternMinuteOfDay(firstMinute) === 9 * 60 + 30
-      && easternMinuteOfDay(lastMinute) === 15 * 60 + 59
-      && complete.length === FULL_RTH_TWO_MINUTE_BARS
-      && easternMinuteOfDay(complete[0]?.timestamp) === 9 * 60 + 30
-      && easternMinuteOfDay(complete.at(-1)?.timestamp) === 15 * 60 + 58;
+  if (!schedule || schedule.status === MARKET_SESSION_STATUS.UNVERIFIED) {
     return {
-      valid,
+      valid: false,
       date,
-      minuteCount: closed.length,
-      missingMinutes: continuity.missingSlots,
-      duplicateMinutes: continuity.duplicates,
-      completeTwoMinuteBars: complete.length,
-      executionBars: complete,
+      minuteCount: 0,
+      missingMinutes: 0,
+      duplicateMinutes: 0,
+      completeTwoMinuteBars: 0,
+      executionBars: [],
     };
   }
 
-  if (evaluationSession === "AFTER_HOURS") {
+  if (schedule.status === MARKET_SESSION_STATUS.CLOSED) {
+    return {
+      valid: !Array.isArray(rthMinuteBars) || rthMinuteBars.length === 0,
+      date,
+      minuteCount: 0,
+      missingMinutes: 0,
+      duplicateMinutes: 0,
+      completeTwoMinuteBars: 0,
+      executionBars: [],
+    };
+  }
+
+  const scheduled = barsWithinSchedule(rthMinuteBars, schedule)
+    .slice()
+    .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+  const closed = scheduled
+    .filter((bar) => !isCurrentSession || Number(bar.timestamp) + ONE_MINUTE_MS <= nowMs)
+    .slice()
+    .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+  const aggregated = aggregateMinuteBars(scheduled, { minutes: 2, nowMs });
+  const complete = aggregated.filter((bar) => bar.complete);
+
+  const fullSessionRequired = !isCurrentSession || evaluationSession === "AFTER_HOURS";
+  if (fullSessionRequired) {
     const continuity = minuteContinuity(closed);
-    const valid = closed.length === FULL_RTH_MINUTES
+    const firstMinute = closed[0]?.timestamp;
+    const lastMinute = closed.at(-1)?.timestamp;
+    const firstTwoMinute = complete[0]?.timestamp;
+    const lastTwoMinute = complete.at(-1)?.timestamp;
+    const valid = closed.length === schedule.minuteCount
       && continuity.missingSlots === 0
       && continuity.duplicates === 0
-      && easternMinuteOfDay(closed[0]?.timestamp) === 9 * 60 + 30
-      && easternMinuteOfDay(closed.at(-1)?.timestamp) === 15 * 60 + 59
-      && complete.length === FULL_RTH_TWO_MINUTE_BARS;
+      && marketMinuteOfDay(firstMinute) === schedule.openMinute
+      && marketMinuteOfDay(lastMinute) === schedule.closeMinute - 1
+      && complete.length === schedule.completeTwoMinuteBars
+      && (schedule.completeTwoMinuteBars === 0 || marketMinuteOfDay(firstTwoMinute) === schedule.openMinute)
+      && (schedule.completeTwoMinuteBars === 0 || marketMinuteOfDay(lastTwoMinute) === schedule.lastCompleteTwoMinuteStartMinute);
     return {
       valid,
       date,
@@ -194,8 +194,8 @@ function sessionIntegrity(rthMinuteBars, {
   const valid = sourceForCompletedBars.length === expectedSourceMinutes
     && continuity.missingSlots === 0
     && continuity.duplicates === 0
-    && easternMinuteOfDay(sourceForCompletedBars[0]?.timestamp) === 9 * 60 + 30
-    && easternMinuteOfDay(complete[0]?.timestamp) === 9 * 60 + 30;
+    && marketMinuteOfDay(sourceForCompletedBars[0]?.timestamp) === schedule.openMinute
+    && marketMinuteOfDay(complete[0]?.timestamp) === schedule.openMinute;
 
   return {
     valid,
@@ -256,6 +256,28 @@ export class DssInputAssemblyError extends Error {
   }
 }
 
+function completedSessionDatesForCalendar(availableTradingDates, {
+  profile,
+  required,
+} = {}) {
+  const selected = [];
+  for (const date of [...availableTradingDates].sort().reverse()) {
+    const schedule = sessionScheduleForDate(date, { profile });
+    if (schedule.status === MARKET_SESSION_STATUS.UNVERIFIED) {
+      throw new DssInputAssemblyError(`market session calendar is unverified for ${date}`, {
+        status: "BLOCKED",
+        reasonCodes: ["MARKET_SESSION_CALENDAR_UNVERIFIED"],
+        stage: "MARKET_SESSION_CALENDAR",
+        details: { date, profile, schedule },
+      });
+    }
+    if (schedule.status === MARKET_SESSION_STATUS.CLOSED) continue;
+    selected.push(date);
+    if (selected.length >= required) break;
+  }
+  return selected.reverse();
+}
+
 export class DssInputAssembler {
   constructor({
     marketDataProvider,
@@ -275,7 +297,7 @@ export class DssInputAssembler {
       throw new Error("instrumentMetadataResolver must be a function or expose getInstrumentMetadata()");
     }
     if (typeof now !== "function") throw new Error("now must be a function");
-    if (typeof snapshotIdFactory !== "function") throw new Error("snapshotIdFactory must be a function");
+    if (typeof snapshotIdFactory !== "function") throw new Error("snapshotIdFactory must return a function");
 
     this.marketDataProvider = marketDataProvider;
     this.instrumentMetadataResolver = resolverFunction
@@ -331,11 +353,29 @@ export class DssInputAssembler {
       });
     }
 
-    const evaluationSession = easternSession(nowMs);
+    const marketSessionProfile = resolveMarketSessionProfile({
+      symbol: normalizedCandidate.symbol,
+      assetMainType: quote?.assetMainType,
+    });
     const currentTradingDate = tradingDateKey(nowMs);
+    const currentSession = sessionStateAt(nowMs, { profile: marketSessionProfile });
+    const evaluationSession = currentSession.state;
+    if (evaluationSession === "UNVERIFIED") {
+      throw new DssInputAssemblyError(`market session calendar is unverified for ${currentTradingDate}`, {
+        status: "BLOCKED",
+        reasonCodes: ["MARKET_SESSION_CALENDAR_UNVERIFIED"],
+        stage: "MARKET_SESSION_CALENDAR",
+        details: { date: currentTradingDate, profile: marketSessionProfile, schedule: currentSession.schedule },
+      });
+    }
+
     const availableTradingDates = uniqueTradingDates(dailyBars).filter((date) => date < currentTradingDate);
-    const completedSessionDates = availableTradingDates.slice(-this.policy.atrReconstructionCompletedRthSessions);
-    const includeCurrentSession = ["RTH", "AFTER_HOURS"].includes(evaluationSession);
+    const completedSessionDates = completedSessionDatesForCalendar(availableTradingDates, {
+      profile: marketSessionProfile,
+      required: this.policy.atrReconstructionCompletedRthSessions,
+    });
+    const includeCurrentSession = ["RTH", "AFTER_HOURS"].includes(evaluationSession)
+      && currentSession.schedule.status !== MARKET_SESSION_STATUS.CLOSED;
     const sessionDates = includeCurrentSession
       ? [...completedSessionDates, currentTradingDate]
       : completedSessionDates;
@@ -346,8 +386,18 @@ export class DssInputAssembler {
 
     for (const date of sessionDates) {
       const isCurrentSession = date === currentTradingDate;
+      const schedule = sessionScheduleForDate(date, { profile: marketSessionProfile });
+      if (schedule.status === MARKET_SESSION_STATUS.UNVERIFIED) {
+        throw new DssInputAssemblyError(`market session calendar is unverified for ${date}`, {
+          status: "BLOCKED",
+          reasonCodes: ["MARKET_SESSION_CALENDAR_UNVERIFIED"],
+          stage: "MARKET_SESSION_CALENDAR",
+          details: { date, profile: marketSessionProfile, schedule },
+        });
+      }
+
       let rthMinuteBars;
-      const cacheKey = `${normalizedCandidate.symbol}:${date}`;
+      const cacheKey = `${normalizedCandidate.symbol}:${marketSessionProfile}:${date}`;
       if (!isCurrentSession && this.completedSessionCache.has(cacheKey)) {
         rthMinuteBars = clone(this.completedSessionCache.get(cacheKey));
         cacheHits.push(date);
@@ -358,7 +408,10 @@ export class DssInputAssembler {
             ...window,
             extendedHours: false,
           });
-          rthMinuteBars = selectSessionBars(minuteBars, { session: "RTH", tradingDate: date });
+          rthMinuteBars = barsWithinSchedule(
+            selectSessionBars(minuteBars, { session: "RTH", tradingDate: date }),
+            schedule,
+          );
         } catch (error) {
           throw new DssInputAssemblyError(`market-data provider failed for ${date}: ${error?.message || error}`, {
             status: "ERROR",
@@ -371,6 +424,7 @@ export class DssInputAssembler {
 
       const report = sessionIntegrity(rthMinuteBars, {
         date,
+        schedule,
         nowMs,
         isCurrentSession,
         evaluationSession,
@@ -378,6 +432,9 @@ export class DssInputAssembler {
       sessionReports.push({
         date,
         isCurrentSession,
+        sessionStatus: schedule.status,
+        expectedMinuteCount: schedule.minuteCount,
+        expectedCompleteTwoMinuteBars: schedule.completeTwoMinuteBars,
         minuteCount: report.minuteCount,
         missingMinutes: report.missingMinutes,
         duplicateMinutes: report.duplicateMinutes,
@@ -393,7 +450,7 @@ export class DssInputAssembler {
         });
       }
 
-      if (!isCurrentSession && report.completeTwoMinuteBars === FULL_RTH_TWO_MINUTE_BARS) {
+      if (!isCurrentSession) {
         this.completedSessionCache.set(cacheKey, deepFreeze(clone(rthMinuteBars)));
       }
       executionBars.push(...report.executionBars);
@@ -422,8 +479,11 @@ export class DssInputAssembler {
       sourceIntegrity: {
         sourceTimeframe: "1m",
         aggregateTimeframe: "2m",
+        marketSessionProfile,
+        marketSessionCalendarVersion: currentSession.schedule.calendarVersion,
         evaluationSession,
         currentTradingDate,
+        currentSessionSchedule: clone(currentSession.schedule),
         requiredCompletedRthSessions: this.policy.atrReconstructionCompletedRthSessions,
         completedRthSessionsIncluded: completedSessionDates.length,
         includedSessionDates: sessionDates,
