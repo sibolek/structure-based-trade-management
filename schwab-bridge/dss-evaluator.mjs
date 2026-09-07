@@ -2,11 +2,17 @@ import crypto from "node:crypto";
 import { dssPolicyForVersion } from "./dss-policy.mjs";
 import { calculateEffectiveStop } from "./effective-stop.mjs";
 import {
-  EASTERN_TIME_ZONE,
-  expectedClosedRthMinutes,
   freshness,
   tradingDateKey,
 } from "./market-data-provider.mjs";
+import {
+  MARKET_SESSION_PROFILE,
+  expectedClosedSessionMinutes,
+  marketMinuteOfDay,
+  resolveMarketSessionProfile,
+  sessionScheduleForDate,
+  sessionStateAt,
+} from "./market-session-calendar.mjs";
 import {
   ATR_RECONSTRUCTION_COMPLETED_RTH_SESSIONS,
   reconstructWilderAtr,
@@ -81,33 +87,6 @@ function snapshot(value) {
 
 function unique(values) {
   return [...new Set(values)];
-}
-
-function easternSession(timestamp) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: EASTERN_TIME_ZONE,
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(timestamp));
-  const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  if (["Sat", "Sun"].includes(fields.weekday)) return "CLOSED";
-  const minuteOfDay = Number(fields.hour) * 60 + Number(fields.minute);
-  if (minuteOfDay < 9 * 60 + 30) return "PREMARKET";
-  if (minuteOfDay < 16 * 60) return "RTH";
-  return "AFTER_HOURS";
-}
-
-function easternMinuteOfDay(timestamp) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: EASTERN_TIME_ZONE,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(timestamp));
-  const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return Number(fields.hour) * 60 + Number(fields.minute);
 }
 
 class DssContractError extends Error {
@@ -211,7 +190,7 @@ function structureReasonCodes(definition, evaluation) {
   return unique(reasons);
 }
 
-function validateBarShape(bar, candidateSymbol, nowMs) {
+function validateBarShape(bar, candidateSymbol, nowMs, marketSessionProfile) {
   const reasons = [];
   const timestamp = finiteNumber(bar?.timestamp);
   const open = finiteNumber(bar?.open);
@@ -229,7 +208,9 @@ function validateBarShape(bar, candidateSymbol, nowMs) {
   if (bar?.complete !== true) reasons.push("INCOMPLETE_EXECUTION_BAR");
   if (bar?.timeframe && text(bar.timeframe) !== "2m") reasons.push("INVALID_EXECUTION_BAR_TIMEFRAME");
   if (bar?.symbol && upper(bar.symbol) !== candidateSymbol) reasons.push("EXECUTION_BAR_SYMBOL_MISMATCH");
-  if (easternSession(timestamp) !== "RTH") reasons.push("NON_RTH_EXECUTION_BAR");
+  const barSession = sessionStateAt(timestamp, { profile: marketSessionProfile });
+  if (barSession.state === "UNVERIFIED") reasons.push("MARKET_SESSION_CALENDAR_UNVERIFIED");
+  else if (barSession.state !== "RTH") reasons.push("NON_RTH_EXECUTION_BAR");
   if (timestamp + TWO_MINUTES_MS > nowMs) reasons.push("FUTURE_OR_FORMING_EXECUTION_BAR");
   return reasons;
 }
@@ -239,21 +220,32 @@ function inspectExecutionBars(bars, {
   nowMs,
   requiredCompletedSessions,
   publicationGraceMs,
+  marketSessionProfile,
 } = {}) {
   const reasons = [];
+  const currentTradingDate = tradingDateKey(nowMs);
+  const currentSession = sessionStateAt(nowMs, { profile: marketSessionProfile });
+  const evaluationSession = currentSession.state;
+
+  if (marketSessionProfile === MARKET_SESSION_PROFILE.UNSUPPORTED || evaluationSession === "UNVERIFIED") {
+    reasons.push("MARKET_SESSION_CALENDAR_UNVERIFIED");
+  }
+  if (evaluationSession === "CLOSED") reasons.push("UNSUPPORTED_EVALUATION_SESSION");
+
   if (!Array.isArray(bars) || bars.length === 0) {
+    reasons.push("MISSING_EXECUTION_BARS");
     return {
-      reasons: ["MISSING_EXECUTION_BARS"],
+      reasons: unique(reasons),
       bars: [],
-      currentTradingDate: tradingDateKey(nowMs),
-      evaluationSession: easternSession(nowMs),
+      currentTradingDate,
+      evaluationSession,
       completedRthSessionsObserved: 0,
       sessionCount: 0,
     };
   }
 
   const ordered = bars.slice().sort((a, b) => Number(a?.timestamp) - Number(b?.timestamp));
-  for (const bar of ordered) reasons.push(...validateBarShape(bar, candidateSymbol, nowMs));
+  for (const bar of ordered) reasons.push(...validateBarShape(bar, candidateSymbol, nowMs, marketSessionProfile));
 
   const timestamps = ordered.map((bar) => finiteNumber(bar?.timestamp)).filter(Number.isFinite);
   if (new Set(timestamps).size !== timestamps.length) reasons.push("DUPLICATE_EXECUTION_BAR");
@@ -272,7 +264,9 @@ function inspectExecutionBars(bars, {
     grouped.set(key, list);
   }
 
-  for (const sessionBars of grouped.values()) {
+  for (const [date, sessionBars] of grouped.entries()) {
+    const schedule = sessionScheduleForDate(date, { profile: marketSessionProfile });
+    if (schedule.status === "UNVERIFIED") reasons.push("MARKET_SESSION_CALENDAR_UNVERIFIED");
     const sessionTimestamps = sessionBars.map((bar) => Number(bar.timestamp)).sort((a, b) => a - b);
     for (let index = 1; index < sessionTimestamps.length; index += 1) {
       if (sessionTimestamps[index] - sessionTimestamps[index - 1] !== TWO_MINUTES_MS) {
@@ -281,10 +275,6 @@ function inspectExecutionBars(bars, {
       }
     }
   }
-
-  const currentTradingDate = tradingDateKey(nowMs);
-  const evaluationSession = easternSession(nowMs);
-  if (evaluationSession === "CLOSED") reasons.push("UNSUPPORTED_EVALUATION_SESSION");
 
   const dateKeys = [...grouped.keys()].sort();
   const priorDateKeys = dateKeys.filter((key) => currentTradingDate && key < currentTradingDate);
@@ -295,13 +285,18 @@ function inspectExecutionBars(bars, {
   const currentBars = (grouped.get(currentTradingDate) || [])
     .slice()
     .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+  const currentSchedule = currentSession.schedule;
 
-  if (currentBars.length > 0 && easternMinuteOfDay(currentBars[0].timestamp) !== 9 * 60 + 30) {
+  if (
+    currentBars.length > 0
+    && Number.isFinite(currentSchedule?.openMinute)
+    && marketMinuteOfDay(currentBars[0].timestamp) !== currentSchedule.openMinute
+  ) {
     reasons.push("CURRENT_SESSION_OPEN_BAR_MISSING");
   }
 
   if (evaluationSession === "RTH") {
-    const expectedClosedMinutes = expectedClosedRthMinutes(nowMs);
+    const expectedClosedMinutes = expectedClosedSessionMinutes(nowMs, { profile: marketSessionProfile });
 
     if (!Number.isFinite(expectedClosedMinutes) || expectedClosedMinutes < 2 || currentBars.length === 0) {
       reasons.push("CURRENT_SESSION_WARMUP_INCOMPLETE");
@@ -331,7 +326,8 @@ function inspectExecutionBars(bars, {
   if (
     evaluationSession === "AFTER_HOURS"
     && currentBars.length > 0
-    && easternMinuteOfDay(currentBars[currentBars.length - 1].timestamp) !== 15 * 60 + 58
+    && Number.isFinite(currentSchedule?.lastCompleteTwoMinuteStartMinute)
+    && marketMinuteOfDay(currentBars[currentBars.length - 1].timestamp) !== currentSchedule.lastCompleteTwoMinuteStartMinute
   ) {
     reasons.push("CURRENT_SESSION_RTH_INCOMPLETE");
   }
@@ -423,8 +419,13 @@ export function evaluateDss(input, {
   const structureEvaluation = inputValue.structureEvaluation;
   const marketSnapshot = inputValue.marketSnapshot;
   const instrument = inputValue.instrument;
+  const quote = marketSnapshot?.quote;
+  const marketSessionProfile = resolveMarketSessionProfile({
+    symbol: candidate.symbol,
+    assetMainType: instrument?.instrumentType || quote?.assetMainType,
+  });
   let policy = null;
-  let evaluationSession = easternSession(evaluationTime);
+  let evaluationSession = sessionStateAt(evaluationTime, { profile: marketSessionProfile }).state;
 
   try {
     policy = validatePolicyContract(inputValue.dssPolicy);
@@ -448,9 +449,14 @@ export function evaluateDss(input, {
       if (!text(marketSnapshot.snapshotId)) reasons.push("MISSING_MARKET_SNAPSHOT_ID");
       if (!text(marketSnapshot.provider)) reasons.push("MISSING_MARKET_PROVIDER");
       if (parseTimestamp(marketSnapshot.capturedAt) === null) reasons.push("INVALID_MARKET_SNAPSHOT_TIMESTAMP");
+      const suppliedProfile = upper(marketSnapshot?.sourceIntegrity?.marketSessionProfile);
+      if (suppliedProfile && suppliedProfile !== marketSessionProfile) reasons.push("MARKET_SESSION_PROFILE_MISMATCH");
     }
 
-    const quote = marketSnapshot?.quote;
+    if (marketSessionProfile === MARKET_SESSION_PROFILE.UNSUPPORTED) {
+      reasons.push("MARKET_SESSION_CALENDAR_UNVERIFIED");
+    }
+
     const quoteTimestamp = quote?.asOf ?? quote?.quoteTime ?? quote?.tradeTime;
     const quoteFreshness = freshness(quoteTimestamp, {
       nowMs: evaluationTime,
@@ -467,6 +473,7 @@ export function evaluateDss(input, {
       nowMs: evaluationTime,
       requiredCompletedSessions: policy.atrReconstructionCompletedRthSessions,
       publicationGraceMs: policy.completedBarPublicationGraceMs,
+      marketSessionProfile,
     });
     reasons.push(...barInspection.reasons);
     evaluationSession = barInspection.evaluationSession;
