@@ -1,5 +1,6 @@
 import { buildPreTradeReviewPackage } from "./pretrade-review.mjs";
 import { canonicalLifecycleState } from "./pretrade-state.mjs";
+import { evaluatePretradeQuantitySafety } from "./pretrade-quantity-safety.mjs";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -10,6 +11,46 @@ function serviceError(message, code, details = null) {
   error.code = code;
   if (details) error.details = details;
   return error;
+}
+
+function positiveNumber(value) {
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function quantitySafetyForAttempt(permissionAttempt) {
+  const riskEvaluation = permissionAttempt?.phase4?.evaluation;
+  const dssEvaluation = permissionAttempt?.dss?.evaluation;
+
+  // Backward compatibility for persisted pre-policy review evidence. New live
+  // permission attempts include the exact DSS evaluation and therefore always
+  // cross the quantity-safety boundary below.
+  if (!riskEvaluation || !dssEvaluation) return null;
+
+  const result = evaluatePretradeQuantitySafety({
+    riskEvaluation,
+    dssEvaluation,
+  });
+
+  if (result.status === "BLOCKED") {
+    throw serviceError(
+      "PRETRADE quantity safety could not be established from the current Phase 4 and DSS evidence",
+      "REVIEW_QUANTITY_SAFETY_BLOCKED",
+      { reasonCodes: result.reasonCodes || [] },
+    );
+  }
+
+  return result;
+}
+
+function reviewMaximum(review) {
+  const direct = positiveNumber(review?.maxAllowedQuantity);
+  if (direct !== null) return direct;
+  const ceiling = positiveNumber(review?.reviewQuantityCeiling?.value);
+  if (ceiling !== null) return ceiling;
+  return positiveNumber(review?.currentPackage?.material?.maxAffordableQuantity);
 }
 
 export class PreTradeReviewService {
@@ -30,7 +71,7 @@ export class PreTradeReviewService {
     this.clock = clock;
   }
 
-  refresh({ operationId, candidateId, contractVersion } = {}) {
+  refresh({ operationId, candidateId, contractVersion, preserveQuantityCeiling = false } = {}) {
     const candidate = this.lifecycleCoordinator.candidateSnapshot(candidateId, contractVersion);
     const state = canonicalLifecycleState(candidate.lifecycleState);
     if (!["READY", "CAUTION"].includes(state)) {
@@ -44,7 +85,13 @@ export class PreTradeReviewService {
       permissionAttempt,
       generatedAt: this.clock(),
     });
-    const review = this.reviewRepository.syncPackage({ operationId, reviewPackage });
+    const quantitySafety = quantitySafetyForAttempt(permissionAttempt);
+    const review = this.reviewRepository.syncPackage({
+      operationId,
+      reviewPackage,
+      quantitySafety,
+      preserveQuantityCeiling: preserveQuantityCeiling === true,
+    });
     return { review, candidate };
   }
 
@@ -85,8 +132,15 @@ export class PreTradeReviewService {
     if (review.currentPackage.evidence.permissionAttemptId !== currentPermissionAttemptId) {
       return { armEligible: false, reasonCode: "REVIEW_EVIDENCE_STALE", candidate, review };
     }
+    const maximum = reviewMaximum(review);
+    if (maximum === null || maximum <= 0) {
+      return { armEligible: false, reasonCode: "NO_SAFE_QUANTITY", candidate, review };
+    }
     if (!review.selectedQuantity || review.selectedQuantity.reviewPackageId !== review.currentPackage.reviewPackageId) {
       return { armEligible: false, reasonCode: "SELECTED_QUANTITY_REQUIRED", candidate, review };
+    }
+    if (Number(review.selectedQuantity.value) > maximum) {
+      return { armEligible: false, reasonCode: "SELECTED_QUANTITY_EXCEEDS_CURRENT_CEILING", candidate, review };
     }
     if (state === "CAUTION") {
       if (!review.cautionAcknowledgment || review.cautionAcknowledgment.reviewPackageId !== review.currentPackage.reviewPackageId) {
