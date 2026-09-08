@@ -19,40 +19,47 @@ v2.3.0
 baabb75f36050599f20e6c89e8db2f1f7d7769a1
 ```
 
-### V2.4 Phases 1–4
+### V2.4 on `main`
 
-Merged to `main`:
+The accepted V2.4 implementation is merged to `main` and includes:
 
 1. Candidate Ingestion;
 2. MarketDataProvider;
 3. DSS / Micro-Volatility Buffer;
-4. Effective-Stop Risk Sizing.
+4. Effective-Stop Risk Sizing;
+5. PRETRADE → ARM → Execution Board handoff integration;
+6. TODO #18 structural-evidence UX enforcement;
+7. TODO #19 PRETRADE quantity-safety policy.
 
-### V2.4 PRETRADE → Execution Board integration
+Final merged implementation checkpoint:
 
-Accepted and closed on:
+```text
+26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
+```
+
+Subsequent documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint.
+
+The former feature branch:
 
 ```text
 v24-execution-board-handoff
 ```
 
-Accepted implementation checkpoint before documentation-only closeout commits:
+was retired and deleted after verified fast-forward merge to `main`.
 
-```text
-3f794538ffbe5c5875a3d671143cb33890530b1f
-```
-
-Frozen design authority:
+Frozen / approved design authority:
 
 ```text
 docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md
 docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md
+docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md
 ```
 
-Implementation closeout:
+Implementation closeouts:
 
 ```text
 docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md
+docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md
 ```
 
 Governing invariant:
@@ -100,10 +107,17 @@ Imported `WAITING` candidates remain proposals until the explicit operator/serve
 - versioned trigger contract and durable satisfaction evidence;
 - immutable permission attempts;
 - structural-validity authority;
+- operator `STRUCTURE = VALID` requires a non-empty structural evidence/reference before permission submission;
+- the UI makes that evidence requirement explicit and disables `EVALUATE PERMISSION` while it is missing;
+- backend `MISSING_STRUCTURE_PROVENANCE` enforcement remains authoritative;
 - Phase 3 DSS + Phase 4 risk integration;
 - `READY / CAUTION / PASS`;
 - material review-package identity;
 - explicit quantity selection;
+- separate PRETRADE quantity-safety evaluation using authoritative DSS 2-minute Wilder ATR(14);
+- 2-ATR volatility-stress maximum quantity evaluated separately from Phase 4 stop-risk sizing;
+- first explicit review freezes the candidate/version reviewed quantity ceiling;
+- ARM-time fresh revalidation may reduce the reviewed ceiling but may not increase it without a new explicit operator review;
 - exact-package CAUTION acknowledgement;
 - same-symbol OCO authority;
 - ARM as the final explicit direction/quantity confirmation, with the exact account exposed in the review package and frozen by ARM;
@@ -167,6 +181,39 @@ STRUCTURE → INVALIDATION → EFFECTIVE STOP → RISK BUDGET → POSITION SIZE
 
 Phase 3 determines the volatility-protected `effectiveStop`. Phase 4 sizes against that stop and may reduce quantity or reject affordability; it may never tighten the stop to make size fit.
 
+### PRETRADE quantity safety
+
+The accepted quantity-safety policy is a separate ceiling layered on top of, not inside, Phase 4 stop-risk sizing.
+
+It uses authoritative DSS 2-minute Wilder ATR(14):
+
+```text
+volatilityStressDistance = 2.0 × ATR
+```
+
+The current policy maximum is bounded by both authorities:
+
+```text
+policyMaxQuantity = min(
+  phase4MaxAffordableQuantity,
+  volatilityMaxQuantity
+)
+```
+
+At first explicit operator review, the current policy maximum is frozen as the candidate/version reviewed ceiling. At ARM-time revalidation:
+
+```text
+finalAllowedQuantity = min(
+  freshPhase4Max,
+  freshVolatilityMax,
+  priorReviewedCeiling
+)
+```
+
+ARM-time revalidation may therefore reduce the already-reviewed ceiling but may not expand it without a new explicit operator review.
+
+The quantity-safety policy does **not** move structural invalidation, synthesize or modify the effective stop, or rewrite Phase 4 `riskDistance` or `plannedDollarRisk` semantics.
+
 For live V2.4 management, realized losses consume the finite authorization budget. Profits do not replenish it. A tighter valid effective stop may free risk only within existing authorization ceilings; a wider stop cannot manufacture new capacity.
 
 ---
@@ -226,13 +273,13 @@ ERROR
 
 ---
 
-## Normal V2.4 startup on the accepted branch
+## Normal V2.4 startup
 
-Until the integration branch is explicitly merged to `main`:
+Operate the accepted system from `main`:
 
 ```bash
-git checkout v24-execution-board-handoff
-git pull --ff-only
+git checkout main
+git pull --ff-only origin main
 ```
 
 Run three terminals:
@@ -314,17 +361,21 @@ V3 has not started.
 
 ## Final acceptance evidence
 
+September 6 closeout evidence remains preserved in the historical handoff-integration closeout. Final September 8 acceptance added TODO #18/#19 completion and reran the comprehensive pre-merge regression/build sequence successfully.
+
 ```text
-Focused Slice 7:                  26 / 26 PASS
-Downstream lifecycle E2E:          1 / 1 PASS
-Canonical PRETRADE→Execution E2E:  1 / 1 PASS
-Full repository regression:       734 / 734 PASS
-Production build:                 PASS
-Implementation worktree:          CLEAN
-Broker writes introduced:         NONE
+Focused Slice 7:                     26 / 26 PASS
+Downstream lifecycle E2E:             1 / 1 PASS
+Canonical PRETRADE→Execution E2E:     1 / 1 PASS
+September 8 comprehensive regression: GREEN
+Production build:                     PASS
+Final merged implementation SHA:      26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
+Broker writes introduced:             NONE
 ```
 
-The production build was run at `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796`; the only subsequent implementation change through accepted checkpoint `3f794538ffbe5c5875a3d671143cb33890530b1f` was the addition of the canonical PRETRADE→Execution E2E test, so production code was unchanged.
+The final aggregate numeric test count is intentionally not restated because the September 8 acceptance was recorded as an all-green multi-command regression rather than one single aggregate-count artifact.
+
+The final quantity-safety implementation requires authoritative DSS ATR evidence. Older synthetic ARM and full PRETRADE E2E fixtures were updated with valid `atrValue` evidence; production fail-closed validation was not weakened.
 
 ---
 
@@ -365,7 +416,9 @@ Use:
 - `DOCUMENTATION-STATUS.md` — current vs historical records;
 - `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md` — frozen current V2.4 architecture;
 - `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` — Decision 22–97 coverage;
+- `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` — approved PRETRADE quantity-safety policy supplement;
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` — accepted Slices 1–7 implementation evidence;
+- `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` — final merge/TODO/regression/repository-closeout evidence;
 - Phase 3/4 closeouts — subsystem acceptance evidence;
 - `docs/ExecutionOS_EOD_Report.md` — reporting semantics.
 
