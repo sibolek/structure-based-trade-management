@@ -3,7 +3,7 @@
 **Date:** 2026-09-08  
 **Repository:** `sibolek/structure-based-trade-management`  
 **Final merged branch:** `main`  
-**Final merged commit:** `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`  
+**Final merged implementation commit:** `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`  
 **Status:** **MERGED / ACCEPTED / CLOSED**
 
 ---
@@ -26,7 +26,7 @@ Frozen approved baselines and historical approval-time addenda remain unchanged.
 
 The completed integration was fast-forwarded into `main` without force.
 
-Final accepted commit:
+Final accepted implementation commit:
 
 ```text
 26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
@@ -50,7 +50,7 @@ ahead: 0
 behind: 0
 ```
 
-The local `main` worktree was then fast-forwarded to the same commit.
+The local `main` worktree was then fast-forwarded to the same implementation commit. Subsequent documentation-only closeout commits may advance the tip of `main` without changing that accepted implementation checkpoint.
 
 ---
 
@@ -252,7 +252,7 @@ The accepted V2.4 PRETRADE → Execution Board integration now lives on:
 main
 ```
 
-Current accepted merged checkpoint:
+Current accepted implementation checkpoint:
 
 ```text
 26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
@@ -281,7 +281,7 @@ As of September 8, 2026:
 
 ```text
 V2.4 PRETRADE → EXECUTION BOARD HANDOFF: MERGED / ACCEPTED / CLOSED
-FINAL MAIN SHA:                           26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
+FINAL MERGED IMPLEMENTATION SHA:          26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
 TODO #18:                                COMPLETED / CLOSED
 TODO #19:                                COMPLETED / CLOSED
 FINAL REGRESSION:                        GREEN
