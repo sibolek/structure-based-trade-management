@@ -436,10 +436,50 @@ function PermissionControls({ candidate, draft, setDraft, accounts, busy, onEval
 function ReviewControls({ candidate, review, draft, setDraft, pretrade, busy, run }) {
   const pkg = currentReviewPackage(review);
   const quantity = selectedQuantity(review);
-  const rawMaxQuantity = Number(pkg?.material?.maxAffordableQuantity);
-  const maxRiskSizedQuantity = Number.isFinite(rawMaxQuantity) && rawMaxQuantity > 0
-    ? rawMaxQuantity
+  const rawPhase4MaxQuantity = Number(pkg?.material?.maxAffordableQuantity);
+  const phase4MaxQuantity = Number.isFinite(rawPhase4MaxQuantity) && rawPhase4MaxQuantity > 0
+    ? rawPhase4MaxQuantity
     : null;
+  const quantitySafety = review?.quantitySafety && typeof review.quantitySafety === "object"
+    ? review.quantitySafety
+    : null;
+  const rawVolatilityMaxQuantity = Number(quantitySafety?.volatilityMaxQuantity);
+  const volatilityMaxQuantity = Number.isFinite(rawVolatilityMaxQuantity) && rawVolatilityMaxQuantity >= 0
+    ? rawVolatilityMaxQuantity
+    : null;
+  const rawReviewCeiling = Number(review?.reviewQuantityCeiling?.value);
+  const reviewCeilingQuantity = Number.isFinite(rawReviewCeiling) && rawReviewCeiling >= 0
+    ? rawReviewCeiling
+    : null;
+  const rawMaxAllowedQuantity = Number(
+    review?.maxAllowedQuantity
+      ?? review?.reviewQuantityCeiling?.value
+      ?? pkg?.material?.maxAffordableQuantity,
+  );
+  const maxAllowedQuantity = Number.isFinite(rawMaxAllowedQuantity) && rawMaxAllowedQuantity > 0
+    ? rawMaxAllowedQuantity
+    : null;
+  const rawPolicyMaxQuantity = Number(quantitySafety?.policyMaxQuantity);
+  const policyMaxQuantity = Number.isFinite(rawPolicyMaxQuantity) && rawPolicyMaxQuantity >= 0
+    ? rawPolicyMaxQuantity
+    : null;
+  const reviewCeilingBinding = (
+    upper(review?.reviewQuantityCeiling?.source) === "ARM_REVALIDATION_NON_EXPANDING"
+    && reviewCeilingQuantity !== null
+    && policyMaxQuantity !== null
+    && reviewCeilingQuantity < policyMaxQuantity
+  );
+  const bindingConstraint = reviewCeilingBinding
+    ? "REVIEW_CEILING"
+    : upper(quantitySafety?.bindingConstraint) || "PHASE4_STOP_RISK";
+  const bindingLabel = {
+    PHASE4_STOP_RISK: "Phase 4 stop risk",
+    VOLATILITY_STRESS: "2-ATR volatility",
+    REVIEW_CEILING: "Reviewed non-expanding ceiling",
+  }[bindingConstraint] || bindingConstraint.replaceAll("_", " ");
+  const atrValue = Number(quantitySafety?.atrValue);
+  const stressAtrMultiple = Number(quantitySafety?.stressAtrMultiple);
+  const stressDistance = Number(quantitySafety?.stressDistance);
   const cautionRequired = upper(candidate.lifecycleState) === "CAUTION";
   const cautionAcked = Boolean(review?.cautionAcknowledgment && text(review.cautionAcknowledgment.reviewPackageId) === text(pkg?.reviewPackageId));
   const ownershipConnected = pretrade?.health?.executionOwnershipAuthorityConnected === true;
@@ -472,9 +512,34 @@ function ReviewControls({ candidate, review, draft, setDraft, pretrade, busy, ru
         <div><p className="section-label">Expected Entry</p><p className="font-semibold">{price(pkg.material.currentExpectedEntry)}</p></div>
         <div><p className="section-label">Effective Stop</p><p className="font-semibold text-red-200">{price(pkg.material.effectiveStop)}</p></div>
         <div><p className="section-label">Max Risk</p><p className="font-semibold text-sky-100">{money(pkg.material.maxDollarRisk)}</p></div>
-        <div><p className="section-label">Max Qty</p><p className="font-semibold">{pkg.material.maxAffordableQuantity}</p></div>
+        <div><p className="section-label">Final Max Qty</p><p className="font-semibold text-emerald-100">{maxAllowedQuantity ?? 0}</p></div>
         <div><p className="section-label">Account</p><p className="font-mono text-xs text-zinc-300">…{accountId.slice(-8)}</p></div>
       </div>
+
+      {quantitySafety ? (
+        <div className="rounded border border-sky-400/20 bg-sky-950/10 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="section-label">Quantity Safety · 2-ATR Stress</p>
+              <p className="mt-1 text-xs text-zinc-500">Phase 4 stop-risk sizing remains unchanged. The volatility policy independently limits exposure.</p>
+            </div>
+            <span className="rounded border border-sky-400/20 px-2 py-1 text-[10px] font-bold text-sky-100">Binding: {bindingLabel}</span>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <div><p className="section-label">Phase 4 Stop-Risk Max</p><p className="font-semibold">{phase4MaxQuantity ?? "—"}</p></div>
+            <div><p className="section-label">2-ATR Volatility Max</p><p className="font-semibold">{volatilityMaxQuantity ?? "—"}</p></div>
+            <div><p className="section-label">Reviewed Ceiling</p><p className="font-semibold">{reviewCeilingQuantity ?? "—"}</p></div>
+            <div><p className="section-label">Final Allowed</p><p className="font-semibold text-emerald-100">{maxAllowedQuantity ?? 0}</p></div>
+          </div>
+          <p className="mt-2 text-[11px] text-zinc-500">
+            2m Wilder ATR(14) {Number.isFinite(atrValue) ? price(atrValue) : "—"} × {Number.isFinite(stressAtrMultiple) ? stressAtrMultiple : "—"} = {Number.isFinite(stressDistance) ? price(stressDistance) : "—"} stress distance. Effective stop is unchanged.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded border border-white/10 bg-black/10 p-3 text-xs text-zinc-500">
+          Legacy review evidence: final quantity currently follows the Phase 4 ceiling because this persisted review predates the PRETRADE quantity-safety policy.
+        </div>
+      )}
 
       {cautionRequired && (
         <div className="rounded border border-amber-400/25 bg-amber-950/15 p-3 text-xs text-amber-100">
@@ -489,14 +554,14 @@ function ReviewControls({ candidate, review, draft, setDraft, pretrade, busy, ru
         <div className="flex flex-wrap items-end gap-2">
           <button
             type="button"
-            disabled={busy || !maxRiskSizedQuantity}
+            disabled={busy || !maxAllowedQuantity}
             onClick={() => {
-              setDraft({ quantity: String(maxRiskSizedQuantity) });
-              run(() => pretrade.client.selectQuantity(candidate, pkg.reviewPackageId, maxRiskSizedQuantity));
+              setDraft({ quantity: String(maxAllowedQuantity) });
+              run(() => pretrade.client.selectQuantity(candidate, pkg.reviewPackageId, maxAllowedQuantity));
             }}
             className="rounded border border-emerald-400/35 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100 disabled:opacity-35"
           >
-            USE MAX RISK-SIZED QTY — {maxRiskSizedQuantity || "—"} {unitLabel(review, maxRiskSizedQuantity)}
+            USE MAX ALLOWED QTY — {maxAllowedQuantity || "—"} {unitLabel(review, maxAllowedQuantity)}
           </button>
 
           <label className="text-xs text-zinc-500">
@@ -530,7 +595,7 @@ function ReviewControls({ candidate, review, draft, setDraft, pretrade, busy, ru
         </div>
 
         <p className="text-[11px] text-zinc-600">
-          Max risk-sized quantity is the largest quantity permitted by the current authorized risk calculation. It is not a trade recommendation.
+          Final allowed quantity is the lesser of Phase 4 stop-risk sizing, the 2-ATR volatility ceiling, and any non-expanding reviewed ceiling. It is not a trade recommendation.
         </p>
       </div>
 
