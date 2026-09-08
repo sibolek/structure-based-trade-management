@@ -109,6 +109,27 @@ function brokerThrough(brokerState) {
   return isoTimestamp(brokerState?.executionCoverage?.currentThrough);
 }
 
+function retryableInitialCoverageLag(admission) {
+  if (upper(admission?.reason) !== "BROKER_EXECUTION_COVERAGE_GAP") return false;
+  const evidence = admission?.evidence && typeof admission.evidence === "object" ? admission.evidence : {};
+  const authorizedAt = isoTimestamp(evidence.authorizedAt);
+  const coverageStartedAt = isoTimestamp(evidence.coverageStartedAt);
+  const currentThrough = isoTimestamp(evidence.currentThrough);
+  const activityStartedAt = isoTimestamp(evidence.activityStartedAt);
+  const activityCurrentThrough = isoTimestamp(evidence.activityCurrentThrough);
+
+  if (!authorizedAt || !coverageStartedAt || !currentThrough || !activityStartedAt || !activityCurrentThrough) {
+    return false;
+  }
+
+  return (
+    activityStartedAt === coverageStartedAt
+    && activityCurrentThrough === currentThrough
+    && Date.parse(coverageStartedAt) <= Date.parse(authorizedAt)
+    && Date.parse(currentThrough) < Date.parse(authorizedAt)
+  );
+}
+
 export async function advanceV24HandoffActivation({
   envelope,
   brokerState,
@@ -205,6 +226,14 @@ export async function advanceV24HandoffActivation({
     });
 
     if (!initialAdmission.admitted) {
+      if (retryableInitialCoverageLag(initialAdmission)) {
+        return result("WAITING_FOR_BROKER_PROOF", {
+          handoffId,
+          brokerCurrentThrough: initialAdmission.evidence.currentThrough,
+          requiredThrough: initialAdmission.evidence.authorizedAt,
+          waitReason: "BROKER_EXECUTION_COVERAGE_LAG",
+        });
+      }
       return blockDelivery({
         transport: api,
         handoffId,
