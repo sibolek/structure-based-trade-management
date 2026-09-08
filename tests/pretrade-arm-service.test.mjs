@@ -122,7 +122,17 @@ function permissionAttempt(candidate, riskEvaluation, id, stateRevision) {
     candidate: { ...candidate, stateRevision },
     triggerSatisfaction: { authority: "PRETRADE_TRIGGER_ENGINE", evidenceId: "trigger-1", evidenceTimestamp: "2026-09-06T14:59:00.000Z" },
     structuralValidity: { authority: "PRETRADE_STRUCTURAL_VALIDITY", structuralEvaluationId: `structure-${id}`, status: "VALID", resolvedPrice: 179.5 },
-    dssResult: { action: "EVALUATED", status: "VALID", dssEvaluationId: riskEvaluation.dss.dssEvaluationId, evaluation: { dssEvaluationId: riskEvaluation.dss.dssEvaluationId, status: "VALID", effectiveStop: 179.25 } },
+    dssResult: {
+      action: "EVALUATED",
+      status: "VALID",
+      dssEvaluationId: riskEvaluation.dss.dssEvaluationId,
+      evaluation: {
+        dssEvaluationId: riskEvaluation.dss.dssEvaluationId,
+        status: "VALID",
+        effectiveStop: 179.25,
+        atrValue: 0.1,
+      },
+    },
     riskEvaluation,
     permissionDecision: decision(candidate, id),
     result: { kind: "OUTCOME", outcome: "READY", reasonCodes: [] },
