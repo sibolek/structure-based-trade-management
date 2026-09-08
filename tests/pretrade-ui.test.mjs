@@ -229,6 +229,15 @@ test("React PRETRADE workspace is intent-only and renders all three frozen proje
   assert.match(workspace, /structuralEvidenceMissing/);
   assert.match(workspace, /Structure evidence \/ reference — required for VALID/);
   assert.match(workspace, /Structure evidence is required when STRUCTURE = VALID/);
+  assert.match(workspace, /Quantity Safety · 2-ATR Stress/);
+  assert.match(workspace, /Phase 4 Stop-Risk Max/);
+  assert.match(workspace, /2-ATR Volatility Max/);
+  assert.match(workspace, /Reviewed Ceiling/);
+  assert.match(workspace, /Final Allowed/);
+  assert.match(workspace, /USE MAX ALLOWED QTY/);
+  assert.match(workspace, /maxAllowedQuantity/);
+  assert.match(workspace, /Reviewed non-expanding ceiling/);
+  assert.doesNotMatch(workspace, /USE MAX RISK-SIZED QTY/);
   assert.doesNotMatch(workspace, /operatorContextAssessment/);
   assert.doesNotMatch(workspace, /localStorage\.setItem/);
   assert.doesNotMatch(workspace, /transactExecutionBoardStore/);
