@@ -79,17 +79,28 @@ test("reviewPackageId ignores fresh evidence identities when authorization-mater
   assert.notEqual(first.evidence.riskEvaluationId, second.evidence.riskEvaluationId);
 });
 
-test("material expected-entry or quantity-ceiling changes create a new reviewPackageId", () => {
+test("marketable expected-entry drift does not change review authorization identity when the fresh risk ceiling is unchanged", () => {
   const base = buildPreTradeReviewPackage({ candidate: candidate(), permissionAttempt: attempt(), generatedAt: NOW });
   const changed = buildPreTradeReviewPackage({
     candidate: candidate(),
-    permissionAttempt: attempt({ riskEvaluation: risk({ currentExpectedEntry: 180.01, finalQuantity: 89 }) }),
+    permissionAttempt: attempt({ riskEvaluation: risk({ currentExpectedEntry: 180.01 }) }),
+    generatedAt: NOW,
+  });
+  assert.equal(base.reviewPackageId, changed.reviewPackageId);
+  assert.notEqual(base.material.currentExpectedEntry, changed.material.currentExpectedEntry);
+});
+
+test("quantity-ceiling changes create a new reviewPackageId", () => {
+  const base = buildPreTradeReviewPackage({ candidate: candidate(), permissionAttempt: attempt(), generatedAt: NOW });
+  const changed = buildPreTradeReviewPackage({
+    candidate: candidate(),
+    permissionAttempt: attempt({ riskEvaluation: risk({ finalQuantity: 89 }) }),
     generatedAt: NOW,
   });
   assert.notEqual(base.reviewPackageId, changed.reviewPackageId);
 });
 
-test("review repository preserves selection across equivalent refresh but clears it on material change", () => {
+test("review repository preserves selection across evidence and quote refreshes but clears it on authorization-material change", () => {
   const repo = new PreTradeReviewRepository({ filePath: tempFile(), clock: () => NOW });
   repo.load();
   const base = buildPreTradeReviewPackage({ candidate: candidate(), permissionAttempt: attempt(), generatedAt: NOW });
@@ -100,17 +111,18 @@ test("review repository preserves selection across equivalent refresh but clears
   nextCandidate.currentPermissionOutcome.permissionEvaluationId = "attempt-2";
   const equivalent = buildPreTradeReviewPackage({
     candidate: nextCandidate,
-    permissionAttempt: attempt({ id: "attempt-2", riskEvaluation: risk({ riskEvaluationId: "risk-2", dssEvaluationId: "dss-2" }) }),
+    permissionAttempt: attempt({ id: "attempt-2", riskEvaluation: risk({ riskEvaluationId: "risk-2", dssEvaluationId: "dss-2", currentExpectedEntry: 180.02 }) }),
     generatedAt: "2026-09-06T13:00:01.000Z",
   });
   const refreshed = repo.syncPackage({ operationId: "sync-2", reviewPackage: equivalent });
   assert.equal(refreshed.selectedQuantity.value, 25);
+  assert.equal(refreshed.currentPackage.material.currentExpectedEntry, 180.02);
 
   const changedCandidate = candidate();
   changedCandidate.currentPermissionOutcome.permissionEvaluationId = "attempt-3";
   const changed = buildPreTradeReviewPackage({
     candidate: changedCandidate,
-    permissionAttempt: attempt({ id: "attempt-3", riskEvaluation: risk({ riskEvaluationId: "risk-3", currentExpectedEntry: 180.02 }) }),
+    permissionAttempt: attempt({ id: "attempt-3", riskEvaluation: risk({ riskEvaluationId: "risk-3", currentExpectedEntry: 180.03, finalQuantity: 24 }) }),
     generatedAt: "2026-09-06T13:00:02.000Z",
   });
   const replaced = repo.syncPackage({ operationId: "sync-3", reviewPackage: changed });
