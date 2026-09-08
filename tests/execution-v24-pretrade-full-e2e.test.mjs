@@ -205,6 +205,7 @@ function permissionAttempt(candidate, riskEvaluation, id, stateRevision) {
         dssEvaluationId: riskEvaluation.dss.dssEvaluationId,
         status: "VALID",
         effectiveStop: 179.25,
+        atrValue: 0.1,
       },
     },
     riskEvaluation,
