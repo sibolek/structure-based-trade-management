@@ -36,7 +36,6 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import html
           import markdown
           from weasyprint import HTML
 
@@ -45,6 +44,20 @@ jobs:
           output.parent.mkdir(parents=True, exist_ok=True)
 
           md = source.read_text(encoding='utf-8')
+
+          # Keep the Quick Start link and the numbered manual TOC as two
+          # distinct Markdown lists in the PDF without changing USER-GUIDE.md.
+          toc_boundary = (
+              '- [Quick Start — Completely New to ExecutionOS? Start Here]'
+              '(#quick-start--completely-new-to-executionos-start-here)\n'
+              '1. [Purpose](#1-purpose)'
+          )
+          md = md.replace(
+              toc_boundary,
+              toc_boundary.replace('\n1. [Purpose]', '\n\n1. [Purpose]'),
+              1,
+          )
+
           body = markdown.markdown(
               md,
               extensions=[
@@ -74,14 +87,18 @@ jobs:
             line-height: 1.42;
             max-width: 100%;
           }
-          h1, h2, h3, h4 { color: #0f2744; line-height: 1.2; }
+          h1, h2, h3, h4 {
+            color: #0f2744;
+            line-height: 1.2;
+            break-after: avoid;
+          }
           h1 {
             font-size: 20pt;
             border-bottom: 2px solid #d7e0ea;
             padding-bottom: 5pt;
-            margin-top: 0;
+            margin-top: 18pt;
           }
-          h1:not(:first-of-type) { break-before: page; }
+          h1:first-of-type { margin-top: 0; }
           h2 { font-size: 14.5pt; margin-top: 18pt; margin-bottom: 7pt; }
           h3 { font-size: 11.5pt; margin-top: 13pt; margin-bottom: 5pt; }
           h4 { font-size: 10pt; margin-top: 10pt; margin-bottom: 4pt; }
@@ -136,10 +153,6 @@ jobs:
           hr { border: 0; border-top: 1px solid #d7e0ea; margin: 14pt 0; }
           a { color: #1d4ed8; text-decoration: none; }
           strong { color: #111827; }
-          .document-meta {
-            color: #475569;
-            margin-bottom: 10pt;
-          }
           '''
 
           document = f'''<!doctype html>
