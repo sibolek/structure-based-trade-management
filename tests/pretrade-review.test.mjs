@@ -28,6 +28,7 @@ function candidate(state = "READY") {
 }
 
 function risk(overrides = {}) {
+  const entryMode = overrides.entryMode || "MARKETABLE_NOW";
   return {
     riskEvaluationId: overrides.riskEvaluationId || "risk-1",
     status: "VALID",
@@ -36,7 +37,11 @@ function risk(overrides = {}) {
       structuralInvalidation: 179.5,
       effectiveStop: 179.25,
     },
-    entry: { currentExpectedEntry: overrides.currentExpectedEntry ?? 180 },
+    entry: {
+      entryMode,
+      triggerPrice: entryMode === "STOP_TRIGGER" ? (overrides.triggerPrice ?? 180.5) : null,
+      currentExpectedEntry: overrides.currentExpectedEntry ?? 180,
+    },
     account: { accountId: "acct-1", maxDollarRisk: 67.5 },
     instrument: {
       assetType: "EQUITY",
@@ -90,6 +95,20 @@ test("marketable expected-entry drift does not change review authorization ident
   assert.notEqual(base.material.currentExpectedEntry, changed.material.currentExpectedEntry);
 });
 
+test("stop-trigger expected-entry drift remains review material", () => {
+  const base = buildPreTradeReviewPackage({
+    candidate: candidate(),
+    permissionAttempt: attempt({ riskEvaluation: risk({ entryMode: "STOP_TRIGGER", triggerPrice: 180.5, currentExpectedEntry: 180.5 }) }),
+    generatedAt: NOW,
+  });
+  const changed = buildPreTradeReviewPackage({
+    candidate: candidate(),
+    permissionAttempt: attempt({ riskEvaluation: risk({ entryMode: "STOP_TRIGGER", triggerPrice: 180.5, currentExpectedEntry: 180.75 }) }),
+    generatedAt: NOW,
+  });
+  assert.notEqual(base.reviewPackageId, changed.reviewPackageId);
+});
+
 test("quantity-ceiling changes create a new reviewPackageId", () => {
   const base = buildPreTradeReviewPackage({ candidate: candidate(), permissionAttempt: attempt(), generatedAt: NOW });
   const changed = buildPreTradeReviewPackage({
@@ -100,7 +119,7 @@ test("quantity-ceiling changes create a new reviewPackageId", () => {
   assert.notEqual(base.reviewPackageId, changed.reviewPackageId);
 });
 
-test("review repository preserves selection across evidence and quote refreshes but clears it on authorization-material change", () => {
+test("review repository preserves selection across evidence and marketable-quote refreshes but clears it on authorization-material change", () => {
   const repo = new PreTradeReviewRepository({ filePath: tempFile(), clock: () => NOW });
   repo.load();
   const base = buildPreTradeReviewPackage({ candidate: candidate(), permissionAttempt: attempt(), generatedAt: NOW });
