@@ -1,19 +1,24 @@
 # ExecutionOS Documentation Index
 
 **Status:** Current documentation inventory  
-**Date:** 2026-09-06  
-**Repository:** `sibolek/structure-based-trade-management`
+**Date:** 2026-09-08  
+**Repository:** `sibolek/structure-based-trade-management`  
+**Current operating branch:** `main`  
+**Final merged implementation checkpoint:** `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`
 
 ---
 
 ## 1. Authority and precedence
 
 1. **Current code and validated runtime behavior** define what the system actually does.
-2. `USER-GUIDE.md` is the living operator guide for the accepted handoff branch.
+2. `USER-GUIDE.md` is the living operator guide for the accepted system on `main`.
 3. `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md` is the consolidated frozen V2.4 architectural authority for Decisions 22–97.
 4. `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` is the approved decision-coverage companion to v0.5.
-5. Closeout/status records define implemented/accepted state.
-6. Earlier approved baselines/addenda remain historical approval-time evidence and do not override later frozen authority or accepted runtime behavior.
+5. `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` is the approved September 8 PRETRADE quantity-safety authority layered on top of Phase 4.
+6. Closeout/status records define implemented/accepted state.
+7. Earlier approved baselines/addenda remain historical approval-time evidence and do not override later frozen authority or accepted runtime behavior.
+
+Frozen approved design records should not be rewritten merely because implementation status later advanced.
 
 ---
 
@@ -21,33 +26,47 @@
 
 | Document | Role | Authority |
 |---|---|---|
-| `USER-GUIDE.md` | Current operator workflow | **Authoritative operator guide for accepted handoff branch** |
+| `USER-GUIDE.md` | Current operator workflow and first-time Quick Start | **Authoritative living operator guide for `main`** |
+| `docs/ExecutionOS_User_Guide.pdf` | Rendered operator guide | **Generated PDF companion to `USER-GUIDE.md`** |
 | `README.md` | Current repository overview | **Current overview** |
 | `DOCUMENTATION-STATUS.md` | Current vs historical map | **Documentation governance** |
 | `docs/ExecutionOS_Documentation_Index.md` | Cross-document authority/status | **Current index** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md` | Consolidated PRETRADE→ARM→Execution architecture | **Current frozen V2.4 design authority** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` | Decision 22–97 traceability | **Approved implementation companion** |
+| `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` | Separate 2-ATR PRETRADE quantity-safety ceiling | **Approved current quantity-safety policy authority** |
 | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` | Slices 1–7 implementation/acceptance record | **Accepted implementation closeout** |
+| `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` | Merge/TODO/regression/repository closeout | **Final handoff merge closeout** |
 | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` | Phase 3 accepted implementation | **Accepted implementation** |
 | `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md` | Phase 4 accepted implementation | **Accepted implementation** |
 | `docs/ExecutionOS_EOD_Report.md` | EOD semantics | **Current reporting reference** |
 
 Earlier approved handoff baselines/addenda and `ExecutionOS_V2.4_Design_Baseline_v0.4_APPROVED.md` remain preserved historical evidence. Do not rewrite them merely because implementation status advanced.
 
+The PDF user guide is generated from `USER-GUIDE.md`; if the two ever differ, the current Markdown source plus validated application behavior governs.
+
 ---
 
 ## 3. Release / branch map
 
-### `main`
+### Current operating branch: `main`
 
-Contains merged V2.4 Phases 1–4.
+The complete accepted V2.4 PRETRADE → ARM → Execution Board integration is merged to `main`.
 
-Phase 4 merge:
+Final merged **implementation** checkpoint:
 
 ```text
-PR #14
-0a976fb8bc68f64fd479d48322a011c9d419b2c2
+26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
 ```
+
+Later documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint.
+
+### Retired feature branch
+
+```text
+v24-execution-board-handoff
+```
+
+The feature branch was fast-forward merged, then deleted locally and remotely. Its worktree was removed. It is historical only and must not be recreated for normal operation.
 
 ### Frozen downstream reference
 
@@ -56,19 +75,12 @@ v2.3.0
 baabb75f36050599f20e6c89e8db2f1f7d7769a1
 ```
 
-### Accepted V2.4 integration branch
+### Historical Phase 4 merge record
 
 ```text
-v24-execution-board-handoff
+PR #14
+0a976fb8bc68f64fd479d48322a011c9d419b2c2
 ```
-
-Accepted implementation checkpoint before documentation-only closeout commits:
-
-```text
-3f794538ffbe5c5875a3d671143cb33890530b1f
-```
-
-The handoff branch is accepted/closed but must not be assumed to exist on `main` until an explicit merge occurs.
 
 ---
 
@@ -104,27 +116,33 @@ CANDIDATE SOURCE
 → OWNERSHIP RELEASE
 ```
 
-Browser code is presentation/intent only. Server-side PRETRADE authorities own candidate lifecycle, trigger, permission, review, OCO, and ARM. The canonical Execution Board store owns downstream installation/lifecycle/management state.
+Browser code is presentation/intent only. Server-side PRETRADE authorities own candidate lifecycle, trigger, permission, review, OCO, quantity-safety evaluation, and ARM. The canonical Execution Board store owns downstream installation/lifecycle/management state.
 
 ---
 
 ## 5. Accepted PRETRADE / ARM capabilities
 
-Implemented/accepted on the handoff branch:
+Implemented/accepted on `main`:
 
 - canonical candidate ingress, validity, immutable hashing, versioning and supersession;
 - automatic relevance plus versioned trigger-satisfaction evidence;
 - durable trigger progress/recovery;
 - immutable permission attempts;
 - structural-validity authority;
-- Phase 3 DSS + Phase 4 risk integration;
+- **required structural evidence/reference when the operator selects `STRUCTURE = VALID`**;
+- authoritative backend provenance enforcement via `MISSING_STRUCTURE_PROVENANCE`;
+- Phase 3 DSS + Phase 4 effective-stop risk integration;
+- separate PRETRADE **2-ATR volatility-stress quantity-safety ceiling**;
 - `READY / CAUTION / PASS` outcomes;
 - exact-package operator review;
-- explicit quantity selection;
+- Phase 4 Stop-Risk Max, 2-ATR Volatility Max, Reviewed Ceiling, and Final Allowed quantity auditability;
+- explicit quantity selection no greater than `Final Allowed`;
+- first explicit review freezes a non-expanding reviewed quantity ceiling;
+- fresh ARM-time evidence may reduce that ceiling but may not increase it without a new explicit review;
 - exact-package CAUTION acknowledgement;
 - OCO group authority and same-symbol ARM gate;
 - ARM as the final explicit symbol/direction/quantity confirmation, with the exact account exposed in the review package and frozen by ARM;
-- fresh ARM-time permission and risk revalidation;
+- fresh ARM-time permission, risk, and quantity-safety revalidation;
 - durable ARM operation journal and recovery;
 - immutable ARMED provenance;
 - exactly one immutable handoff and one PENDING delivery per successful authorization;
@@ -132,6 +150,13 @@ Implemented/accepted on the handoff branch:
 - no browser generic lifecycle or ARM authority.
 
 An imported WAITING candidate is still a proposal only. Progression requires the explicit operator/server workflow; it is never automatically ARMED merely because the router is running.
+
+### September 8 TODO closeout
+
+- **Issue #18 — completed/closed:** structural evidence is explicitly required for operator `VALID` permission evaluation, with browser enforcement plus authoritative backend provenance validation.
+- **Issue #19 — completed/closed:** near-stop sizing expansion is constrained by the separate PRETRADE 2-ATR quantity-safety ceiling while preserving Phase 4 effective-stop sizing semantics.
+
+The quantity-safety layer does **not** move structural invalidation, synthesize a new effective stop, rewrite Phase 4 `riskDistance`, or rewrite Phase 4 `plannedDollarRisk`.
 
 ---
 
@@ -200,7 +225,9 @@ brokerWriteAuthority === false
 
 ExecutionOS does not place, replace, cancel, modify, reduce, or flatten broker orders.
 
-Actual equity order entry remains in thinkorswim/Schwab. Schwab observation is exact-account and authoritative `executionTime` based.
+Actual equity order entry remains manual in thinkorswim/Schwab. Schwab observation is exact-account and authoritative `executionTime` based.
+
+**Broker write authority introduced by the V2.4 handoff integration: NONE.**
 
 ---
 
@@ -262,25 +289,27 @@ LEGACY_MANUAL_V23  -> originalPlan.structuralStop
 
 Structural invalidation remains separate from the V2.4 effective stop. Slice 7 live managed-stop changes do not rewrite the EOD planned-risk stop basis.
 
+The separate PRETRADE 2-ATR quantity-safety policy also does not replace or rewrite the EOD planned-risk stop basis.
+
 ---
 
 ## 12. Acceptance evidence
 
-Final closeout evidence:
+Accepted final handoff closeout state:
 
 ```text
-Focused Slice 7:                 26 / 26 PASS
-Downstream lifecycle E2E:         1 / 1 PASS
-Canonical PRETRADE→Execution E2E: 1 / 1 PASS
-Full repository regression:      734 / 734 PASS
-Production build:                PASS
-Implementation worktree:         CLEAN
-Broker-write authority:          NONE
+Focused Slice 7:                       26 / 26 PASS
+Downstream lifecycle E2E:               1 / 1 PASS
+Canonical PRETRADE→Execution E2E:       1 / 1 PASS
+September 8 comprehensive regression:  GREEN
+Production build:                       PASS
+Final merged implementation checkpoint: 26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
+Broker-write authority introduced:      NONE
 ```
 
-The production build was run at `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796`. The only subsequent implementation change through accepted checkpoint `3f794538ffbe5c5875a3d671143cb33890530b1f` was addition of `tests/execution-v24-pretrade-full-e2e.test.mjs`, so production code was unchanged.
+The final aggregate numeric repository-wide test count is intentionally not restated here because the September 8 acceptance was established by an all-green multi-command regression/build sequence after the final quantity-safety fixture update. The final merged implementation checkpoint includes the synthetic E2E DSS fixture update required by the approved quantity-safety policy.
 
-Dedicated tests include:
+Dedicated validation includes:
 
 ```text
 node --test tests/execution-v24-live-management.test.mjs \
@@ -295,17 +324,42 @@ npm run analytics:test
 npm run build
 ```
 
+The September 8 full regression also covered the current V2.4 router, store-authority, V2.3 compatibility/install, retirement, activation, fill ownership, live lifecycle, and PRETRADE integration paths documented by the final closeout.
+
 ---
 
-## 13. Pull requests as project records
+## 13. Pull requests, issues, and closeout records
 
 - PR #1 — V2.3 execution system; merged.
 - PR #7 — read-only EOD reporting; merged.
 - PR #12 — V2.4 Phase 3 DSS; merged.
 - PR #13 — Phase 3 documentation cleanup; merged.
 - PR #14 — V2.4 Phase 4 risk sizing; merged.
-- Execution Board handoff integration — accepted/closed on `v24-execution-board-handoff`; merge status must be checked explicitly.
+- Execution Board handoff integration — fast-forward merged to `main` at implementation checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`; former feature branch retired/deleted.
+- Issue #18 — completed/closed.
+- Issue #19 — completed/closed.
+- September 8 final merge closeout — `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md`.
 
 ---
 
-**Maintenance principle:** current code/runtime and accepted closeout evidence govern current truth. Preserve frozen approved documents, but synchronize `USER-GUIDE.md`, `README.md`, `DOCUMENTATION-STATUS.md`, this index, and current operational references whenever accepted behavior changes.
+## 14. Operator-document generation
+
+The living operator source is:
+
+```text
+USER-GUIDE.md
+```
+
+Rendered PDF companion:
+
+```text
+docs/ExecutionOS_User_Guide.pdf
+```
+
+A repository GitHub Actions workflow regenerates the PDF when the guide or renderer changes, verifies the PDF signature, uploads a workflow artifact, and commits the updated PDF to `main` when content changed.
+
+The Markdown guide remains the editable source of truth for operator documentation.
+
+---
+
+**Maintenance principle:** current code/runtime and accepted closeout evidence govern current truth. Preserve frozen approved documents, but synchronize `USER-GUIDE.md`, its generated PDF, `README.md`, `DOCUMENTATION-STATUS.md`, this index, and current operational references whenever accepted behavior changes.
