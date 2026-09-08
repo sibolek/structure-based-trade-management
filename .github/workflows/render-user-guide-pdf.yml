@@ -1,0 +1,189 @@
+name: Render ExecutionOS User Guide PDF
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - USER-GUIDE.md
+      - .github/workflows/render-user-guide-pdf.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render-user-guide:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PDF dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install markdown weasyprint pygments
+
+      - name: Render USER-GUIDE.md to PDF
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import html
+          import markdown
+          from weasyprint import HTML
+
+          source = Path('USER-GUIDE.md')
+          output = Path('docs/ExecutionOS_User_Guide.pdf')
+          output.parent.mkdir(parents=True, exist_ok=True)
+
+          md = source.read_text(encoding='utf-8')
+          body = markdown.markdown(
+              md,
+              extensions=[
+                  'extra',
+                  'fenced_code',
+                  'tables',
+                  'toc',
+                  'sane_lists',
+              ],
+              output_format='html5',
+          )
+
+          css = r'''
+          @page {
+            size: Letter;
+            margin: 0.68in 0.62in 0.76in 0.62in;
+            @bottom-center {
+              content: "ExecutionOS User Guide  |  Page " counter(page) " of " counter(pages);
+              font-size: 8pt;
+              color: #64748b;
+            }
+          }
+          html { font-family: "DejaVu Sans", Arial, sans-serif; }
+          body {
+            color: #172033;
+            font-size: 9.4pt;
+            line-height: 1.42;
+            max-width: 100%;
+          }
+          h1, h2, h3, h4 { color: #0f2744; line-height: 1.2; }
+          h1 {
+            font-size: 20pt;
+            border-bottom: 2px solid #d7e0ea;
+            padding-bottom: 5pt;
+            margin-top: 0;
+          }
+          h1:not(:first-of-type) { break-before: page; }
+          h2 { font-size: 14.5pt; margin-top: 18pt; margin-bottom: 7pt; }
+          h3 { font-size: 11.5pt; margin-top: 13pt; margin-bottom: 5pt; }
+          h4 { font-size: 10pt; margin-top: 10pt; margin-bottom: 4pt; }
+          p { margin: 4pt 0 7pt; }
+          ul, ol { margin-top: 4pt; margin-bottom: 8pt; padding-left: 20pt; }
+          li { margin: 2pt 0; }
+          blockquote {
+            margin: 9pt 0;
+            padding: 7pt 10pt;
+            border-left: 4px solid #3b82f6;
+            background: #f4f8fd;
+          }
+          code {
+            font-family: "DejaVu Sans Mono", monospace;
+            font-size: 8.5pt;
+            background: #f3f5f7;
+            padding: 1px 3px;
+            border-radius: 3px;
+          }
+          pre {
+            font-family: "DejaVu Sans Mono", monospace;
+            font-size: 7.7pt;
+            line-height: 1.35;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            background: #f5f7fa;
+            border: 1px solid #d8dee8;
+            border-radius: 5px;
+            padding: 8pt 9pt;
+            margin: 7pt 0 10pt;
+            break-inside: avoid;
+          }
+          pre code { background: transparent; padding: 0; }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 9pt 0 12pt;
+            font-size: 8.6pt;
+          }
+          th, td {
+            border: 1px solid #cfd8e3;
+            padding: 5pt 6pt;
+            vertical-align: top;
+            overflow-wrap: anywhere;
+          }
+          th {
+            background: #eef3f8;
+            color: #0f2744;
+            font-weight: 700;
+          }
+          tr { break-inside: avoid; }
+          hr { border: 0; border-top: 1px solid #d7e0ea; margin: 14pt 0; }
+          a { color: #1d4ed8; text-decoration: none; }
+          strong { color: #111827; }
+          .document-meta {
+            color: #475569;
+            margin-bottom: 10pt;
+          }
+          '''
+
+          document = f'''<!doctype html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>ExecutionOS User Guide</title>
+            <style>{css}</style>
+          </head>
+          <body>{body}</body>
+          </html>'''
+
+          HTML(string=document, base_url=str(Path.cwd())).write_pdf(output)
+          if not output.exists() or output.stat().st_size < 10_000:
+              raise SystemExit('PDF generation failed or produced an unexpectedly small file')
+          print(f'Wrote {output} ({output.stat().st_size} bytes)')
+          PY
+
+      - name: Verify PDF signature
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('docs/ExecutionOS_User_Guide.pdf')
+          data = p.read_bytes()
+          assert data.startswith(b'%PDF-'), 'Generated file is not a PDF'
+          assert b'%%EOF' in data[-2048:], 'Generated PDF is missing EOF marker'
+          print(f'PDF verification passed: {len(data)} bytes')
+          PY
+
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: executionos-user-guide-pdf
+          path: docs/ExecutionOS_User_Guide.pdf
+          if-no-files-found: error
+
+      - name: Commit updated PDF
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/ExecutionOS_User_Guide.pdf
+          if git diff --cached --quiet; then
+            echo "PDF is already current."
+          else
+            git commit -m "Render ExecutionOS user guide PDF"
+            git push origin HEAD:main
+          fi
