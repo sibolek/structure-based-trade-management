@@ -5,6 +5,7 @@ import {
   candidateValidityStatusAt,
   isCanonicalCandidate,
 } from "./pretrade-candidate-contract.mjs";
+import { validateExecutionBoardHandoffDeliveryContract } from "./execution-board-handoff-delivery.mjs";
 
 export const PRETRADE_ARM_LIFECYCLE_AUTHORITY = "PRETRADE_ARM_LIFECYCLE_AUTHORITY";
 
@@ -108,6 +109,68 @@ export class PreTradeArmLifecycleAuthority {
           handoffId: text(armCommit.handoffId),
           executionAccountId: text(armCommit.accountId),
           ocoGroupId: text(armCommit.ocoGroupId) || null,
+        };
+      },
+    });
+  }
+
+  retireBlockedHandoff(command = {}) {
+    const delivery = command.delivery && typeof command.delivery === "object" ? clone(command.delivery) : null;
+    const contract = validateExecutionBoardHandoffDeliveryContract(delivery);
+    if (!contract.valid) {
+      throw authorityError(
+        `blocked handoff retirement requires a valid delivery contract: ${contract.errors.join("; ")}`,
+        "ARM_RETIREMENT_DELIVERY_INVALID",
+        { errors: contract.errors },
+      );
+    }
+    if (upper(delivery.status) !== "BLOCKED") {
+      throw authorityError("only a terminal BLOCKED handoff may retire PRETRADE ARM authority", "ARM_RETIREMENT_BLOCKED_DELIVERY_REQUIRED");
+    }
+    if (text(delivery.executionListeningAt) || text(delivery.deliveredAt)) {
+      throw authorityError("handoff that reached Execution listening/delivery cannot retire through blocked-handoff reconciliation", "ARM_RETIREMENT_EXECUTION_OWNERSHIP_AMBIGUOUS");
+    }
+
+    const handoffId = text(delivery.handoffId);
+    const blockReason = upper(delivery.blockReason);
+    const retirementProvenance = {
+      handoffId,
+      deliveryStatus: "BLOCKED",
+      blockReason,
+      blockedAt: text(delivery.blockedAt),
+      claimedBy: text(delivery.claimedBy),
+      claimedAt: text(delivery.claimedAt),
+    };
+
+    return this.#run(command, {
+      action: "RETIRE_BLOCKED_HANDOFF",
+      eventType: "ARM_RETIRED_AFTER_BLOCKED_HANDOFF",
+      allowedStates: new Set(["ARMED"]),
+      payload: { delivery },
+      precondition: (candidate) => {
+        if (!candidate.arm) throw authorityError("ARM retirement requires frozen candidate ARM provenance", "ARM_RETIREMENT_ARM_PROVENANCE_REQUIRED");
+        if (text(candidate.arm.handoffId) !== handoffId) {
+          throw authorityError("blocked delivery handoff does not match candidate ARM handoff", "ARM_RETIREMENT_HANDOFF_MISMATCH", {
+            candidateHandoffId: text(candidate.arm.handoffId) || null,
+            deliveryHandoffId: handoffId || null,
+          });
+        }
+      },
+      update: (candidate, at) => {
+        candidate.lifecycleState = "RETIRED";
+        candidate.armRetirement = {
+          retiredAt: at,
+          source: PRETRADE_ARM_LIFECYCLE_AUTHORITY,
+          reasonCode: "EXECUTION_HANDOFF_BLOCKED_BEFORE_LISTENING",
+          ...retirementProvenance,
+        };
+        candidate.terminalOutcome = {
+          state: "RETIRED",
+          occurredAt: at,
+          source: PRETRADE_ARM_LIFECYCLE_AUTHORITY,
+          reasonCode: "EXECUTION_HANDOFF_BLOCKED_BEFORE_LISTENING",
+          note: null,
+          provenance: retirementProvenance,
         };
       },
     });
