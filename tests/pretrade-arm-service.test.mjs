@@ -131,7 +131,7 @@ function permissionAttempt(candidate, riskEvaluation, id, stateRevision) {
   });
 }
 
-function harness({ materialChange = false, ownershipStatus = "FREE" } = {}) {
+function harness({ expectedEntryChange = false, quantityChange = false, ownershipStatus = "FREE" } = {}) {
   const clock = () => NOW;
   const store = new PreTradeStore({ filePath: tmp("arm-state"), clock });
   store.load();
@@ -173,7 +173,12 @@ function harness({ materialChange = false, ownershipStatus = "FREE" } = {}) {
       const candidate = coordinator.candidateSnapshot(candidateId, contractVersion);
       assert.equal(candidate.lifecycleState, "PERMISSION_EVALUATING");
       assert.equal(candidate.stateRevision, expectedRevision);
-      const risk2 = risk(candidate, { id: "risk-2", dssId: "dss-2", expectedEntry: materialChange ? 180.01 : 180 });
+      const risk2 = risk(candidate, {
+        id: "risk-2",
+        dssId: "dss-2",
+        expectedEntry: expectedEntryChange ? 180.01 : 180,
+        quantity: quantityChange ? 24 : 90,
+      });
       riskMap.set("risk-2", risk2);
       const attempt2 = permissionAttempt(candidate, risk2, "permission-2", expectedRevision);
       attemptRepository.record(attempt2);
@@ -286,8 +291,24 @@ test("explicit ARM performs fresh permission revalidation then atomically forwar
   assert.equal(h.deliveryRepository.snapshot().deliveries.length, 1);
 });
 
-test("material ARM-time permission change returns REVIEW_REQUIRED and never creates authorization", async () => {
-  const h = harness({ materialChange: true });
+test("marketable quote drift with unchanged fresh risk ceiling completes ARM without a review loop", async () => {
+  const h = harness({ expectedEntryChange: true });
+  const result = await h.armService.arm(command(h));
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(result.candidate.lifecycleState, "ARMED");
+  assert.equal(result.candidate.arm.selectedQuantity, 25);
+  assert.equal(h.permissionCalls(), 1);
+  const refreshedReview = h.reviewRepository.get("arm-NVDA-1", 1);
+  assert.equal(refreshedReview.currentPackage.material.currentExpectedEntry, 180.01);
+  assert.equal(refreshedReview.currentPackage.evidence.riskEvaluationId, "risk-2");
+  assert.equal(refreshedReview.selectedQuantity.value, 25);
+  assert.equal(h.armOperationRepository.getByOperationId("arm-op-1").status, "COMPLETED");
+  assert.equal(h.handoffRepository.snapshot().handoffs.length, 1);
+  assert.equal(h.deliveryRepository.snapshot().deliveries.length, 1);
+});
+
+test("ARM-time quantity-ceiling change returns REVIEW_REQUIRED and never creates authorization", async () => {
+  const h = harness({ quantityChange: true });
   const result = await h.armService.arm(command(h));
   assert.equal(result.status, "REVIEW_REQUIRED");
   assert.equal(h.coordinator.candidateSnapshot("arm-NVDA-1", 1).lifecycleState, "READY");
