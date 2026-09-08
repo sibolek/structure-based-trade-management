@@ -26,15 +26,18 @@ export class PreTradeOcoService {
     lifecycleCoordinator,
     ocoRepository,
     armLifecycleAuthority,
+    deliveryRepository = null,
     executionOwnershipProvider = { async checkSymbol() { return { status: "UNKNOWN", reasonCode: "EXECUTION_OWNERSHIP_AUTHORITY_UNAVAILABLE" }; } },
   } = {}) {
     if (!lifecycleCoordinator || typeof lifecycleCoordinator.candidateSnapshot !== "function" || typeof lifecycleCoordinator.snapshot !== "function") throw new Error("OCO service requires lifecycleCoordinator");
     if (!ocoRepository || typeof ocoRepository.groupForCandidate !== "function") throw new Error("OCO service requires ocoRepository");
     if (!armLifecycleAuthority || typeof armLifecycleAuthority.cancelOcoSibling !== "function") throw new Error("OCO service requires ARM lifecycle authority");
+    if (deliveryRepository && typeof deliveryRepository.getById !== "function") throw new Error("deliveryRepository.getById() is required when delivery reconciliation is configured");
     if (!executionOwnershipProvider || typeof executionOwnershipProvider.checkSymbol !== "function") throw new Error("executionOwnershipProvider.checkSymbol() is required");
     this.lifecycleCoordinator = lifecycleCoordinator;
     this.ocoRepository = ocoRepository;
     this.armLifecycleAuthority = armLifecycleAuthority;
+    this.deliveryRepository = deliveryRepository;
     this.executionOwnershipProvider = executionOwnershipProvider;
   }
 
@@ -86,6 +89,64 @@ export class PreTradeOcoService {
     return this.ocoRepository.dissolve(command);
   }
 
+  reconcileBlockedHandoffRetirements({ symbol = null } = {}) {
+    if (!this.deliveryRepository || typeof this.armLifecycleAuthority.retireBlockedHandoff !== "function") return [];
+    const normalizedSymbol = text(symbol).toUpperCase();
+    const results = [];
+    const candidates = this.lifecycleCoordinator.snapshot().candidates || [];
+
+    for (const candidate of candidates) {
+      if (canonicalLifecycleState(candidate.lifecycleState) !== "ARMED") continue;
+      if (normalizedSymbol && text(candidate.symbol).toUpperCase() !== normalizedSymbol) continue;
+      const handoffId = text(candidate.arm?.handoffId);
+      if (!handoffId) {
+        results.push({ candidateId: candidate.candidateId, contractVersion: candidate.contractVersion, status: "ARMED_WITHOUT_HANDOFF_PROOF" });
+        continue;
+      }
+
+      let delivery;
+      try {
+        delivery = this.deliveryRepository.getById(handoffId);
+      } catch (error) {
+        if (error?.code === "EXECUTION_BOARD_HANDOFF_DELIVERY_NOT_FOUND") {
+          results.push({ candidateId: candidate.candidateId, contractVersion: candidate.contractVersion, handoffId, status: "DELIVERY_NOT_FOUND" });
+          continue;
+        }
+        throw error;
+      }
+      if (text(delivery.status).toUpperCase() !== "BLOCKED") continue;
+
+      try {
+        const transition = this.armLifecycleAuthority.retireBlockedHandoff({
+          operationId: `HANDOFF_BLOCK_RETIRE:${handoffId}`,
+          candidateId: candidate.candidateId,
+          contractVersion: candidate.contractVersion,
+          expectedState: "ARMED",
+          expectedRevision: candidate.stateRevision,
+          delivery,
+          reason: "EXECUTION_HANDOFF_BLOCKED_BEFORE_LISTENING",
+          provenance: {
+            authority: "EXECUTION_BOARD_HANDOFF_DELIVERY",
+            handoffId,
+            blockReason: delivery.blockReason,
+            blockedAt: delivery.blockedAt,
+          },
+        });
+        results.push({ candidateId: candidate.candidateId, contractVersion: candidate.contractVersion, handoffId, status: "RETIRED", transition });
+      } catch (error) {
+        results.push({
+          candidateId: candidate.candidateId,
+          contractVersion: candidate.contractVersion,
+          handoffId,
+          status: "RECONCILIATION_BLOCKED",
+          code: error.code || "BLOCKED_HANDOFF_RETIREMENT_ERROR",
+          message: error.message,
+        });
+      }
+    }
+    return results;
+  }
+
   async armGate({ candidateId, contractVersion, review } = {}) {
     const candidate = this.lifecycleCoordinator.candidateSnapshot(candidateId, contractVersion);
     const state = canonicalLifecycleState(candidate.lifecycleState);
@@ -95,6 +156,12 @@ export class PreTradeOcoService {
     if (group && text(review?.currentPackage?.material?.accountId) !== text(group.accountId)) {
       return { allowed: false, reasonCode: "OCO_ACCOUNT_CONTEXT_MISMATCH", candidate, group, executionOwnership: null };
     }
+
+    // A terminal BLOCKED delivery proves Execution never established LISTENING
+    // ownership. Retire only that exact frozen ARMED handoff before applying the
+    // unchanged same-symbol exclusion gate. Pending/claimed/delivered handoffs
+    // remain blockers and therefore continue to fail closed.
+    this.reconcileBlockedHandoffRetirements({ symbol: candidate.symbol });
 
     const allCandidates = this.lifecycleCoordinator.snapshot().candidates || [];
     const conflicts = allCandidates.filter((other) => {
