@@ -1,11 +1,11 @@
 # ExecutionOS User Guide
 
-**Version:** 1.5.1  
-**Date:** 6 September 2026  
-**Status:** Living operator guide for the accepted ExecutionOS V2.4 PRETRADE → Execution Board integration  
+**Version:** 1.6.0  
+**Date:** 8 September 2026  
+**Status:** Living operator guide for the accepted ExecutionOS V2.4 PRETRADE → Execution Board system on `main`  
 **Repository:** `sibolek/structure-based-trade-management`  
-**Current accepted integration branch:** `v24-execution-board-handoff`  
-**Accepted implementation checkpoint before documentation-only closeout commits:** `3f794538ffbe5c5875a3d671143cb33890530b1f`  
+**Current operating branch:** `main`  
+**Final merged implementation checkpoint:** `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`  
 **Frozen downstream execution release:** `v2.3.0`
 
 > **Operating principle:** Structure decides. P&L emotion does not.
@@ -23,7 +23,7 @@
 5. [Installation and startup](#5-installation-and-startup)
 6. [Schwab authorization and account checks](#6-schwab-authorization-and-account-checks)
 7. [Candidate and PRETRADE workflow](#7-candidate-and-pretrade-workflow)
-8. [Phase 3 DSS and Phase 4 risk sizing](#8-phase-3-dss-and-phase-4-risk-sizing)
+8. [Phase 3 DSS, Phase 4 risk sizing, and PRETRADE quantity safety](#8-phase-3-dss-phase-4-risk-sizing-and-pretrade-quantity-safety)
 9. [Operator review, CAUTION and ARM](#9-operator-review-caution-and-arm)
 10. [Handoff and pre-fill execution ownership](#10-handoff-and-pre-fill-execution-ownership)
 11. [LIVE management](#11-live-management)
@@ -43,24 +43,28 @@
 
 # 1. Purpose
 
-This is the practical operator guide for ExecutionOS as it exists on the accepted V2.4 integration branch after Slices 1–7 closeout.
+This is the practical operator guide for ExecutionOS as it exists after the accepted V2.4 PRETRADE → ARM → Execution Board integration was merged to `main`, the September 8 follow-up TODOs were completed, and the final pre-merge regression/build sequence passed.
 
 Use it to answer:
 
 > **How do I operate the accepted system today, what authority owns each decision, what may I do from the browser, and what remains intentionally unavailable?**
 
-For frozen architecture use:
+For frozen architecture and approved policy use:
 
 ```text
 docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md
 docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md
+docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md
 ```
 
-For implementation acceptance use:
+For implementation acceptance and final merge closeout use:
 
 ```text
 docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md
+docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md
 ```
+
+Frozen approved historical documents remain approval-time evidence and should not be rewritten merely because implementation status advanced.
 
 ---
 
@@ -77,36 +81,35 @@ Legacy/manual V2.3 remains the reference for its own historical workflow and tru
 
 V2.4-origin trades do **not** use the legacy symbol-only / `detectedAt` ownership path. They use exact-account ownership, authoritative Schwab `executionTime`, and the lossless ownership journal.
 
-## 2.2 V2.4 Phases 1–4
+## 2.2 Accepted V2.4 state on `main`
 
-Merged to `main`:
+The accepted implementation now on `main` includes:
 
 1. Candidate Ingestion;
 2. MarketDataProvider;
 3. DSS / Micro-Volatility Buffer;
-4. Effective-Stop Risk Sizing.
+4. Effective-Stop Risk Sizing;
+5. PRETRADE → ARM → Execution Board handoff integration;
+6. TODO #18 structural-evidence UX enforcement;
+7. TODO #19 PRETRADE quantity-safety policy.
 
-Phase 4 merge commit:
-
-```text
-0a976fb8bc68f64fd479d48322a011c9d419b2c2
-```
-
-## 2.3 Accepted PRETRADE → Execution integration
-
-Accepted and closed on:
+Final merged implementation checkpoint:
 
 ```text
-v24-execution-board-handoff
+26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
 ```
 
-Slices 1–7 are accepted. Decisions 22–97 are frozen.
+Subsequent documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint.
+
+The former feature branch `v24-execution-board-handoff` was retired and deleted after the verified fast-forward merge. It is not an operating branch.
+
+Slices 1–7 are accepted. Decisions 22–97 remain frozen. GitHub issues #18 and #19 are completed/closed.
 
 Governing invariant:
 
 > **V2.4 authorizes; the handoff transfers; V2.3-compatible execution infrastructure owns execution.**
 
-## 2.4 Final accepted lifecycle
+## 2.3 Final accepted lifecycle
 
 ```text
 CANDIDATE SOURCE
@@ -150,7 +153,7 @@ HISTORY
 SYMBOL OWNERSHIP RELEASE
 ```
 
-## 2.5 Broker boundary
+## 2.4 Broker boundary
 
 ```text
 readOnly === true
@@ -161,7 +164,7 @@ No V2.4 state grants broker-write authority.
 
 Actual equity order entry remains manual in thinkorswim/Schwab.
 
-## 2.6 V3 status
+## 2.5 V3 status
 
 V3 Management Governor has not started. It requires a separate explicit design/implementation authorization.
 
@@ -191,6 +194,7 @@ Server-side PRETRADE services own:
 - structural validity;
 - DSS and permission orchestration;
 - review package state;
+- quantity-safety evaluation;
 - quantity selection validation;
 - CAUTION acknowledgement;
 - OCO authority;
@@ -265,7 +269,11 @@ CURRENT EXPECTED ENTRY
    ↓
 0.5% RISK BUDGET
    ↓
-POSITION SIZE
+PHASE 4 STOP-RISK MAXIMUM
+   ↓
+PRETRADE QUANTITY-SAFETY CEILING
+   ↓
+EXPLICIT OPERATOR QUANTITY
 ```
 
 Never choose size first and tighten the stop until the dollars fit.
@@ -308,7 +316,64 @@ It may:
 
 It may never alter the effective stop to make size fit.
 
-## 4.4 Live risk after fills
+Phase 4 `riskDistance` and `plannedDollarRisk` continue to represent actual expected-entry-to-effective-stop economics.
+
+## 4.4 Separate PRETRADE quantity safety
+
+The accepted quantity-safety policy is a **separate ceiling** layered on top of Phase 4. It is not a replacement for Phase 4 sizing and it does not create a synthetic stop.
+
+It uses authoritative DSS 2-minute Wilder ATR(14):
+
+```text
+volatilityStressDistance = 2.0 × ATR
+```
+
+For equities:
+
+```text
+volatilityRiskPerUnit = 2.0 × ATR
+```
+
+For futures, the 2-ATR distance is converted to ticks with protective upward rounding and multiplied by trusted tick value.
+
+The volatility maximum is derived from the same existing max-dollar-risk budget and floored to the instrument's valid quantity increment.
+
+Current policy maximum:
+
+```text
+policyMaxQuantity = min(
+  phase4MaxAffordableQuantity,
+  volatilityMaxQuantity
+)
+```
+
+This guard prevents a marketable expected entry very near the effective stop from mechanically expanding permitted quantity solely because the Phase 4 per-unit stop risk became very small.
+
+The quantity-safety policy does **not**:
+
+- move structural invalidation;
+- move or synthesize the effective stop;
+- rewrite Phase 4 `riskDistance`;
+- rewrite Phase 4 `plannedDollarRisk`;
+- create a buying-power, notional, or margin rule.
+
+## 4.5 Reviewed quantity ceiling
+
+At the first explicit operator review, the current policy maximum is frozen as the candidate/version **reviewed quantity ceiling**.
+
+At ARM-time fresh revalidation:
+
+```text
+finalAllowedQuantity = min(
+  freshPhase4Max,
+  freshVolatilityMax,
+  priorReviewedCeiling
+)
+```
+
+Therefore fresh ARM-time evidence may reduce an already-reviewed ceiling but may not increase it without a new explicit operator review.
+
+## 4.6 Live risk after fills
 
 After LIVE begins, actual fill economics become relevant without rewriting expected-entry provenance.
 
@@ -336,14 +401,14 @@ Realized losses consume capacity. Realized profits do not replenish it.
 
 ## 5.1 Branch rule
 
-Until the accepted integration branch is explicitly merged to `main`, operate the accepted V2.4 system from:
+Operate the accepted V2.4 system from `main`:
 
 ```bash
-git checkout v24-execution-board-handoff
-git pull --ff-only
+git checkout main
+git pull --ff-only origin main
 ```
 
-Do not assume `main` contains the handoff integration before an actual merge.
+Do not use the retired `v24-execution-board-handoff` branch for normal operation.
 
 ## 5.2 Install
 
@@ -389,6 +454,7 @@ http://localhost:5173
 
 Confirm:
 
+- current Git branch is `main`;
 - Schwab monitor is healthy;
 - exact intended execution account is present;
 - PRETRADE service is healthy;
@@ -517,14 +583,39 @@ A trigger may use:
 
 Satisfaction provenance is durable and must identify the exact trigger branch/evidence/version.
 
-## 7.5 Permission evaluation
+## 7.5 Structural evidence requirement
+
+When the operator selects:
+
+```text
+STRUCTURE = VALID
+```
+
+a non-empty structural evidence/reference is required before permission submission.
+
+The UI:
+
+- labels the field as required for `VALID`;
+- displays an inline validation message when missing;
+- disables `EVALUATE PERMISSION` while required evidence is blank.
+
+Backend enforcement remains authoritative:
+
+```text
+MISSING_STRUCTURE_PROVENANCE
+```
+
+The browser validation does not weaken or replace the backend contract.
+
+## 7.6 Permission evaluation
 
 Permission combines authoritative evidence for:
 
 - trigger satisfaction;
-- structural validity;
+- structural validity and provenance;
 - Phase 3 DSS;
 - Phase 4 risk sizing;
+- PRETRADE quantity-safety inputs where review is applicable;
 - account/entry evidence;
 - macro/setup context from trusted evaluator or explicit operator assessment.
 
@@ -540,7 +631,7 @@ Unresolved data may remain retryable or integrity-blocked rather than being misl
 
 ---
 
-# 8. Phase 3 DSS and Phase 4 risk sizing
+# 8. Phase 3 DSS, Phase 4 risk sizing, and PRETRADE quantity safety
 
 ## 8.1 Expected entry
 
@@ -586,17 +677,17 @@ maxDollarRisk = floorToCent(rawMaxDollarRisk)
 
 Budget rounding never rounds upward.
 
-## 8.4 Equity sizing
+## 8.4 Equity Phase 4 sizing
 
 ```text
 riskPerShare = riskDistance
 rawQuantity = maxDollarRisk / riskPerShare
-finalQuantity = floor(rawQuantity)
+phase4MaxAffordableQuantity = floor(rawQuantity)
 ```
 
 Odd lots are allowed. Fractional shares are not assumed.
 
-## 8.5 Futures sizing
+## 8.5 Futures Phase 4 sizing
 
 Trusted futures metadata includes:
 
@@ -616,7 +707,7 @@ riskTicks = ceil(riskDistance / tickSize)
 riskPerContract = riskTicks × tickValue
 ```
 
-## 8.6 Affordability outcomes
+## 8.6 Phase 4 affordability outcomes
 
 ```text
 VALID
@@ -633,14 +724,33 @@ PASS — STOP_RISK_CONFLICT
 
 Do not tighten the stop to force affordability.
 
-## 8.7 ARM freshness
+## 8.7 PRETRADE quantity-safety evaluation
 
-Every final ARM attempt requires fresh Phase 4 evidence.
+The review layer evaluates the separate 2-ATR volatility maximum from authoritative DSS ATR evidence.
+
+The review UI exposes:
+
+- **Phase 4 Stop-Risk Max**;
+- **2-ATR Volatility Max**;
+- **Reviewed Ceiling**;
+- **Final Allowed**;
+- the binding constraint;
+- ATR / stress-distance audit context.
+
+The UI also makes explicit that the effective stop is unchanged.
+
+If the policy inputs are invalid or no valid safe quantity exists, the workflow fails closed rather than manufacturing a quantity.
+
+## 8.8 ARM freshness
+
+Every final ARM attempt requires fresh Phase 4 and applicable quantity-safety evidence.
 
 At authorization:
 
 - quote freshness ≤5 seconds;
 - account snapshot freshness ≤15 seconds.
+
+Fresh ARM-time calculations may lower `Final Allowed`; they may not expand beyond the prior reviewed ceiling without a new explicit review.
 
 ---
 
@@ -656,27 +766,39 @@ The package exposes authorization-critical facts including:
 - structural invalidation;
 - effective stop;
 - max dollar risk;
-- maximum affordable quantity;
+- Phase 4 Stop-Risk Max;
+- 2-ATR Volatility Max;
+- Reviewed Ceiling;
+- Final Allowed quantity;
+- binding quantity constraint;
 - exact execution account;
 - permission outcome/provenance.
 
-Material changes produce a new review package and clear stale quantity/acknowledgement state.
+Material changes produce a new review package and clear stale quantity/acknowledgement state as required by the authoritative review contract.
 
 ## 9.2 Quantity selection
 
-Maximum affordable quantity is a **ceiling**, not a required size.
+`Final Allowed` is a **ceiling**, not a required size.
 
-Select a valid explicit quantity within instrument increment/minimum rules.
+Select a valid explicit quantity within instrument increment/minimum rules and no greater than the current final allowed quantity.
 
 The final ARM action must confirm the exact selected quantity.
 
-## 9.3 CAUTION acknowledgement
+## 9.3 Non-expanding reviewed ceiling
+
+The first explicit review freezes the candidate/version reviewed quantity ceiling.
+
+If fresh quote/ATR/account evidence later reduces safe quantity, the ceiling may ratchet downward.
+
+It may not ratchet upward merely because the expected entry moved closer to the stop or current volatility inputs would otherwise allow more size. A higher ceiling requires a new explicit operator review.
+
+## 9.4 CAUTION acknowledgement
 
 A CAUTION candidate may be authorized only after explicit acknowledgement bound to the exact current review package.
 
 A materially changed package requires a new acknowledgement.
 
-## 9.4 Final ARM confirmation
+## 9.5 Final ARM confirmation
 
 ARM itself is the final explicit **quantity/direction** confirmation, for example:
 
@@ -688,9 +810,9 @@ The exact account is already exposed in the authoritative current review package
 
 There is no separate final account-confirmation control. If the account or another material authorization fact changes, final revalidation changes the review package or rejects the stale ARM rather than silently accepting the old review.
 
-The server performs fresh permission/risk revalidation before authorization. Accidental Enter-key submission is not wired to ARM.
+The server performs fresh permission/risk/quantity-safety revalidation before authorization. Accidental Enter-key submission is not wired to ARM.
 
-## 9.5 Successful ARM
+## 9.6 Successful ARM
 
 Successful ARM freezes:
 
@@ -700,6 +822,7 @@ Successful ARM freezes:
 - account;
 - direction;
 - selected quantity;
+- reviewed/final quantity authority carried by the accepted review;
 - authorized time;
 - management/entry authorization contract;
 - handoff identity.
@@ -708,7 +831,7 @@ It then creates/registers exactly one immutable Execution Board handoff and one 
 
 ARM does **not** place a broker order.
 
-## 9.6 OCO
+## 9.7 OCO
 
 OCO groups bind exact candidate versions on the same symbol and common account.
 
@@ -809,6 +932,8 @@ It may not rewrite a fill away or pretend the broker did something else.
 `selectedQuantity` is the immutable maximum simultaneous authorized quantity under the ARM.
 
 It is not a one-shot required entry size.
+
+The PRETRADE reviewed/final quantity safety controls how large `selectedQuantity` may be authorized to become; after ARM, the immutable selected quantity is the downstream ARM ceiling.
 
 ## 11.3 Position-build window
 
@@ -967,7 +1092,7 @@ Default local files include:
 .executionos-v24-execution-board-handoff-deliveries.json
 ```
 
-Additional PRETRADE repositories may persist permission/review/OCO/ARM operation evidence according to the service configuration.
+Additional PRETRADE repositories may persist permission/review/OCO/ARM operation and quantity-safety evidence according to the service configuration.
 
 Keep local runtime state private and Git-ignored.
 
@@ -1006,6 +1131,7 @@ Do not manually edit:
 - handoff JSON;
 - delivery JSON;
 - PRETRADE journals;
+- review/quantity-safety evidence;
 - Authorization Exception state
 
 to force a lifecycle result.
@@ -1035,6 +1161,8 @@ LEGACY_MANUAL_V23  -> originalPlan.structuralStop
 For V2.4, structural invalidation remains separate provenance and is not substituted for `v24.effectiveStop`.
 
 Slice 7 live managed-stop changes are management state; they do **not** currently rewrite the EOD planned-risk stop basis or replace `v24.effectiveStop` in the EOD enrichment calculation.
+
+The separate PRETRADE 2-ATR quantity-safety policy also does not replace the EOD planned-risk stop basis.
 
 ## 14.2 Enriched EOD procedure
 
@@ -1082,7 +1210,9 @@ Private exports/reports should not be committed.
 
 # 15. Futures / NinjaTrader status
 
-MES/MNQ and supported futures can be represented by Phase 4 sizing and Slice 7 native risk economics when authoritative instrument metadata is present.
+MES/MNQ and supported futures can be represented by Phase 4 sizing and the PRETRADE 2-ATR quantity-safety policy when authoritative instrument metadata is present.
+
+For futures quantity safety, the 2-ATR price distance is converted to ticks with protective upward rounding and multiplied by tick value before deriving the valid quantity maximum.
 
 However:
 
@@ -1179,6 +1309,7 @@ Check:
 
 - trigger satisfaction provenance;
 - structural validity;
+- if `STRUCTURE = VALID`, structural evidence/reference is non-empty;
 - current DSS status;
 - Phase 4 status;
 - exact account;
@@ -1186,7 +1317,22 @@ Check:
 - macro/setup context assessment;
 - retryable/integrity blocker reason.
 
-## 17.7 ARM returns REVIEW_REQUIRED
+If the UI shows the structural evidence requirement, provide the appropriate evidence/reference; do not bypass backend provenance validation.
+
+## 17.7 Quantity safety blocks review or selection
+
+Check:
+
+- DSS evaluation contains authoritative ATR evidence;
+- ATR is current/valid under the accepted DSS contract;
+- Phase 4 evaluation identity matches the reviewed evidence;
+- instrument quantity increment/minimum is valid;
+- the 2-ATR volatility maximum is nonzero/affordable;
+- the selected quantity does not exceed `Final Allowed`.
+
+Do not alter the effective stop to defeat the quantity-safety ceiling.
+
+## 17.8 ARM returns REVIEW_REQUIRED
 
 The material review package changed during fresh final revalidation.
 
@@ -1194,7 +1340,13 @@ Review the new package, select quantity again if required, acknowledge CAUTION a
 
 Do not force the old package through.
 
-## 17.8 Existing handoff does not progress
+## 17.9 ARM final allowed quantity decreased
+
+This is valid when fresh Phase 4 or 2-ATR evidence is more restrictive.
+
+The prior reviewed ceiling is non-expanding: fresh evidence can reduce authorization but cannot silently expand it. A higher quantity ceiling requires a new explicit operator review.
+
+## 17.10 Existing handoff does not progress
 
 Check:
 
@@ -1207,7 +1359,7 @@ Check:
 - PREPARED/LISTENING state;
 - retirement state.
 
-## 17.9 Fill did not become owned
+## 17.11 Fill did not become owned
 
 Check:
 
@@ -1221,7 +1373,7 @@ Check:
 - order identity;
 - retirement cutoff.
 
-## 17.10 Add/re-add is blocked
+## 17.12 Add/re-add is blocked
 
 Check:
 
@@ -1235,7 +1387,7 @@ Check:
 
 Do not widen/tighten stops merely to manufacture capacity.
 
-## 17.11 CRITICAL Authorization Exception
+## 17.13 CRITICAL Authorization Exception
 
 Do not delete it or manually alter broker/history state.
 
@@ -1243,17 +1395,17 @@ Review the broker truth and use only the explicit supported reconciliation inten
 
 Further exposure increases remain blocked while the exception is unresolved.
 
-## 17.12 General reconciliation required
+## 17.14 General reconciliation required
 
 For `RECONCILIATION_REQUIRED` / `LIVE_RECONCILIATION_REQUIRED`, preserve ownership and investigate the missing coverage/provenance evidence.
 
 Do not edit persistence manually to release the symbol.
 
-## 17.13 Phase 4 says no affordable size
+## 17.15 Phase 4 says no affordable size
 
 Do not tighten the stop. Reduce quantity if a smaller valid size exists; otherwise PASS.
 
-## 17.14 EOD broker-only rows
+## 17.16 EOD broker-only rows
 
 Check:
 
@@ -1288,11 +1440,15 @@ Do not bypass these gaps with guessed fallbacks or manual state edits.
 
 Treat:
 
-- `v2.3.0` as frozen downstream reference;
-- `main` as merged Phases 1–4 baseline until the handoff branch is merged;
-- `v24-execution-board-handoff` as the accepted/closed integration branch;
-- v0.5 baseline + traceability audit as frozen current design authority;
-- the 2026-09-06 handoff-integration closeout as accepted implementation evidence.
+- `v2.3.0` as the frozen downstream reference;
+- `main` as the accepted operating branch for the merged V2.4 implementation;
+- `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` as the final merged **implementation** checkpoint, even though later documentation-only commits advance `main`;
+- the v0.5 baseline + traceability audit as frozen V2.4 design authority for Decisions 22–97;
+- the approved PRETRADE Quantity Safety Addendum v0.1 as the September 8 quantity-safety policy authority;
+- the September 6 handoff-integration closeout as Slices 1–7 acceptance evidence;
+- the September 8 final merge closeout as merge/TODO/regression/repository-closeout evidence.
+
+The retired `v24-execution-board-handoff` branch is historical only and should not be recreated for normal operation.
 
 Do not:
 
@@ -1312,7 +1468,7 @@ A material architecture change requires a new approved future design decision.
 
 ## Before market / before first trade
 
-1. Use `v24-execution-board-handoff` until merge status changes.
+1. Use `main` and pull it fast-forward-only from `origin/main`.
 2. Start `npm run schwab:monitor`.
 3. Confirm healthy read-only broker state.
 4. Start `npm run v24:pretrade`.
@@ -1323,16 +1479,19 @@ A material architecture change requires a new approved future design decision.
 ## Candidate / PRETRADE
 
 1. Perform the READ and define the trade contract.
-2. Preserve `structure → invalidation → effective stop → risk budget → size`.
+2. Preserve `structure → invalidation → effective stop → risk budget → Phase 4 size → quantity-safety ceiling → explicit selected size`.
 3. Import/receive a canonical candidate.
 4. Confirm the candidate is within its validity window.
 5. Activate/observe trigger evidence as appropriate.
-6. Let permission run from authoritative evidence.
-7. If READY/CAUTION, inspect the current review package.
-8. Select explicit quantity.
-9. If CAUTION, acknowledge the exact package.
-10. Verify the exact account and entry mode shown/carried by the current review state.
-11. ARM explicitly; the ARM control is the final quantity/direction confirmation.
+6. If selecting `STRUCTURE = VALID`, provide a non-empty structural evidence/reference.
+7. Let permission run from authoritative evidence.
+8. If READY/CAUTION, inspect the current review package.
+9. Compare Phase 4 Stop-Risk Max, 2-ATR Volatility Max, Reviewed Ceiling, Final Allowed, and binding constraint.
+10. Select an explicit quantity no greater than Final Allowed.
+11. If CAUTION, acknowledge the exact package.
+12. Verify the exact account and entry mode shown/carried by the current review state.
+13. ARM explicitly; the ARM control is the final quantity/direction confirmation.
+14. If fresh ARM revalidation reduces Final Allowed or returns REVIEW_REQUIRED, review the new authoritative package rather than forcing the stale one.
 
 ## After ARM / before fill
 
@@ -1373,6 +1532,8 @@ Durable authorization, LISTENING boundaries, retirement cutoffs, LIVE state, exc
 ## Setup / UI
 
 ```bash
+git checkout main
+git pull --ff-only origin main
 npm install
 npm run dev
 npm run build
@@ -1452,24 +1613,26 @@ Canonical PRETRADE → Execution E2E:
 node --test tests/execution-v24-pretrade-full-e2e.test.mjs
 ```
 
-Full repository:
+Full repository / final regression components:
 
 ```bash
 npm run analytics:test
 npm run build
 ```
 
-Accepted closeout results:
+September 8 final acceptance state:
 
 ```text
-Focused Slice 7:                  26 / 26 PASS
-Downstream lifecycle E2E:          1 / 1 PASS
-Canonical PRETRADE→Execution E2E:  1 / 1 PASS
-Full repository regression:       734 / 734 PASS
-Production build:                 PASS
+Focused Slice 7:                     26 / 26 PASS
+Downstream lifecycle E2E:             1 / 1 PASS
+Canonical PRETRADE→Execution E2E:     1 / 1 PASS
+September 8 comprehensive regression: GREEN
+Production build:                     PASS
+Final merged implementation SHA:      26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
+Broker writes introduced:             NONE
 ```
 
-The production build was run at `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796`; the only later implementation change through `3f794538ffbe5c5875a3d671143cb33890530b1f` was the E2E test file, so production code was unchanged.
+The final aggregate numeric test count is intentionally not restated because the September 8 acceptance was recorded as an all-green multi-command regression rather than one single aggregate-count artifact.
 
 ---
 
@@ -1479,35 +1642,49 @@ The production build was run at `2dbfbf23e5c7e4352777c31b8bbb5b6e628e9796`; the 
 
 | Need | Source |
 |---|---|
-| Operate current accepted branch | `USER-GUIDE.md` |
+| Operate current accepted system on `main` | `USER-GUIDE.md` |
 | Current repository overview | `README.md` |
 | Documentation authority/status | `docs/ExecutionOS_Documentation_Index.md` |
 | Current vs historical map | `DOCUMENTATION-STATUS.md` |
 | Frozen V2.4 design authority | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md` |
 | Decision 22–97 traceability | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` |
+| PRETRADE quantity-safety policy | `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` |
 | Slices 1–7 accepted closeout | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` |
+| Final merge / TODO / repository closeout | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` |
 | Phase 3 closeout | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` |
 | Phase 4 closeout | `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md` |
 | EOD semantics | `docs/ExecutionOS_EOD_Report.md` |
 
-Historical approved documents remain valid approval-time evidence but do not override the v0.5 design authority or accepted implementation closeout.
+Historical approved documents remain valid approval-time evidence but do not override current validated runtime behavior, the frozen v0.5 authority, the approved quantity-safety addendum, or later accepted closeout records.
 
 ## 22.2 Glossary
 
 **Structural invalidation**  
 The structure/price condition that proves the trade thesis wrong.
 
+**Structural evidence/reference**  
+Operator-supplied provenance supporting a `STRUCTURE = VALID` assessment. It is required before permission submission in that state; backend provenance enforcement remains authoritative.
+
 **Effective stop**  
 The volatility-protected execution stop derived by Phase 3. In LIVE management it may change only through explicit/frozen management authority. The EOD planned-risk basis remains the frozen `v24.effectiveStop` currently exported for the trade; live managed-stop changes do not rewrite that planned-risk basis.
 
 **DSS evaluation**  
-Immutable Phase 3 evaluation identified by `dssEvaluationId`.
+Immutable Phase 3 evaluation identified by `dssEvaluationId`. Its authoritative ATR evidence is also used by the separate PRETRADE quantity-safety policy.
 
 **Risk evaluation**  
 Immutable Phase 4 evaluation identified by `riskEvaluationId`.
 
-**Maximum affordable quantity**  
-Largest valid pre-entry quantity fitting the risk budget. It is a ceiling, not a required trade size.
+**Phase 4 Stop-Risk Max**  
+Largest valid pre-entry quantity fitting actual expected-entry-to-effective-stop risk under the 0.5% account-equity budget.
+
+**2-ATR Volatility Max**  
+Separate PRETRADE quantity maximum derived from a 2-ATR adverse-move stress exposure using the same max-dollar-risk budget.
+
+**Reviewed Ceiling**  
+Candidate/version quantity ceiling frozen at explicit review. Fresh ARM revalidation may reduce it but may not increase it without a new explicit review.
+
+**Final Allowed**  
+Current maximum quantity allowed by the minimum of fresh Phase 4 max, fresh 2-ATR volatility max, and the applicable reviewed ceiling.
 
 **Review package**  
 Material authorization-critical snapshot shown before ARM. Material changes produce a new identity.
@@ -1555,6 +1732,6 @@ Planned future V3 management-policy layer. V3 has not started.
 
 ## Living-document maintenance rule
 
-Update this guide whenever accepted branch/release state, startup, candidate/permission/ARM workflow, risk semantics, handoff/ownership, Slice 7 management, persistence, broker safety boundary, supported instruments, EOD procedure, or CLI surface changes.
+Update this guide whenever accepted branch/release state, startup, candidate/permission/ARM workflow, risk or quantity-safety semantics, handoff/ownership, Slice 7 management, persistence, broker safety boundary, supported instruments, EOD procedure, or CLI surface changes.
 
 Do not let this guide drift away from validated application behavior.
