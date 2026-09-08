@@ -44,6 +44,21 @@ function hash(value) {
   return crypto.createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
 }
 
+function reviewIdentityMaterial(material) {
+  const value = material && typeof material === "object" && !Array.isArray(material)
+    ? structuredClone(material)
+    : {};
+
+  // MARKETABLE_NOW expected entry is a live snapshot, not a durable operator
+  // authorization fact. ARM performs a fresh permission/risk evaluation and the
+  // resulting maxAffordableQuantity remains authoritative. If quote drift makes
+  // the selected quantity unsafe, that ceiling changes and therefore changes the
+  // review identity. Keeping currentExpectedEntry visible in material preserves
+  // auditability without creating an endless re-review loop on every price tick.
+  delete value.currentExpectedEntry;
+  return value;
+}
+
 function deepFreeze(value) {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
   for (const child of Object.values(value)) deepFreeze(child);
@@ -152,7 +167,7 @@ export function buildPreTradeReviewPackage({ candidate, permissionAttempt, gener
     cautionReasonCodes,
   };
 
-  const reviewPackageId = `review-${hash(material)}`;
+  const reviewPackageId = `review-${hash(reviewIdentityMaterial(material))}`;
   const packageValue = {
     schemaVersion: PRETRADE_REVIEW_SCHEMA_VERSION,
     authority: PRETRADE_REVIEW_AUTHORITY,
@@ -213,8 +228,11 @@ export function validatePreTradeReviewPackage(value) {
   if (!isoTimestamp(review.evidence?.generatedAt)) errors.push("generatedAt is invalid");
 
   if (review.material && typeof review.material === "object" && text(review.reviewPackageId)) {
-    const expectedId = `review-${hash(review.material)}`;
-    if (review.reviewPackageId !== expectedId) errors.push("reviewPackageId does not match material package");
+    const expectedId = `review-${hash(reviewIdentityMaterial(review.material))}`;
+    const legacyId = `review-${hash(review.material)}`;
+    if (review.reviewPackageId !== expectedId && review.reviewPackageId !== legacyId) {
+      errors.push("reviewPackageId does not match material package");
+    }
   }
   return { valid: errors.length === 0, errors: Object.freeze(errors) };
 }
