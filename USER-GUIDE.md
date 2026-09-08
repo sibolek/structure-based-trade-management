@@ -1,6 +1,6 @@
 # ExecutionOS User Guide
 
-**Version:** 1.6.0  
+**Version:** 1.7.0  
 **Date:** 8 September 2026  
 **Status:** Living operator guide for the accepted ExecutionOS V2.4 PRETRADE → Execution Board system on `main`  
 **Repository:** `sibolek/structure-based-trade-management`  
@@ -14,8 +14,220 @@
 
 ---
 
+## Quick Start — Completely New to ExecutionOS? Start Here
+
+This section is deliberately written for someone who has **never used ExecutionOS before**. You do not need to understand the internal architecture before using the normal workflow.
+
+### What ExecutionOS does — in plain English
+
+ExecutionOS helps you define a trade **before entry**, checks whether that trade is still valid and appropriately sized, records your authorization, and then watches the broker for the actual fill and trade lifecycle.
+
+Three facts matter most:
+
+1. **ExecutionOS does not place the broker order.** You still place the actual equity order manually in thinkorswim/Schwab.
+2. **ARM does not mean “send an order.”** ARM means “I approve this exact trade plan, direction, account and quantity for handoff to the Execution Board.”
+3. **The system observes broker reality after ARM.** Once the handoff reaches `LISTENING`, a qualifying Schwab fill can be recognized and promoted to `LIVE`.
+
+If something is `BLOCKED`, stale, inconsistent, or unclear, **do not bypass it by editing files, localStorage, or browser state**. Resolve the stated problem or stop the workflow.
+
+### Before your first session
+
+You need:
+
+- this repository on your computer;
+- Node/npm dependencies installed;
+- working Schwab authorization;
+- the intended Schwab account visible to the monitor;
+- three Terminal windows or tabs;
+- a browser for the ExecutionOS UI.
+
+From the repository folder, make sure you are on the current operating branch:
+
+```bash
+git checkout main
+git pull --ff-only origin main
+```
+
+If this is the first time you are running the project, or dependencies changed, run:
+
+```bash
+npm install
+```
+
+### Start ExecutionOS — three Terminal windows
+
+Keep all three processes running during the session.
+
+#### Terminal 1 — start the read-only Schwab monitor
+
+```bash
+npm run schwab:monitor
+```
+
+This process reads broker/account/execution information. It does **not** place orders.
+
+Wait until it reports healthy broker state before relying on ExecutionOS for a live workflow.
+
+#### Terminal 2 — start the V2.4 PRETRADE service
+
+```bash
+npm run v24:pretrade
+```
+
+Default address:
+
+```text
+http://127.0.0.1:8788
+```
+
+This service owns the authoritative PRETRADE workflow: candidate state, trigger/permission evaluation, review, quantity authority and ARM.
+
+#### Terminal 3 — start the browser UI
+
+```bash
+npm run dev
+```
+
+Then open the URL Vite prints, normally:
+
+```text
+http://localhost:5173
+```
+
+### What you should verify before using a candidate
+
+Before working a trade candidate, confirm:
+
+- the Schwab monitor is healthy;
+- the PRETRADE service is healthy;
+- the browser UI is open;
+- the intended account shown by ExecutionOS is the account you expect;
+- broker positions shown by the system match reality;
+- router health is not `BLOCKED`, `ERROR`, or unexpectedly stale.
+
+Useful health checks:
+
+```bash
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/api/state
+curl http://127.0.0.1:8788/health
+curl http://127.0.0.1:8788/api/candidates
+```
+
+### The normal trade workflow — from candidate to LIVE
+
+For a completely new operator, think of the workflow as this sequence:
+
+```text
+1. CANDIDATE
+   A proposed trade plan enters ExecutionOS.
+
+2. WAITING / TRIGGER EVALUATION
+   ExecutionOS waits for the candidate's trigger conditions and required evidence.
+
+3. STRUCTURE / CONTEXT ASSESSMENT
+   You provide required operator assessments when the workflow asks for them.
+
+4. PERMISSION
+   ExecutionOS evaluates authoritative trigger, structure, DSS, Phase 4 risk and context evidence.
+
+5. READY / CAUTION / PASS
+   READY   = eligible to proceed to review.
+   CAUTION = may proceed only with the required acknowledgement.
+   PASS    = do not authorize this candidate under the current evidence.
+
+6. REVIEW
+   Inspect the exact account, entry assumptions, stop/risk information and quantity limits.
+
+7. SELECT QUANTITY
+   Use `Final Allowed` as the maximum selectable quantity. You may choose less. Never choose more.
+
+8. ARM
+   Confirm the exact direction and selected quantity. ARM authorizes the plan; it does not place an order.
+
+9. HANDOFF / LISTENING
+   Let the system move the authorization through PENDING → CLAIMED → PREPARED → LISTENING.
+
+10. PLACE THE BROKER ORDER MANUALLY
+    In the normal equity workflow, place the actual order yourself in thinkorswim/Schwab only after the accepted authorization is listening.
+
+11. LIVE
+    A qualifying exact-account Schwab fill can establish LIVE ownership.
+
+12. EXIT / HISTORY
+    Broker fills remain authoritative. When the position becomes flat and exit classification is complete, the trade moves to History.
+```
+
+### The quantity numbers — which one do I actually use?
+
+When the review screen shows several quantity fields, **the one that controls your selectable maximum is `Final Allowed`**.
+
+| Field | Plain-English meaning | What you do with it |
+|---|---|---|
+| **Phase 4 Stop-Risk Max** | Largest quantity that fits the actual expected-entry-to-effective-stop risk budget | Inspect it; it is one input to the final ceiling |
+| **2-ATR Volatility Max** | Largest quantity that fits the separate 2-ATR volatility-stress safety policy | Inspect it; it can be more restrictive than Phase 4 |
+| **Reviewed Ceiling** | Highest quantity approved for this candidate/version at explicit review | Treat it as non-expanding unless you perform a new explicit review |
+| **Final Allowed** | The current minimum of the applicable ceilings | **This is your maximum selectable quantity. You may choose less; never choose more.** |
+
+A smaller selected quantity is allowed when it satisfies the instrument's valid quantity rules. `Final Allowed` is a ceiling, not a recommendation to use the maximum.
+
+### What does “structural evidence” mean?
+
+If you select:
+
+```text
+STRUCTURE = VALID
+```
+
+ExecutionOS requires a short evidence/reference note explaining **what chart structure you are relying on and where you observed it**.
+
+Examples of the level of specificity expected:
+
+```text
+2m H2 above VWAP; signal-bar low 581.25; observed 09:42 ET
+5m ORH breakout/retest holding 184.60; chart observed 10:07 ET
+2m micro double bottom at PMH; second low held; chart observed 09:51 ET
+```
+
+These are examples of evidence formatting, not instructions to take those trades. The point is to leave an auditable reference rather than simply writing “looks good.”
+
+### Before you click ARM
+
+Check each item:
+
+- [ ] This is the intended candidate/version.
+- [ ] Symbol is correct.
+- [ ] Direction is correct.
+- [ ] Exact execution account is correct.
+- [ ] If `STRUCTURE = VALID`, structural evidence/reference is present.
+- [ ] Structural invalidation and effective stop are understood and have not been tightened merely to make size fit.
+- [ ] You have reviewed Phase 4 Stop-Risk Max, 2-ATR Volatility Max, Reviewed Ceiling and Final Allowed.
+- [ ] Selected quantity is **no greater than Final Allowed**.
+- [ ] If the candidate is `CAUTION`, the current review package has been explicitly acknowledged.
+- [ ] Entry mode shown by the review package is the intended one.
+- [ ] You understand that **ARM does not place a broker order**.
+
+After successful ARM, allow the handoff to reach `LISTENING` before following the normal manual broker-entry workflow.
+
+### Seven terms you will see constantly
+
+| Term | Meaning |
+|---|---|
+| **Candidate** | Proposed trade contract; not yet an authorization or broker position |
+| **PRETRADE** | The validation/review stage before authorization |
+| **READY** | Current evidence permits review/authorization to continue |
+| **CAUTION** | May continue only after explicit acknowledgement of the current package |
+| **ARM** | Explicit authorization of the exact plan/direction/quantity; **not** an order |
+| **LISTENING** | Durable pre-fill state in which the authorized handoff is waiting for qualifying broker evidence |
+| **LIVE** | ExecutionOS has recognized qualifying broker fill ownership for the authorized trade |
+
+For the detailed workflow, continue through this guide. For a normal daily checklist after you are familiar with the system, see **Section 20 — Recommended daily operating procedure**.
+
+---
+
 ## Table of contents
 
+- [Quick Start — Completely New to ExecutionOS? Start Here](#quick-start--completely-new-to-executionos-start-here)
 1. [Purpose](#1-purpose)
 2. [Current system status](#2-current-system-status)
 3. [Architecture and authority](#3-architecture-and-authority)
@@ -607,6 +819,16 @@ MISSING_STRUCTURE_PROVENANCE
 
 The browser validation does not weaken or replace the backend contract.
 
+A useful evidence/reference should identify **what structure was observed and where/when it was observed**. Examples:
+
+```text
+2m H2 above VWAP; signal-bar low 581.25; observed 09:42 ET
+5m ORH breakout/retest holding 184.60; observed 10:07 ET
+2m micro double bottom at PMH; second low held; observed 09:51 ET
+```
+
+These examples demonstrate evidence formatting only. They do not make any setup automatically valid and are not instructions to take a trade.
+
 ## 7.6 Permission evaluation
 
 Permission combines authoritative evidence for:
@@ -737,6 +959,15 @@ The review UI exposes:
 - the binding constraint;
 - ATR / stress-distance audit context.
 
+For day-to-day operation, use this interpretation:
+
+| Field | Meaning | Operator action |
+|---|---|---|
+| **Phase 4 Stop-Risk Max** | Largest quantity fitting actual expected-entry-to-effective-stop risk | Inspect; this is one ceiling |
+| **2-ATR Volatility Max** | Largest quantity fitting the separate volatility-stress guard | Inspect; this may become the binding ceiling |
+| **Reviewed Ceiling** | Maximum quantity previously accepted for this candidate/version at explicit review | Treat as non-expanding without a new explicit review |
+| **Final Allowed** | Current minimum of all applicable ceilings | **Use this as the maximum selectable quantity; choose less if desired, never more** |
+
 The UI also makes explicit that the effective stop is unchanged.
 
 If the policy inputs are invalid or no valid safe quantity exists, the workflow fails closed rather than manufacturing a quantity.
@@ -780,6 +1011,8 @@ Material changes produce a new review package and clear stale quantity/acknowled
 
 `Final Allowed` is a **ceiling**, not a required size.
 
+> **Operator rule:** `Final Allowed` is the maximum quantity you may select from the current review. You may always choose less when valid for the instrument. Never select more.
+
 Select a valid explicit quantity within instrument increment/minimum rules and no greater than the current final allowed quantity.
 
 The final ARM action must confirm the exact selected quantity.
@@ -798,7 +1031,29 @@ A CAUTION candidate may be authorized only after explicit acknowledgement bound 
 
 A materially changed package requires a new acknowledgement.
 
-## 9.5 Final ARM confirmation
+## 9.5 Before you ARM — operator checklist
+
+Before using the ARM control, verify:
+
+- [ ] intended candidate/version;
+- [ ] correct symbol;
+- [ ] correct direction;
+- [ ] correct exact execution account;
+- [ ] structural evidence/reference present when `STRUCTURE = VALID`;
+- [ ] structural invalidation understood;
+- [ ] effective stop understood and not tightened merely to make quantity fit;
+- [ ] Phase 4 Stop-Risk Max reviewed;
+- [ ] 2-ATR Volatility Max reviewed;
+- [ ] Reviewed Ceiling reviewed;
+- [ ] `Final Allowed` reviewed;
+- [ ] selected quantity is no greater than `Final Allowed`;
+- [ ] current CAUTION package acknowledged when required;
+- [ ] entry mode is the intended one;
+- [ ] you understand that ARM does **not** place a broker order.
+
+For the normal equity workflow, ARM first, allow the handoff to reach `LISTENING`, and then place the actual broker order manually in thinkorswim/Schwab.
+
+## 9.6 Final ARM confirmation
 
 ARM itself is the final explicit **quantity/direction** confirmation, for example:
 
@@ -812,7 +1067,7 @@ There is no separate final account-confirmation control. If the account or anoth
 
 The server performs fresh permission/risk/quantity-safety revalidation before authorization. Accidental Enter-key submission is not wired to ARM.
 
-## 9.6 Successful ARM
+## 9.7 Successful ARM
 
 Successful ARM freezes:
 
@@ -831,7 +1086,7 @@ It then creates/registers exactly one immutable Execution Board handoff and one 
 
 ARM does **not** place a broker order.
 
-## 9.7 OCO
+## 9.8 OCO
 
 OCO groups bind exact candidate versions on the same symbol and common account.
 
@@ -1490,8 +1745,9 @@ A material architecture change requires a new approved future design decision.
 10. Select an explicit quantity no greater than Final Allowed.
 11. If CAUTION, acknowledge the exact package.
 12. Verify the exact account and entry mode shown/carried by the current review state.
-13. ARM explicitly; the ARM control is the final quantity/direction confirmation.
-14. If fresh ARM revalidation reduces Final Allowed or returns REVIEW_REQUIRED, review the new authoritative package rather than forcing the stale one.
+13. Complete the Section 9.5 pre-ARM checklist.
+14. ARM explicitly; the ARM control is the final quantity/direction confirmation.
+15. If fresh ARM revalidation reduces Final Allowed or returns REVIEW_REQUIRED, review the new authoritative package rather than forcing the stale one.
 
 ## After ARM / before fill
 
@@ -1642,6 +1898,7 @@ The final aggregate numeric test count is intentionally not restated because the
 
 | Need | Source |
 |---|---|
+| First-time operator / quick start | `USER-GUIDE.md` — Quick Start |
 | Operate current accepted system on `main` | `USER-GUIDE.md` |
 | Current repository overview | `README.md` |
 | Documentation authority/status | `docs/ExecutionOS_Documentation_Index.md` |
@@ -1663,7 +1920,7 @@ Historical approved documents remain valid approval-time evidence but do not ove
 The structure/price condition that proves the trade thesis wrong.
 
 **Structural evidence/reference**  
-Operator-supplied provenance supporting a `STRUCTURE = VALID` assessment. It is required before permission submission in that state; backend provenance enforcement remains authoritative.
+Operator-supplied provenance supporting a `STRUCTURE = VALID` assessment. It should identify the observed structure and where/when it was observed. It is required before permission submission in that state; backend provenance enforcement remains authoritative.
 
 **Effective stop**  
 The volatility-protected execution stop derived by Phase 3. In LIVE management it may change only through explicit/frozen management authority. The EOD planned-risk basis remains the frozen `v24.effectiveStop` currently exported for the trade; live managed-stop changes do not rewrite that planned-risk basis.
@@ -1684,7 +1941,7 @@ Separate PRETRADE quantity maximum derived from a 2-ATR adverse-move stress expo
 Candidate/version quantity ceiling frozen at explicit review. Fresh ARM revalidation may reduce it but may not increase it without a new explicit review.
 
 **Final Allowed**  
-Current maximum quantity allowed by the minimum of fresh Phase 4 max, fresh 2-ATR volatility max, and the applicable reviewed ceiling.
+Current maximum quantity allowed by the minimum of fresh Phase 4 max, fresh 2-ATR volatility max, and the applicable reviewed ceiling. This is the operator's maximum selectable quantity; selecting less is allowed when valid for the instrument.
 
 **Review package**  
 Material authorization-critical snapshot shown before ARM. Material changes produce a new identity.
@@ -1732,6 +1989,6 @@ Planned future V3 management-policy layer. V3 has not started.
 
 ## Living-document maintenance rule
 
-Update this guide whenever accepted branch/release state, startup, candidate/permission/ARM workflow, risk or quantity-safety semantics, handoff/ownership, Slice 7 management, persistence, broker safety boundary, supported instruments, EOD procedure, or CLI surface changes.
+Update this guide whenever accepted branch/release state, startup, candidate/permission/ARM workflow, risk or quantity-safety semantics, handoff/ownership, Slice 7 management, persistence, broker safety boundary, supported instruments, EOD procedure, CLI surface, or first-time operator workflow changes.
 
 Do not let this guide drift away from validated application behavior.
