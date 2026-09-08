@@ -15,6 +15,7 @@ export const PRETRADE_UI_TERMINAL_UNARMED_STATES = Object.freeze([
   "DECLINED",
   "SUPERSEDED",
   "OCO_CANCELLED",
+  "RETIRED",
 ]);
 
 const ACTIVE = new Set(PRETRADE_UI_ACTIVE_STATES);
