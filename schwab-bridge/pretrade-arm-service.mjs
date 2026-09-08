@@ -44,6 +44,34 @@ function deepEqual(left, right) {
   return JSON.stringify(stable(left)) === JSON.stringify(stable(right));
 }
 
+function marketableComparableMaterial(reviewPackage) {
+  const material = reviewPackage?.material && typeof reviewPackage.material === "object"
+    ? structuredClone(reviewPackage.material)
+    : {};
+  delete material.currentExpectedEntry;
+  delete material.maxAffordableQuantity;
+  return material;
+}
+
+function canCarryForwardMarketableQuantity(previousReview, refreshedReview, selectedQuantity) {
+  const previousPackage = previousReview?.currentPackage;
+  const currentPackage = refreshedReview?.currentPackage;
+  const quantity = Number(selectedQuantity);
+  const freshMax = Number(currentPackage?.material?.maxAffordableQuantity);
+  if (!previousPackage || !currentPackage) return false;
+  if (upper(previousPackage.material?.entryMode) !== "MARKETABLE_NOW" || upper(currentPackage.material?.entryMode) !== "MARKETABLE_NOW") return false;
+  if (upper(previousPackage.permissionOutcome) !== "READY" || upper(currentPackage.permissionOutcome) !== "READY") return false;
+  if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(freshMax) || freshMax < quantity) return false;
+  if (
+    text(previousPackage.candidateId) !== text(currentPackage.candidateId)
+    || Number(previousPackage.contractVersion) !== Number(currentPackage.contractVersion)
+    || text(previousPackage.candidateContentHash) !== text(currentPackage.candidateContentHash)
+    || upper(previousPackage.symbol) !== upper(currentPackage.symbol)
+    || upper(previousPackage.direction) !== upper(currentPackage.direction)
+  ) return false;
+  return deepEqual(marketableComparableMaterial(previousPackage), marketableComparableMaterial(currentPackage));
+}
+
 function replayOperatorAssessments(permissionAttempt) {
   const structuralValidity = permissionAttempt?.structuralValidity;
   const structuralStatus = upper(structuralValidity?.status);
@@ -228,16 +256,34 @@ export class PreTradeArmService {
         candidateId,
         contractVersion,
       });
-      const refreshedReview = refreshed.review;
-      if (refreshedReview.currentPackage.reviewPackageId !== reviewPackageId) {
-        operation = this.armOperationRepository.markReviewRequired(operationId, {
-          reasonCode: "ARM_REVIEW_PACKAGE_CHANGED",
-          details: { previousReviewPackageId: reviewPackageId, currentReviewPackageId: refreshedReview.currentPackage.reviewPackageId },
-        });
-        return { status: "REVIEW_REQUIRED", operation, review: refreshedReview, candidate: refreshed.candidate };
+      let refreshedReview = refreshed.review;
+      let activeReviewPackageId = text(refreshedReview.currentPackage.reviewPackageId);
+      if (activeReviewPackageId !== reviewPackageId) {
+        if (canCarryForwardMarketableQuantity(precheck.review, refreshedReview, selectedQuantity)) {
+          refreshedReview = this.reviewService.selectQuantity({
+            operationId: `${operationId}:CARRY_FORWARD_QUANTITY`,
+            candidateId,
+            contractVersion,
+            reviewPackageId: activeReviewPackageId,
+            selectedQuantity,
+          });
+          activeReviewPackageId = text(refreshedReview.currentPackage.reviewPackageId);
+        } else {
+          operation = this.armOperationRepository.markReviewRequired(operationId, {
+            reasonCode: "ARM_REVIEW_PACKAGE_CHANGED",
+            details: {
+              previousReviewPackageId: reviewPackageId,
+              currentReviewPackageId: activeReviewPackageId,
+              selectedQuantity,
+              previousMaxAffordableQuantity: Number(precheck.review.currentPackage.material.maxAffordableQuantity),
+              currentMaxAffordableQuantity: Number(refreshedReview.currentPackage.material.maxAffordableQuantity),
+            },
+          });
+          return { status: "REVIEW_REQUIRED", operation, review: refreshedReview, candidate: refreshed.candidate };
+        }
       }
 
-      const readiness = this.reviewService.readiness(candidateId, contractVersion, reviewPackageId);
+      const readiness = this.reviewService.readiness(candidateId, contractVersion, activeReviewPackageId);
       if (!readiness.armEligible || Number(readiness.review.selectedQuantity?.value) !== selectedQuantity) {
         operation = this.armOperationRepository.markReviewRequired(operationId, {
           reasonCode: readiness.reasonCode || "ARM_REVIEW_STATE_CHANGED",
@@ -273,7 +319,7 @@ export class PreTradeArmService {
         candidateContentHash: candidate.contentHash,
         symbol: candidate.symbol,
         direction: candidate.direction,
-        reviewPackageId,
+        reviewPackageId: activeReviewPackageId,
         permissionAttemptId: readiness.review.currentPackage.evidence.permissionAttemptId,
         permissionState: canonicalLifecycleState(candidate.lifecycleState),
         permissionStateRevision: candidate.stateRevision,
