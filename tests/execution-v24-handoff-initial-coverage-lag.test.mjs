@@ -208,4 +208,4 @@ test("coverage that starts after authorization remains a terminal admission bloc
     "receiver-A",
     "BROKER_EXECUTION_COVERAGE_GAP",
   ]]);
-}
+});
