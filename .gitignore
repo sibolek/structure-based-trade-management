@@ -12,3 +12,4 @@ research/30-day-management-study/normalized-trades.json
 research/30-day-management-study/historical-study-trades.json
 research/30-day-management-study/schwab-minute-cache.json
 reports/eod/*.html
+.vscode/
