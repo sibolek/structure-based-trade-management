@@ -53,11 +53,23 @@ function marketableComparableMaterial(reviewPackage) {
   return material;
 }
 
+function reviewMaximum(review) {
+  for (const value of [
+    review?.maxAllowedQuantity,
+    review?.reviewQuantityCeiling?.value,
+    review?.currentPackage?.material?.maxAffordableQuantity,
+  ]) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number >= 0) return number;
+  }
+  return null;
+}
+
 function canCarryForwardMarketableQuantity(previousReview, refreshedReview, selectedQuantity) {
   const previousPackage = previousReview?.currentPackage;
   const currentPackage = refreshedReview?.currentPackage;
   const quantity = Number(selectedQuantity);
-  const freshMax = Number(currentPackage?.material?.maxAffordableQuantity);
+  const freshMax = reviewMaximum(refreshedReview);
   if (!previousPackage || !currentPackage) return false;
   if (upper(previousPackage.material?.entryMode) !== "MARKETABLE_NOW" || upper(currentPackage.material?.entryMode) !== "MARKETABLE_NOW") return false;
   if (upper(previousPackage.permissionOutcome) !== "READY" || upper(currentPackage.permissionOutcome) !== "READY") return false;
@@ -255,6 +267,7 @@ export class PreTradeArmService {
         operationId: `${operationId}:REFRESH_REVIEW`,
         candidateId,
         contractVersion,
+        preserveQuantityCeiling: true,
       });
       let refreshedReview = refreshed.review;
       let activeReviewPackageId = text(refreshedReview.currentPackage.reviewPackageId);
@@ -275,8 +288,8 @@ export class PreTradeArmService {
               previousReviewPackageId: reviewPackageId,
               currentReviewPackageId: activeReviewPackageId,
               selectedQuantity,
-              previousMaxAffordableQuantity: Number(precheck.review.currentPackage.material.maxAffordableQuantity),
-              currentMaxAffordableQuantity: Number(refreshedReview.currentPackage.material.maxAffordableQuantity),
+              previousMaxAffordableQuantity: reviewMaximum(precheck.review),
+              currentMaxAffordableQuantity: reviewMaximum(refreshedReview),
             },
           });
           return { status: "REVIEW_REQUIRED", operation, review: refreshedReview, candidate: refreshed.candidate };
