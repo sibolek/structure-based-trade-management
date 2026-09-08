@@ -131,7 +131,7 @@ function permissionAttempt(candidate, riskEvaluation, id, stateRevision) {
   });
 }
 
-function harness({ expectedEntryChange = false, quantityChange = false, ownershipStatus = "FREE" } = {}) {
+function harness({ expectedEntryChange = false, quantityChange = false, freshQuantity = null, ownershipStatus = "FREE" } = {}) {
   const clock = () => NOW;
   const store = new PreTradeStore({ filePath: tmp("arm-state"), clock });
   store.load();
@@ -177,7 +177,7 @@ function harness({ expectedEntryChange = false, quantityChange = false, ownershi
         id: "risk-2",
         dssId: "dss-2",
         expectedEntry: expectedEntryChange ? 180.01 : 180,
-        quantity: quantityChange ? 24 : 90,
+        quantity: freshQuantity ?? (quantityChange ? 24 : 90),
       });
       riskMap.set("risk-2", risk2);
       const attempt2 = permissionAttempt(candidate, risk2, "permission-2", expectedRevision);
@@ -307,7 +307,30 @@ test("marketable quote drift with unchanged fresh risk ceiling completes ARM wit
   assert.equal(h.deliveryRepository.snapshot().deliveries.length, 1);
 });
 
-test("ARM-time quantity-ceiling change returns REVIEW_REQUIRED and never creates authorization", async () => {
+test("marketable ceiling increase carries the explicit selected quantity forward and completes ARM", async () => {
+  const h = harness({ expectedEntryChange: true, freshQuantity: 120 });
+  const result = await h.armService.arm(command(h));
+  assert.equal(result.status, "COMPLETED");
+  const refreshedReview = h.reviewRepository.get("arm-NVDA-1", 1);
+  assert.equal(refreshedReview.currentPackage.material.maxAffordableQuantity, 120);
+  assert.notEqual(refreshedReview.currentPackage.reviewPackageId, h.initialReview.currentPackage.reviewPackageId);
+  assert.equal(refreshedReview.selectedQuantity.value, 25);
+  assert.equal(refreshedReview.selectedQuantity.reviewPackageId, refreshedReview.currentPackage.reviewPackageId);
+  assert.equal(result.candidate.arm.selectedQuantity, 25);
+  assert.equal(result.candidate.arm.reviewPackageId, refreshedReview.currentPackage.reviewPackageId);
+});
+
+test("marketable ceiling decrease that still permits the explicit selected quantity completes ARM", async () => {
+  const h = harness({ expectedEntryChange: true, freshQuantity: 30 });
+  const result = await h.armService.arm(command(h));
+  assert.equal(result.status, "COMPLETED");
+  const refreshedReview = h.reviewRepository.get("arm-NVDA-1", 1);
+  assert.equal(refreshedReview.currentPackage.material.maxAffordableQuantity, 30);
+  assert.equal(refreshedReview.selectedQuantity.value, 25);
+  assert.equal(result.candidate.arm.selectedQuantity, 25);
+});
+
+test("ARM-time fresh ceiling below selected quantity returns REVIEW_REQUIRED and never creates authorization", async () => {
   const h = harness({ quantityChange: true });
   const result = await h.armService.arm(command(h));
   assert.equal(result.status, "REVIEW_REQUIRED");
