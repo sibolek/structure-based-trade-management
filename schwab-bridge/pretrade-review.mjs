@@ -49,13 +49,13 @@ function reviewIdentityMaterial(material) {
     ? structuredClone(material)
     : {};
 
-  // MARKETABLE_NOW expected entry is a live snapshot, not a durable operator
-  // authorization fact. ARM performs a fresh permission/risk evaluation and the
-  // resulting maxAffordableQuantity remains authoritative. If quote drift makes
-  // the selected quantity unsafe, that ceiling changes and therefore changes the
-  // review identity. Keeping currentExpectedEntry visible in material preserves
-  // auditability without creating an endless re-review loop on every price tick.
-  delete value.currentExpectedEntry;
+  // For MARKETABLE_NOW, currentExpectedEntry is a live quote snapshot, not a
+  // durable operator authorization fact. ARM performs a fresh permission/risk
+  // evaluation and maxAffordableQuantity remains authoritative. If quote drift
+  // makes the selected quantity unsafe, that ceiling changes and therefore
+  // changes the review identity. STOP_TRIGGER keeps expected entry in identity
+  // because quote movement can materially change whether/how the stop will fire.
+  if (upper(value.entryMode) === "MARKETABLE_NOW") delete value.currentExpectedEntry;
   return value;
 }
 
@@ -121,6 +121,8 @@ export function buildPreTradeReviewPackage({ candidate, permissionAttempt, gener
 
   const structuralInvalidation = positiveNumber(dss.structuralInvalidation);
   const effectiveStop = positiveNumber(dss.effectiveStop);
+  const entryMode = upper(entry.entryMode);
+  const triggerPrice = entryMode === "STOP_TRIGGER" ? positiveNumber(entry.triggerPrice) : null;
   const currentExpectedEntry = positiveNumber(entry.currentExpectedEntry);
   const maxAffordableQuantity = positiveNumber(calculation.finalQuantity);
   const maxDollarRisk = positiveNumber(account.maxDollarRisk);
@@ -130,6 +132,8 @@ export function buildPreTradeReviewPackage({ candidate, permissionAttempt, gener
   if (
     structuralInvalidation === null
     || effectiveStop === null
+    || !["MARKETABLE_NOW", "STOP_TRIGGER"].includes(entryMode)
+    || (entryMode === "STOP_TRIGGER" && triggerPrice === null)
     || currentExpectedEntry === null
     || maxAffordableQuantity === null
     || maxDollarRisk === null
@@ -150,6 +154,8 @@ export function buildPreTradeReviewPackage({ candidate, permissionAttempt, gener
     permissionOutcome: outcome,
     structuralInvalidation,
     effectiveStop,
+    entryMode,
+    triggerPrice,
     currentExpectedEntry,
     accountId,
     maxDollarRisk,
