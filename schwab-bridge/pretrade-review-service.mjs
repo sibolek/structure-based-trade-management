@@ -13,11 +13,11 @@ function serviceError(message, code, details = null) {
   return error;
 }
 
-function positiveNumber(value) {
+function finiteNonNegative(value) {
   if (value === null || value === undefined || typeof value === "boolean") return null;
   if (typeof value === "string" && !value.trim()) return null;
   const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? number : null;
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 function quantitySafetyForAttempt(permissionAttempt) {
@@ -46,11 +46,11 @@ function quantitySafetyForAttempt(permissionAttempt) {
 }
 
 function reviewMaximum(review) {
-  const direct = positiveNumber(review?.maxAllowedQuantity);
+  const direct = finiteNonNegative(review?.maxAllowedQuantity);
   if (direct !== null) return direct;
-  const ceiling = positiveNumber(review?.reviewQuantityCeiling?.value);
+  const ceiling = finiteNonNegative(review?.reviewQuantityCeiling?.value);
   if (ceiling !== null) return ceiling;
-  return positiveNumber(review?.currentPackage?.material?.maxAffordableQuantity);
+  return finiteNonNegative(review?.currentPackage?.material?.maxAffordableQuantity);
 }
 
 export class PreTradeReviewService {
