@@ -44,6 +44,37 @@ function deepEqual(left, right) {
   return JSON.stringify(stable(left)) === JSON.stringify(stable(right));
 }
 
+function replayOperatorAssessments(permissionAttempt) {
+  const structuralValidity = permissionAttempt?.structuralValidity;
+  const structuralStatus = upper(structuralValidity?.status);
+  const structural = upper(structuralValidity?.source) === "OPERATOR" && ["VALID", "INVALID", "BLOCKED"].includes(structuralStatus)
+    ? {
+        status: structuralStatus,
+        actor: text(structuralValidity?.provenance?.actor) || "OPERATOR",
+        evidenceReference: text(structuralValidity?.evidenceReference) || null,
+        reasonCodes: [...new Set((structuralValidity?.reasonCodes || []).map(upper).filter(Boolean))],
+        ...(Number.isFinite(Number(structuralValidity?.resolvedPrice)) && Number(structuralValidity.resolvedPrice) > 0
+          ? { resolvedPrice: Number(structuralValidity.resolvedPrice) }
+          : {}),
+        ...(text(structuralValidity?.provenance?.note) ? { note: text(structuralValidity.provenance.note) } : {}),
+      }
+    : null;
+
+  const permissionDecision = permissionAttempt?.permissionDecision;
+  const permissionOutcome = upper(permissionDecision?.outcome);
+  const permission = upper(permissionDecision?.source) === "OPERATOR" && ["READY", "CAUTION", "PASS"].includes(permissionOutcome)
+    ? {
+        outcome: permissionOutcome,
+        actor: text(permissionDecision?.provenance?.actor) || "OPERATOR",
+        note: text(permissionDecision?.provenance?.note) || null,
+        reasonCodes: [...new Set((permissionDecision?.reasonCodes || []).map(upper).filter(Boolean))],
+        ...(text(permissionDecision?.reasonCode) ? { reasonCode: text(permissionDecision.reasonCode) } : {}),
+      }
+    : null;
+
+  return { structural, permission };
+}
+
 export class PreTradeArmService {
   constructor({
     lifecycleCoordinator,
@@ -147,6 +178,19 @@ export class PreTradeArmService {
         return { status: "REJECTED", operation };
       }
 
+      const reviewedPermissionAttemptId = text(precheck.review.currentPackage.evidence.permissionAttemptId);
+      const reviewedPermissionAttempt = this.permissionAttemptRepository.getById(reviewedPermissionAttemptId);
+      if (
+        text(reviewedPermissionAttempt?.candidate?.candidateId) !== candidateId
+        || Number(reviewedPermissionAttempt?.candidate?.contractVersion) !== contractVersion
+        || text(reviewedPermissionAttempt?.candidate?.candidateContentHash) !== text(precheck.candidate.contentHash)
+      ) {
+        throw armError("reviewed permission attempt identity does not match ARM candidate", "ARM_REVIEW_PERMISSION_IDENTITY_MISMATCH");
+      }
+      const replayed = replayOperatorAssessments(reviewedPermissionAttempt);
+      const operatorStructuralAssessment = command.operatorStructuralAssessment ?? replayed.structural;
+      const operatorPermissionAssessment = command.operatorPermissionAssessment ?? replayed.permission;
+
       const revalidation = this.lifecycleCoordinator.revalidatePermission({
         operationId: `${operationId}:REVALIDATE_PERMISSION`,
         candidateId,
@@ -167,8 +211,8 @@ export class PreTradeArmService {
         accountId: reviewAccountId,
         entryMode: upper(command.entryMode),
         triggerPrice: command.triggerPrice ?? null,
-        operatorStructuralAssessment: command.operatorStructuralAssessment ?? null,
-        operatorPermissionAssessment: command.operatorPermissionAssessment ?? null,
+        operatorStructuralAssessment,
+        operatorPermissionAssessment,
       });
 
       const postPermissionCandidate = this.lifecycleCoordinator.candidateSnapshot(candidateId, contractVersion);
