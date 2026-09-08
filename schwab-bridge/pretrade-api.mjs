@@ -189,8 +189,10 @@ const ocoService = new PreTradeOcoService({
   lifecycleCoordinator,
   ocoRepository,
   armLifecycleAuthority,
+  deliveryRepository: handoffDeliveryRepository,
   executionOwnershipProvider,
 });
+const blockedHandoffRetirementRecovery = ocoService.reconcileBlockedHandoffRetirements();
 const armService = new PreTradeArmService({
   lifecycleCoordinator,
   permissionPipeline,
@@ -351,6 +353,8 @@ const server = http.createServer(async (req, res) => {
       armOperationAuthority: true,
       armRecoveryBlocked,
       armRecoveryInspected: armRecovery.requestRecovery.length + armRecovery.operations.length,
+      blockedHandoffRetirementRecoveryInspected: blockedHandoffRetirementRecovery.length,
+      blockedHandoffRetirementRecoveryBlocked: blockedHandoffRetirementRecovery.filter((item) => item.status === "RECONCILIATION_BLOCKED").length,
       ocoAuthority: true,
       ocoRecoveryInspected: armRecovery.ocoRecovery.length + ocoClosedNoArmRecovery.length,
       executionOwnershipAuthorityConnected: executionOwnershipHealth.connected,
@@ -367,6 +371,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith("/api/candidates") || pathname.startsWith("/api/oco-groups")) {
     try {
       lifecycleCoordinator.reconcileAllValidity({ source: "REQUEST_VALIDITY_RECONCILIATION" });
+      ocoService.reconcileBlockedHandoffRetirements();
       ocoService.reconcileClosedNoArm();
     } catch (error) {
       failPreTradeRequest(res, error, origin, "VALIDITY_RECONCILIATION_ERROR");
@@ -409,8 +414,9 @@ const server = http.createServer(async (req, res) => {
       const validityReconciliation = lifecycleCoordinator.reconcileAllValidity({
         source: "INGRESS_VALIDITY_RECONCILIATION",
       });
+      const blockedHandoffRetirementReconciliation = ocoService.reconcileBlockedHandoffRetirements();
       const ocoReconciliation = ocoService.reconcileClosedNoArm();
-      json(res, 200, { ...result, validityReconciliation, ocoReconciliation }, origin);
+      json(res, 200, { ...result, validityReconciliation, blockedHandoffRetirementReconciliation, ocoReconciliation }, origin);
     } catch (error) {
       failPreTradeRequest(res, error, origin, "IMPORT_ERROR");
     }
@@ -442,6 +448,7 @@ server.listen(PORT, HOST, () => {
   console.log("[ExecutionOS V2.4] Review state is server-side, package-bound, and keeps selected quantity unset until explicit operator selection.");
   console.log("[ExecutionOS V2.4] Final ARM is operator-only, freshly revalidates permission, and uses durable authorization proof for recovery.");
   console.log(`[ExecutionOS V2.4] ARM startup recovery inspected ${armRecovery.requestRecovery.length + armRecovery.operations.length} operation(s); blocked=${armRecoveryBlocked}.`);
+  console.log(`[ExecutionOS V2.4] Blocked handoff retirement reconciliation inspected ${blockedHandoffRetirementRecovery.length} ARMED candidate(s).`);
   console.log(`[ExecutionOS V2.4] OCO startup reconciliation inspected ${armRecovery.ocoRecovery.length + ocoClosedNoArmRecovery.length} group action(s).`);
   console.log("[ExecutionOS V2.4] Execution ownership FREE/OWNED is derived server-side from a fresh canonical Execution store snapshot; missing/stale authority is UNKNOWN and blocks ARM.");
   console.log("[ExecutionOS V2.4] Canonical READY/CAUTION/PASS and permission blockers are permission-pipeline authority only.");
