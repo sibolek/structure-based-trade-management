@@ -292,6 +292,10 @@ function PermissionControls({ candidate, draft, setDraft, accounts, busy, onEval
   const { structural, permission } = assessmentInputs(effectiveDraft);
   const needsPermissionReasons = ["CAUTION", "PASS"].includes(upper(effectiveDraft.permissionOutcome));
   const reasonMissing = needsPermissionReasons && reasonCodes(effectiveDraft.permissionReasons).length === 0;
+  const structuralEvidenceMissing = (
+    upper(effectiveDraft.structuralStatus) === "VALID"
+    && !text(effectiveDraft.structuralEvidence)
+  );
   return (
     <div className="space-y-3 border-t border-white/10 p-4">
       <div className="flex items-center justify-between gap-2">
@@ -371,7 +375,18 @@ function PermissionControls({ candidate, draft, setDraft, accounts, busy, onEval
               </button>
             ))}
           </div>
-          <input value={effectiveDraft.structuralEvidence} onChange={(event) => setDraft({ structuralEvidence: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="Optional chart/evidence note" />
+          <input
+            value={effectiveDraft.structuralEvidence}
+            onChange={(event) => setDraft({ structuralEvidence: event.target.value })}
+            aria-required={upper(effectiveDraft.structuralStatus) === "VALID"}
+            className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200"
+            placeholder="Structure evidence / reference — required for VALID"
+          />
+          {structuralEvidenceMissing && (
+            <p className="mt-1 text-xs text-red-300">
+              Structure evidence is required when STRUCTURE = VALID.
+            </p>
+          )}
           {["INVALID", "BLOCKED"].includes(upper(effectiveDraft.structuralStatus)) && (
             <input value={effectiveDraft.structuralReasons} onChange={(event) => setDraft({ structuralReasons: event.target.value })} className="mt-2 w-full rounded border border-white/10 bg-ink-900 px-2 py-2 text-xs text-zinc-200" placeholder="Reason codes" />
           )}
@@ -408,7 +423,7 @@ function PermissionControls({ candidate, draft, setDraft, accounts, busy, onEval
 
       <button
         type="button"
-        disabled={busy || !effectiveDraft.accountId || !effectiveDraft.entryMode || !effectiveDraft.structuralStatus || !effectiveDraft.permissionOutcome || reasonMissing}
+        disabled={busy || !effectiveDraft.accountId || !effectiveDraft.entryMode || !effectiveDraft.structuralStatus || !effectiveDraft.permissionOutcome || structuralEvidenceMissing || reasonMissing}
         onClick={() => onEvaluate({ structural, permission, effectiveDraft })}
         className="flex items-center gap-2 rounded border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-bold text-sky-100 disabled:opacity-35"
       >

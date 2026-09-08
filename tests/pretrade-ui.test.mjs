@@ -226,6 +226,9 @@ test("React PRETRADE workspace is intent-only and renders all three frozen proje
   assert.match(workspace, /ARM \{candidate\.symbol\} \{candidate\.direction\}/);
   assert.match(workspace, /type="button"/);
   assert.match(workspace, /operatorPermissionAssessment/);
+  assert.match(workspace, /structuralEvidenceMissing/);
+  assert.match(workspace, /Structure evidence \/ reference — required for VALID/);
+  assert.match(workspace, /Structure evidence is required when STRUCTURE = VALID/);
   assert.doesNotMatch(workspace, /operatorContextAssessment/);
   assert.doesNotMatch(workspace, /localStorage\.setItem/);
   assert.doesNotMatch(workspace, /transactExecutionBoardStore/);
