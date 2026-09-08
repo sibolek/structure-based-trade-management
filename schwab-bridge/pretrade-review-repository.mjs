@@ -10,6 +10,10 @@ function text(value) {
   return String(value ?? "").trim();
 }
 
+function upper(value) {
+  return text(value).toUpperCase();
+}
+
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
   if (value && typeof value === "object") {
@@ -54,6 +58,61 @@ function normalizeState(raw) {
   };
 }
 
+function finiteNonNegative(value) {
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function finitePositive(value) {
+  const number = finiteNonNegative(value);
+  return number !== null && number > 0 ? number : null;
+}
+
+function quantitySafetyAuthority(reviewPackage, quantitySafety) {
+  const phase4Maximum = finitePositive(reviewPackage?.material?.maxAffordableQuantity);
+  if (phase4Maximum === null) {
+    throw repositoryError("review package has no valid Phase 4 quantity maximum", "INVALID_REVIEW_PACKAGE");
+  }
+
+  if (quantitySafety === null || quantitySafety === undefined) {
+    return {
+      source: "PHASE4_LEGACY_FALLBACK",
+      maximum: phase4Maximum,
+      evidence: null,
+    };
+  }
+
+  const status = upper(quantitySafety?.status);
+  const policyMaximum = finiteNonNegative(quantitySafety?.policyMaxQuantity);
+  if (status === "VALID") {
+    if (policyMaximum === null || policyMaximum <= 0 || policyMaximum > phase4Maximum + 1e-12) {
+      throw repositoryError("quantity safety maximum is invalid or exceeds Phase 4", "INVALID_QUANTITY_SAFETY");
+    }
+  } else if (status === "NO_AFFORDABLE_SIZE") {
+    if (policyMaximum !== 0) {
+      throw repositoryError("NO_AFFORDABLE_SIZE quantity safety must have zero policy maximum", "INVALID_QUANTITY_SAFETY");
+    }
+  } else {
+    throw repositoryError("quantity safety must be VALID or NO_AFFORDABLE_SIZE", "INVALID_QUANTITY_SAFETY");
+  }
+
+  return {
+    source: "V24_PRETRADE_QUANTITY_SAFETY",
+    maximum: policyMaximum,
+    evidence: immutable(quantitySafety),
+  };
+}
+
+function allowedMaximum(record) {
+  const direct = finiteNonNegative(record?.maxAllowedQuantity);
+  if (direct !== null) return direct;
+  const ceiling = finiteNonNegative(record?.reviewQuantityCeiling?.value);
+  if (ceiling !== null) return ceiling;
+  return finiteNonNegative(record?.currentPackage?.material?.maxAffordableQuantity);
+}
+
 function gcd(a, b) {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
@@ -95,16 +154,16 @@ function exactIncrement(value, increment) {
   return denominator !== 0n && numerator % denominator === 0n;
 }
 
-function validateQuantity(reviewPackage, selectedQuantity) {
+function validateQuantity(record, selectedQuantity) {
   let selected;
   let minimum;
   let increment;
   let maximum;
   try {
     selected = rat(selectedQuantity);
-    minimum = rat(reviewPackage.material.instrument.minimumQuantity);
-    increment = rat(reviewPackage.material.instrument.quantityIncrement);
-    maximum = rat(reviewPackage.material.maxAffordableQuantity);
+    minimum = rat(record.currentPackage.material.instrument.minimumQuantity);
+    increment = rat(record.currentPackage.material.instrument.quantityIncrement);
+    maximum = rat(allowedMaximum(record));
   } catch {
     throw repositoryError("selected quantity is invalid", "INVALID_SELECTED_QUANTITY");
   }
@@ -113,11 +172,12 @@ function validateQuantity(reviewPackage, selectedQuantity) {
     compare(selected, zero) <= 0
     || compare(minimum, zero) <= 0
     || compare(increment, zero) <= 0
+    || compare(maximum, zero) <= 0
     || compare(selected, minimum) < 0
     || compare(selected, maximum) > 0
     || !exactIncrement(selected, increment)
   ) {
-    throw repositoryError("selected quantity is outside the current review package ceiling or increment", "INVALID_SELECTED_QUANTITY");
+    throw repositoryError("selected quantity is outside the current review quantity-safety ceiling or increment", "INVALID_SELECTED_QUANTITY");
   }
   const number = Number(selected.n) / Number(selected.d);
   if (!Number.isFinite(number)) throw repositoryError("selected quantity is outside supported range", "INVALID_SELECTED_QUANTITY");
@@ -160,11 +220,14 @@ export class PreTradeReviewRepository {
     return record ? immutable(record) : null;
   }
 
-  syncPackage({ operationId, reviewPackage } = {}) {
+  syncPackage({ operationId, reviewPackage, quantitySafety = null, preserveQuantityCeiling = false } = {}) {
     const validation = validatePreTradeReviewPackage(reviewPackage);
     if (!validation.valid) throw repositoryError(`review package is invalid: ${validation.errors.join("; ")}`, "INVALID_REVIEW_PACKAGE");
+    const safetyAuthority = quantitySafetyAuthority(reviewPackage, quantitySafety);
     return this.#run(operationId, "SYNC_REVIEW_PACKAGE", {
       reviewPackage,
+      quantitySafety: safetyAuthority.evidence,
+      preserveQuantityCeiling: preserveQuantityCeiling === true,
     }, () => {
       let record = this.#find(reviewPackage.candidateId, reviewPackage.contractVersion);
       const at = this.#now();
@@ -176,17 +239,50 @@ export class PreTradeReviewRepository {
           currentPackage: null,
           selectedQuantity: null,
           cautionAcknowledgment: null,
+          quantitySafety: null,
+          reviewQuantityCeiling: null,
+          maxAllowedQuantity: null,
           events: [],
         };
         this.state.reviews.push(record);
       }
+
       const previousPackageId = text(record.currentPackage?.reviewPackageId);
       const changed = previousPackageId && previousPackageId !== reviewPackage.reviewPackageId;
+      const previousCeiling = finiteNonNegative(record.reviewQuantityCeiling?.value);
+      const preserve = preserveQuantityCeiling === true && previousCeiling !== null;
+      const nextMaximum = preserve
+        ? Math.min(previousCeiling, safetyAuthority.maximum)
+        : safetyAuthority.maximum;
+
       record.currentPackage = immutable(reviewPackage);
+      record.quantitySafety = safetyAuthority.evidence;
+      record.maxAllowedQuantity = nextMaximum;
+      record.reviewQuantityCeiling = immutable({
+        value: nextMaximum,
+        source: preserve ? "ARM_REVALIDATION_NON_EXPANDING" : "EXPLICIT_REVIEW",
+        safetySource: safetyAuthority.source,
+        policyMaxQuantity: safetyAuthority.maximum,
+        establishedAt: preserve && text(record.reviewQuantityCeiling?.establishedAt)
+          ? record.reviewQuantityCeiling.establishedAt
+          : at,
+        updatedAt: at,
+        reviewPackageId: reviewPackage.reviewPackageId,
+      });
+
+      let quantitySelectionCleared = false;
       if (changed) {
+        quantitySelectionCleared = Boolean(record.selectedQuantity);
         record.selectedQuantity = null;
         record.cautionAcknowledgment = null;
+      } else if (
+        record.selectedQuantity
+        && Number(record.selectedQuantity.value) > nextMaximum
+      ) {
+        record.selectedQuantity = null;
+        quantitySelectionCleared = true;
       }
+
       record.reviewRevision = Number(record.reviewRevision || 0) + 1;
       record.events.push(immutable({
         type: changed ? "REVIEW_PACKAGE_CHANGED" : previousPackageId ? "REVIEW_PACKAGE_REFRESHED" : "REVIEW_PACKAGE_ESTABLISHED",
@@ -194,6 +290,11 @@ export class PreTradeReviewRepository {
         reviewPackageId: reviewPackage.reviewPackageId,
         previousReviewPackageId: previousPackageId || null,
         reviewStateCleared: Boolean(changed),
+        quantitySelectionCleared,
+        preserveQuantityCeiling: preserve,
+        quantitySafetyStatus: upper(quantitySafety?.status) || "PHASE4_LEGACY_FALLBACK",
+        policyMaxQuantity: safetyAuthority.maximum,
+        maxAllowedQuantity: nextMaximum,
       }));
       return immutable(record);
     });
@@ -202,7 +303,7 @@ export class PreTradeReviewRepository {
   selectQuantity({ operationId, candidateId, contractVersion, reviewPackageId, selectedQuantity } = {}) {
     return this.#run(operationId, "SELECT_QUANTITY", { candidateId, contractVersion, reviewPackageId, selectedQuantity }, () => {
       const record = this.#requireCurrent(candidateId, contractVersion, reviewPackageId);
-      const quantity = validateQuantity(record.currentPackage, selectedQuantity);
+      const quantity = validateQuantity(record, selectedQuantity);
       const at = this.#now();
       record.selectedQuantity = immutable({
         reviewPackageId: record.currentPackage.reviewPackageId,
@@ -210,7 +311,7 @@ export class PreTradeReviewRepository {
         selectedAt: at,
       });
       record.reviewRevision += 1;
-      record.events.push(immutable({ type: "QUANTITY_SELECTED", at, reviewPackageId, selectedQuantity: quantity }));
+      record.events.push(immutable({ type: "QUANTITY_SELECTED", at, reviewPackageId, selectedQuantity: quantity, maxAllowedQuantity: allowedMaximum(record) }));
       return immutable(record);
     });
   }
@@ -287,8 +388,22 @@ export class PreTradeReviewRepository {
       if (!record.currentPackage) throw repositoryError("review record is missing currentPackage", "CORRUPT_REVIEW_REPOSITORY");
       const validation = validatePreTradeReviewPackage(record.currentPackage);
       if (!validation.valid) throw repositoryError(`persisted review package is invalid: ${validation.errors.join("; ")}`, "CORRUPT_REVIEW_REPOSITORY");
+
+      const maximum = allowedMaximum(record);
+      if (maximum === null || maximum < 0) {
+        throw repositoryError("review record contains invalid quantity ceiling", "CORRUPT_REVIEW_REPOSITORY");
+      }
+      if (record.maxAllowedQuantity !== null && record.maxAllowedQuantity !== undefined && finiteNonNegative(record.maxAllowedQuantity) === null) {
+        throw repositoryError("review record contains invalid maxAllowedQuantity", "CORRUPT_REVIEW_REPOSITORY");
+      }
+      if (record.reviewQuantityCeiling && finiteNonNegative(record.reviewQuantityCeiling.value) === null) {
+        throw repositoryError("review record contains invalid reviewQuantityCeiling", "CORRUPT_REVIEW_REPOSITORY");
+      }
       if (record.selectedQuantity && record.selectedQuantity.reviewPackageId !== record.currentPackage.reviewPackageId) {
         throw repositoryError("selected quantity is bound to a stale review package", "CORRUPT_REVIEW_REPOSITORY");
+      }
+      if (record.selectedQuantity && Number(record.selectedQuantity.value) > maximum) {
+        throw repositoryError("selected quantity exceeds persisted review quantity ceiling", "CORRUPT_REVIEW_REPOSITORY");
       }
       if (record.cautionAcknowledgment && record.cautionAcknowledgment.reviewPackageId !== record.currentPackage.reviewPackageId) {
         throw repositoryError("CAUTION acknowledgment is bound to a stale review package", "CORRUPT_REVIEW_REPOSITORY");
