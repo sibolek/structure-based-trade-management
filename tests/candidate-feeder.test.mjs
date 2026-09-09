@@ -177,7 +177,7 @@ test("bundle validation requires canonical source explicit IDs unique IDs versio
   assert.ok(errors.some((item) => item.includes("ingressPolicy")));
   assert.ok(errors.some((item) => item.includes("duplicate candidateId")));
   assert.ok(errors.some((item) => item.includes("contractVersion")));
-  assert.ok(errors.some((item) => item.includes("candidate source")));
+  assert.ok(errors.some((item) => item.includes("candidates[1].source")));
 });
 
 test("bundle validation rejects payloads above PRETRADE body limit", () => {
