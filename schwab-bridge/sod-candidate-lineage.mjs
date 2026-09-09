@@ -9,6 +9,7 @@ import { contentHash } from "./pretrade-state.mjs";
 export const SOD_LINEAGE_NEW = "NEW";
 export const SOD_LINEAGE_UNCHANGED = "UNCHANGED";
 export const SOD_LINEAGE_REVISED = "REVISED";
+export const SOD_LINEAGE_SOURCE_DATE_CONFLICT = "SOD_LINEAGE_SOURCE_DATE_CONFLICT";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -117,10 +118,35 @@ function priorVersionsFor(candidateId, priorCandidates) {
   return matches.sort((left, right) => Number(left.contractVersion) - Number(right.contractVersion));
 }
 
+function assertSameSourceDate(candidateId, proposalSourceDate, versions) {
+  const conflicting = [...new Set(
+    versions
+      .map((candidate) => text(candidate?.sourceDate))
+      .filter((sourceDate) => sourceDate !== proposalSourceDate),
+  )];
+  if (!conflicting.length) return;
+
+  throw lineageError(
+    `SOD candidateId ${candidateId} cannot cross sourceDate/session identity boundaries`,
+    SOD_LINEAGE_SOURCE_DATE_CONFLICT,
+    {
+      candidateId,
+      proposalSourceDate,
+      priorSourceDates: conflicting,
+    },
+  );
+}
+
 export function resolveSodCandidateLineage(proposalInput, priorCandidates = []) {
   const proposal = normalizedLineageProposal(proposalInput);
   const candidateId = proposal.candidateId;
   const versions = priorVersionsFor(candidateId, priorCandidates);
+
+  // SOD candidate identity is scoped to one source/trade date. Reusing the same
+  // candidateId on another date is an identity collision, not a substantive
+  // revision. Fail closed rather than silently extending lineage across sessions.
+  assertSameSourceDate(candidateId, proposal.sourceDate, versions);
+
   const proposalSubstantiveHash = candidateSubstantiveHash(proposal);
 
   if (!versions.length) {
