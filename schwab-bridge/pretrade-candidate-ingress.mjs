@@ -10,6 +10,11 @@ import {
   normalizeCanonicalCandidateProposal,
 } from "./pretrade-candidate-contract.mjs";
 
+export const AUTOMATED_UNTOUCHED_ONLY = "AUTOMATED_UNTOUCHED_ONLY";
+export const AUTOMATED_VERSION_GAP = "AUTOMATED_VERSION_GAP";
+export const AUTOMATED_SUPERSESSION_REQUIRES_UNTOUCHED_WAITING_REVISION_0 =
+  "AUTOMATED_SUPERSESSION_REQUIRES_UNTOUCHED_WAITING_REVISION_0";
+
 const ACTIVE_PRETRADE_STATES = new Set([
   "INGESTED",
   "WAITING",
@@ -44,6 +49,29 @@ function ingressError(message, code) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function normalizeIngressPolicy(value) {
+  const policy = upper(value);
+  if (!policy) return null;
+  if (policy === AUTOMATED_UNTOUCHED_ONLY) return policy;
+  throw ingressError(`Unsupported candidate ingress policy: ${policy}`, "INVALID_INGRESS_POLICY");
+}
+
+function candidateLifecycleProjection(candidate) {
+  return {
+    lifecycleState: canonicalLifecycleState(candidate?.lifecycleState),
+    stateRevision: normalizeRevision(candidate?.stateRevision),
+  };
+}
+
+function rejectedPolicyOutcome(candidate, reason) {
+  return {
+    candidateId: candidate.candidateId,
+    contractVersion: candidate.contractVersion,
+    status: "REJECTED",
+    reasons: [reason],
+  };
 }
 
 function ensureCandidateAuthorityShape(candidate) {
@@ -86,7 +114,7 @@ export class PreTradeCandidateIngress {
     this.idFactory = idFactory;
   }
 
-  importBundle(bundle) {
+  importBundle(bundle, { ingressPolicy = null } = {}) {
     if (!bundle || typeof bundle !== "object" || !Array.isArray(bundle.candidates)) {
       throw ingressError("Import bundle must be an object with a candidates array", "INVALID_BUNDLE");
     }
@@ -94,6 +122,7 @@ export class PreTradeCandidateIngress {
       throw ingressError("store state is unavailable; call store.load() first", "INGRESS_STORE_NOT_LOADED");
     }
 
+    const normalizedIngressPolicy = normalizeIngressPolicy(ingressPolicy);
     const stateBeforeMutation = clone(this.store.state);
     const importedAt = this.clock();
     const bundleSource = upper(bundle.source);
@@ -107,6 +136,7 @@ export class PreTradeCandidateIngress {
         importedAt,
         bundleSource,
         bundleId,
+        ingressPolicy: normalizedIngressPolicy,
       }));
 
       this.store.state.updatedAt = importedAt;
@@ -115,6 +145,7 @@ export class PreTradeCandidateIngress {
         importedAt,
         source: bundleSource,
         bundleId,
+        ...(normalizedIngressPolicy ? { ingressPolicy: normalizedIngressPolicy } : {}),
         accepted: outcomes.filter((item) => item.status === "ACCEPTED").length,
         duplicate: outcomes.filter((item) => item.status === "DUPLICATE").length,
         rejected: outcomes.filter((item) => item.status === "REJECTED").length,
@@ -123,14 +154,18 @@ export class PreTradeCandidateIngress {
       });
 
       this.store.save();
-      return { importedAt, outcomes };
+      return {
+        importedAt,
+        ...(normalizedIngressPolicy ? { ingressPolicy: normalizedIngressPolicy } : {}),
+        outcomes,
+      };
     } catch (error) {
       this.store.state = stateBeforeMutation;
       throw error;
     }
   }
 
-  #importCandidate({ input, importedAt, bundleSource, bundleId }) {
+  #importCandidate({ input, importedAt, bundleSource, bundleId, ingressPolicy }) {
     const { normalized, errors } = normalizeCanonicalCandidateProposal(input, { bundleSource });
     if (errors.length) {
       return {
@@ -174,6 +209,40 @@ export class PreTradeCandidateIngress {
       };
     }
 
+    if (ingressPolicy === AUTOMATED_UNTOUCHED_ONLY) {
+      if (!versions.length) {
+        if (normalized.contractVersion !== 1) {
+          return rejectedPolicyOutcome(normalized, AUTOMATED_VERSION_GAP);
+        }
+      } else {
+        if (normalized.contractVersion !== newestVersion + 1) {
+          return rejectedPolicyOutcome(normalized, AUTOMATED_VERSION_GAP);
+        }
+
+        for (const existingRaw of versions) assertCanonicalCandidateIntegrity(existingRaw);
+
+        const newestRaw = versions.find((item) => Number(item.contractVersion) === newestVersion);
+        const newestProjection = candidateLifecycleProjection(newestRaw);
+        const activePriorVersions = versions.filter((item) => (
+          Number(item.contractVersion) < normalized.contractVersion
+          && ACTIVE_PRETRADE_STATES.has(candidateLifecycleProjection(item).lifecycleState)
+        ));
+
+        if (
+          !newestRaw
+          || newestProjection.lifecycleState !== "WAITING"
+          || newestProjection.stateRevision !== 0
+          || activePriorVersions.length !== 1
+          || activePriorVersions[0] !== newestRaw
+        ) {
+          return rejectedPolicyOutcome(
+            normalized,
+            AUTOMATED_SUPERSESSION_REQUIRES_UNTOUCHED_WAITING_REVISION_0,
+          );
+        }
+      }
+    }
+
     for (const existingRaw of versions) {
       const existing = ensureCandidateAuthorityShape(existingRaw);
       assertCanonicalCandidateIntegrity(existing);
@@ -188,6 +257,7 @@ export class PreTradeCandidateIngress {
           supersedingContentHash: hash,
           bundleSource,
           bundleId,
+          ingressPolicy,
         });
       }
     }
@@ -211,6 +281,7 @@ export class PreTradeCandidateIngress {
         bundleId,
         candidateSource: normalized.source,
         candidateContentHash: hash,
+        ...(ingressPolicy ? { ingressPolicy } : {}),
       },
       metadata: null,
     };
@@ -289,6 +360,7 @@ export class PreTradeCandidateIngress {
     supersedingContentHash,
     bundleSource,
     bundleId,
+    ingressPolicy,
   }) {
     const beforeState = existing.lifecycleState;
     const beforeRevision = existing.stateRevision;
@@ -320,6 +392,7 @@ export class PreTradeCandidateIngress {
         bundleId,
         supersededByVersion,
         supersedingContentHash,
+        ...(ingressPolicy ? { ingressPolicy } : {}),
       },
       metadata: null,
     };
