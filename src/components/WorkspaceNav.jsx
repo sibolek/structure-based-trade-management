@@ -1,7 +1,8 @@
-import { Activity, Radio, ShieldCheck, WifiOff } from "lucide-react";
+import { Activity, Radio, ShieldCheck, Sparkles, WifiOff } from "lucide-react";
 import { PRETRADE_UI_ACTIVE_STATES } from "../pretrade/pretrade-ui-projection.js";
 
 const WORKSPACES = [
+  { id: "SOD", label: "SOD" },
   { id: "PRETRADE", label: "PRE-TRADE" },
   { id: "EXECUTION", label: "EXECUTION" },
 ];
@@ -17,7 +18,7 @@ function StatusChip({ connected, label, offlineLabel }) {
   );
 }
 
-export default function WorkspaceNav({ workspace, onChange, broker, pretrade }) {
+export default function WorkspaceNav({ workspace, onChange, broker, pretrade, sod }) {
   const candidates = Array.isArray(pretrade?.state?.candidates) ? pretrade.state.candidates : [];
   const active = candidates.filter((candidate) => ACTIVE_PRETRADE_STATES.has(String(candidate.lifecycleState || "").toUpperCase())).length;
   const positions = Array.isArray(broker?.state?.positions) ? broker.state.positions.length : 0;
@@ -27,18 +28,19 @@ export default function WorkspaceNav({ workspace, onChange, broker, pretrade }) 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
         <div>
           <p className="section-label">ExecutionOS Workspace</p>
-          <h1 className="text-lg font-semibold text-zinc-100">Pre-trade decisions and execution stay visibly separate.</h1>
+          <h1 className="text-lg font-semibold text-zinc-100">SOD analysis, pre-trade decisions, and execution stay visibly separate.</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <StatusChip connected={sod?.connected} label="SOD ONLINE" offlineLabel="SOD OFFLINE" />
           <StatusChip connected={broker?.connected} label={`SCHWAB · ${positions} POS`} offlineLabel="SCHWAB OFFLINE" />
           <StatusChip connected={pretrade?.connected} label={`PRE-TRADE · ACTIVE ${active}`} offlineLabel="PRE-TRADE OFFLINE" />
         </div>
       </div>
 
-      <nav className="grid grid-cols-2" aria-label="ExecutionOS workspaces">
+      <nav className="grid grid-cols-3" aria-label="ExecutionOS workspaces">
         {WORKSPACES.map((item) => {
           const selected = workspace === item.id;
-          const Icon = item.id === "PRETRADE" ? Radio : Activity;
+          const Icon = item.id === "SOD" ? Sparkles : item.id === "PRETRADE" ? Radio : Activity;
           return (
             <button
               key={item.id}
