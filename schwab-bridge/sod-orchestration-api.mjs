@@ -82,17 +82,22 @@ function json(res, statusCode, payload, { origin = null, allowedOrigin = null } 
 function readJson(req, maxBytes = MAX_SOD_ORCHESTRATION_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let size = 0;
+    let tooLarge = false;
     const chunks = [];
     req.on("data", (chunk) => {
       size += chunk.length;
       if (size > maxBytes) {
-        reject(apiError("SOD orchestration request body too large", "SOD_ORCHESTRATION_BODY_TOO_LARGE"));
-        req.destroy();
+        tooLarge = true;
+        chunks.length = 0;
         return;
       }
-      chunks.push(chunk);
+      if (!tooLarge) chunks.push(chunk);
     });
     req.on("end", () => {
+      if (tooLarge) {
+        reject(apiError("SOD orchestration request body too large", "SOD_ORCHESTRATION_BODY_TOO_LARGE"));
+        return;
+      }
       try {
         const raw = Buffer.concat(chunks).toString("utf8");
         resolve(raw ? JSON.parse(raw) : {});
