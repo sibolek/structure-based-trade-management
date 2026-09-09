@@ -1,6 +1,7 @@
 import { useState } from "react";
 import BrokerStatusPanel from "./components/BrokerStatusPanel.jsx";
 import PreTradeWorkspace from "./components/PreTradeWorkspace.jsx";
+import SodWorkspace from "./components/SodWorkspace.jsx";
 import V24AuthorizedTradesBoard from "./components/V24AuthorizedTradesBoard.jsx";
 import V24LiveExecutionBoard from "./components/V24LiveExecutionBoard.jsx";
 import V24RouterHealthPanel from "./components/V24RouterHealthPanel.jsx";
@@ -8,12 +9,14 @@ import WorkspaceNav from "./components/WorkspaceNav.jsx";
 import useBrokerState from "./hooks/useBrokerState.js";
 import useExecutionOwnershipPublisher from "./hooks/useExecutionOwnershipPublisher.js";
 import usePretradeState from "./hooks/usePretradeState.js";
+import useSodOrchestration from "./hooks/useSodOrchestration.js";
 import useV24ExecutionRouter from "./hooks/useV24ExecutionRouter.js";
 import ExecutionV23 from "./pages/ExecutionV23.jsx";
 
 export default function App() {
   const broker = useBrokerState();
   const pretrade = usePretradeState();
+  const sod = useSodOrchestration();
   useExecutionOwnershipPublisher({ pretrade });
   const v24Router = useV24ExecutionRouter({ broker, pretrade });
   const [workspace, setWorkspace] = useState("PRETRADE");
@@ -21,8 +24,14 @@ export default function App() {
   return (
     <div className="min-h-screen bg-ink-950 text-zinc-100">
       <div className="mx-auto max-w-7xl space-y-3 px-3 pt-4 md:px-5">
-        <WorkspaceNav workspace={workspace} onChange={setWorkspace} broker={broker} pretrade={pretrade} />
+        <WorkspaceNav workspace={workspace} onChange={setWorkspace} broker={broker} pretrade={pretrade} sod={sod} />
         <BrokerStatusPanel broker={broker} />
+      </div>
+
+      <div className={workspace === "SOD" ? "block" : "hidden"}>
+        <div className="mx-auto max-w-7xl px-3 py-4 md:px-5">
+          <SodWorkspace sod={sod} />
+        </div>
       </div>
 
       <div className={workspace === "PRETRADE" ? "block" : "hidden"}>
