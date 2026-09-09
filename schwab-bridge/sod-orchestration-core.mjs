@@ -7,6 +7,7 @@ import {
   SOD_PUBLICATION_PRETRADE_PREFLIGHT_REQUIRED,
 } from "./sod-publication-intent.mjs";
 
+export const SOD_ORCHESTRATION_NO_CANDIDATES = "NO_CANDIDATES";
 export const SOD_ORCHESTRATION_READY_TO_PUBLISH = "READY_TO_PUBLISH";
 export const SOD_ORCHESTRATION_PRETRADE_PREFLIGHT_REQUIRED = "PRETRADE_PREFLIGHT_REQUIRED";
 
@@ -39,6 +40,14 @@ function priorCandidatesFromSnapshot(snapshot) {
   return snapshot.candidates;
 }
 
+function analysisProjection(invocation) {
+  return {
+    report: invocation.result.report,
+    dashboard: invocation.result.dashboard,
+    generationMetadata: invocation.result.generationMetadata,
+  };
+}
+
 export async function prepareSodOrchestration({
   provider,
   request,
@@ -50,6 +59,20 @@ export async function prepareSodOrchestration({
   const invocation = await invokeSodAnalysisProvider(provider, request);
   const generatedAt = text(clock());
   safeBundleTimestamp(generatedAt);
+
+  if (invocation.result.candidateProposals.length === 0) {
+    return {
+      status: SOD_ORCHESTRATION_NO_CANDIDATES,
+      sourceDate: invocation.request.sourceDate,
+      generationMode: invocation.request.generationMode,
+      generatedAt,
+      analysis: analysisProjection(invocation),
+      bundle: null,
+      lineage: [],
+      publicationIntents: [],
+      requiresPretradePreflight: false,
+    };
+  }
 
   const bundleId = text(bundleIdFactory({
     sourceDate: invocation.request.sourceDate,
@@ -83,11 +106,7 @@ export async function prepareSodOrchestration({
     sourceDate: invocation.request.sourceDate,
     generationMode: invocation.request.generationMode,
     generatedAt,
-    analysis: {
-      report: invocation.result.report,
-      dashboard: invocation.result.dashboard,
-      generationMetadata: invocation.result.generationMetadata,
-    },
+    analysis: analysisProjection(invocation),
     bundle: resolved.bundle,
     lineage: resolved.lineage,
     publicationIntents,
@@ -100,8 +119,17 @@ export async function publishPreparedSodOrchestration({
   inboxPath,
   idFactory,
 } = {}) {
-  if (!prepared || typeof prepared !== "object" || !prepared.bundle) {
+  if (!prepared || typeof prepared !== "object") {
     throw orchestrationError("Prepared SOD orchestration is required", "SOD_ORCHESTRATION_PREPARED_INVALID");
+  }
+  if (prepared.status === SOD_ORCHESTRATION_NO_CANDIDATES) {
+    throw orchestrationError(
+      "SOD orchestration contains no A+ candidates and has nothing to publish",
+      "SOD_ORCHESTRATION_NO_CANDIDATES",
+    );
+  }
+  if (!prepared.bundle) {
+    throw orchestrationError("Prepared SOD orchestration bundle is required", "SOD_ORCHESTRATION_PREPARED_INVALID");
   }
   if (prepared.requiresPretradePreflight === true) {
     throw orchestrationError(
