@@ -58,6 +58,19 @@ function normalizeIngressPolicy(value) {
   throw ingressError(`Unsupported candidate ingress policy: ${policy}`, "INVALID_INGRESS_POLICY");
 }
 
+function resolveIngressPolicy(bundlePolicy, optionPolicy) {
+  const normalizedBundlePolicy = normalizeIngressPolicy(bundlePolicy);
+  const normalizedOptionPolicy = normalizeIngressPolicy(optionPolicy);
+  if (
+    normalizedBundlePolicy
+    && normalizedOptionPolicy
+    && normalizedBundlePolicy !== normalizedOptionPolicy
+  ) {
+    throw ingressError("Candidate ingress policy sources disagree", "INVALID_INGRESS_POLICY");
+  }
+  return normalizedOptionPolicy || normalizedBundlePolicy;
+}
+
 function candidateLifecycleProjection(candidate) {
   return {
     lifecycleState: canonicalLifecycleState(candidate?.lifecycleState),
@@ -122,7 +135,7 @@ export class PreTradeCandidateIngress {
       throw ingressError("store state is unavailable; call store.load() first", "INGRESS_STORE_NOT_LOADED");
     }
 
-    const normalizedIngressPolicy = normalizeIngressPolicy(ingressPolicy);
+    const normalizedIngressPolicy = resolveIngressPolicy(bundle.ingressPolicy, ingressPolicy);
     const stateBeforeMutation = clone(this.store.state);
     const importedAt = this.clock();
     const bundleSource = upper(bundle.source);
