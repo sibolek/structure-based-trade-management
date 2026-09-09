@@ -5,6 +5,7 @@ import {
   normalizeCanonicalCandidateProposal,
   SOD_A_PLUS_TRADES_SOURCE,
 } from "./pretrade-candidate-contract.mjs";
+import { AUTOMATED_UNTOUCHED_ONLY } from "./pretrade-candidate-ingress.mjs";
 
 export const SOD_EXPORT_SCHEMA_VERSION = 1;
 
@@ -116,9 +117,22 @@ function sourceProvenance(candidate) {
   return Object.values(provenance).some((value) => value !== null) ? provenance : null;
 }
 
-function candidateIdFor(candidate, sourceDate, index) {
+function exportError(message, details = null) {
+  const error = new Error(message);
+  error.code = "SOD_CANDIDATE_EXPORT_INVALID";
+  if (details) error.details = details;
+  return error;
+}
+
+function candidateIdFor(candidate, sourceDate, index, { requireExplicitCandidateId = false } = {}) {
   const explicit = text(candidate.candidateId);
   if (explicit) return explicit;
+  if (requireExplicitCandidateId) {
+    throw exportError(
+      `Automated SOD publication requires explicit stable candidateId at index ${index}`,
+      { index },
+    );
+  }
   const setupSlug = slug(candidate.setup) || `candidate-${index + 1}`;
   const symbol = slug(upper(candidate.symbol)) || "symbol";
   const direction = slug(upper(candidate.direction)) || "direction";
@@ -132,13 +146,6 @@ function candidateIdFor(candidate, sourceDate, index) {
       ? `-p${priority}`
       : "";
   return `sod-${sourceDate}-${symbol}-${direction}-${setupSlug}${qualifier}`;
-}
-
-function exportError(message, details = null) {
-  const error = new Error(message);
-  error.code = "SOD_CANDIDATE_EXPORT_INVALID";
-  if (details) error.details = details;
-  return error;
 }
 
 function meaningfulAuthorityValue(value) {
@@ -197,6 +204,7 @@ function buildCandidate(candidate, {
   generatedAt,
   bundleValidity,
   index,
+  requireExplicitCandidateId,
 }) {
   assertNoRuntimeAuthority(candidate, index);
 
@@ -213,7 +221,7 @@ function buildCandidate(candidate, {
     );
   }
 
-  const candidateId = candidateIdFor(candidate, sourceDate, index);
+  const candidateId = candidateIdFor(candidate, sourceDate, index, { requireExplicitCandidateId });
   const validity = hasOwn(candidate, "validity") ? clone(candidate.validity) : clone(bundleValidity);
   const managementContract = resolvedManagementContract(candidate, candidateId);
 
@@ -271,6 +279,7 @@ function buildCandidate(candidate, {
 
 export function buildCanonicalSodCandidateBundle(input, {
   clock = () => new Date().toISOString(),
+  automatedPublication = false,
 } = {}) {
   if (!input || typeof input !== "object") throw exportError("SOD export input must be an object");
   const candidates = Array.isArray(input.candidates) ? input.candidates : [];
@@ -291,6 +300,7 @@ export function buildCanonicalSodCandidateBundle(input, {
     generatedAt,
     bundleValidity,
     index,
+    requireExplicitCandidateId: automatedPublication,
   }));
 
   const ids = normalizedCandidates.map((candidate) => candidate.candidateId);
@@ -305,22 +315,26 @@ export function buildCanonicalSodCandidateBundle(input, {
     sourceDate,
     generatedAt,
     bundleId,
+    ...(automatedPublication ? { ingressPolicy: AUTOMATED_UNTOUCHED_ONLY } : {}),
     candidates: normalizedCandidates,
   };
 }
 
 function cli() {
-  const inputPath = process.argv[2];
-  const outputPath = process.argv[3] || null;
+  const args = process.argv.slice(2);
+  const automatedPublication = args.includes("--automated");
+  const positional = args.filter((arg) => arg !== "--automated");
+  const inputPath = positional[0];
+  const outputPath = positional[1] || null;
   if (!inputPath) {
-    console.error("Usage: npm run v24:sod-export -- <input.json> [output.json]");
+    console.error("Usage: npm run v24:sod-export -- [--automated] <input.json> [output.json]");
     process.exitCode = 2;
     return;
   }
 
   try {
     const raw = JSON.parse(fs.readFileSync(path.resolve(inputPath), "utf8"));
-    const bundle = buildCanonicalSodCandidateBundle(raw);
+    const bundle = buildCanonicalSodCandidateBundle(raw, { automatedPublication });
     const serialized = `${JSON.stringify(bundle, null, 2)}\n`;
     if (outputPath) {
       fs.writeFileSync(path.resolve(outputPath), serialized);
