@@ -40,6 +40,14 @@ function feederError(message, code, { retryable = false, details = null } = {}) 
   return error;
 }
 
+function retryableFinalizationError(error) {
+  return feederError(
+    `Candidate feeder could not finalize receipt/archive state: ${error.message}`,
+    "CANDIDATE_FEEDER_FINALIZATION_ERROR",
+    { retryable: true, details: { causeCode: error.code || null } },
+  );
+}
+
 function statFingerprint(stat) {
   return `${stat.size}:${stat.mtimeMs}`;
 }
@@ -80,15 +88,16 @@ async function requestBytes(url, {
       const chunks = [];
       let size = 0;
       res.on("data", (chunk) => {
+        if (settled) return;
         size += chunk.length;
         if (size > MAX_RESPONSE_BYTES) {
-          const error = feederError(
+          settled = true;
+          reject(feederError(
             "PRETRADE response exceeded feeder response limit",
             "PRETRADE_RESPONSE_TOO_LARGE",
             { retryable: true },
-          );
-          settled = true;
-          req.destroy(error);
+          ));
+          req.destroy();
           return;
         }
         chunks.push(chunk);
@@ -107,15 +116,16 @@ async function requestBytes(url, {
     req.setTimeout(timeoutMs, () => {
       if (settled) return;
       settled = true;
-      req.destroy(feederError(
+      reject(feederError(
         `PRETRADE request timed out after ${timeoutMs}ms`,
         "PRETRADE_TIMEOUT",
         { retryable: true },
       ));
+      req.destroy();
     });
 
     req.on("error", (error) => {
-      if (settled && error?.code !== "PRETRADE_TIMEOUT") return;
+      if (settled) return;
       settled = true;
       if (error?.retryable) {
         reject(error);
@@ -504,9 +514,18 @@ async function terminalLocalFailure({
       details: error.details || null,
     },
   };
-  const receiptPath = await writeReceipt(directories, receipt);
-  const movedTo = await moveImmutableFile(filePath, directories.quarantine, hash);
-  return { status: "QUARANTINED", receiptPath, movedTo, receipt };
+
+  try {
+    const receiptPath = await writeReceipt(directories, receipt);
+    const movedTo = await moveImmutableFile(filePath, directories.quarantine, hash);
+    return { status: "QUARANTINED", receiptPath, movedTo, receipt };
+  } catch (finalizationError) {
+    return {
+      status: "PENDING_RETRY",
+      error: retryableFinalizationError(finalizationError),
+      receipt,
+    };
+  }
 }
 
 export async function processCandidatePublication(filePath, {
@@ -570,17 +589,25 @@ export async function processCandidatePublication(filePath, {
     receipt.candidates = reconciled.perCandidate;
     receipt.validityReconciliation = importResult.validityReconciliation ?? null;
 
-    const receiptPath = await writeReceipt(directories, receipt);
-    const targetDirectory = reconciled.disposition === "ARCHIVE"
-      ? directories.archive
-      : directories.quarantine;
-    const movedTo = await moveImmutableFile(filePath, targetDirectory, hash);
-    return {
-      status: reconciled.disposition === "ARCHIVE" ? "ARCHIVED" : "QUARANTINED",
-      receiptPath,
-      movedTo,
-      receipt,
-    };
+    try {
+      const receiptPath = await writeReceipt(directories, receipt);
+      const targetDirectory = reconciled.disposition === "ARCHIVE"
+        ? directories.archive
+        : directories.quarantine;
+      const movedTo = await moveImmutableFile(filePath, targetDirectory, hash);
+      return {
+        status: reconciled.disposition === "ARCHIVE" ? "ARCHIVED" : "QUARANTINED",
+        receiptPath,
+        movedTo,
+        receipt,
+      };
+    } catch (finalizationError) {
+      return {
+        status: "PENDING_RETRY",
+        error: retryableFinalizationError(finalizationError),
+        receipt,
+      };
+    }
   } catch (error) {
     if (error.retryable) return { status: "PENDING_RETRY", error, receipt };
     return terminalLocalFailure({
@@ -607,28 +634,46 @@ async function pidIsAlive(pid) {
 
 export async function acquireSingleInstanceLock(lockFile) {
   await fs.mkdir(path.dirname(lockFile), { recursive: true });
-  const record = { pid: process.pid, acquiredAt: nowIso() };
+  const record = { pid: process.pid, lockId: crypto.randomUUID(), acquiredAt: nowIso() };
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const handle = await fs.open(lockFile, "wx", 0o600);
-      await handle.writeFile(`${JSON.stringify(record)}\n`);
+      try {
+        await handle.writeFile(`${JSON.stringify(record)}\n`);
+      } catch (error) {
+        await handle.close().catch(() => {});
+        await fs.unlink(lockFile).catch(() => {});
+        throw error;
+      }
       await handle.close();
+
       let released = false;
       return async () => {
         if (released) return;
         released = true;
-        try { await fs.unlink(lockFile); } catch (error) { if (error.code !== "ENOENT") throw error; }
+        try {
+          const current = JSON.parse(await fs.readFile(lockFile, "utf8"));
+          if (current.lockId !== record.lockId) return;
+          await fs.unlink(lockFile);
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
       };
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      let stale = true;
+
+      let existing;
       try {
-        const existing = JSON.parse(await fs.readFile(lockFile, "utf8"));
-        stale = !(await pidIsAlive(Number(existing.pid)));
+        existing = JSON.parse(await fs.readFile(lockFile, "utf8"));
       } catch {
-        stale = true;
+        throw feederError(
+          `Candidate feeder lock exists but its owner cannot be verified: ${lockFile}`,
+          "CANDIDATE_FEEDER_LOCK_UNVERIFIABLE",
+        );
       }
+
+      const stale = !(await pidIsAlive(Number(existing.pid)));
       if (!stale) {
         throw feederError(
           `Candidate feeder is already running; lock held at ${lockFile}`,
