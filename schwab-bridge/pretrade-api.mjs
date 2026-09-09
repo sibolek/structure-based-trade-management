@@ -1,7 +1,10 @@
 import http from "node:http";
 import { isAllowedLocalOrigin } from "./local-origin.mjs";
 import { PreTradeStore, DEFAULT_PRETRADE_STATE_FILE } from "./pretrade-state.mjs";
-import { PreTradeCandidateIngress } from "./pretrade-candidate-ingress.mjs";
+import {
+  AUTOMATED_UNTOUCHED_ONLY,
+  PreTradeCandidateIngress,
+} from "./pretrade-candidate-ingress.mjs";
 import { PreTradeLifecycleCoordinator } from "./pretrade-lifecycle-coordinator.mjs";
 import { createPreTradeLifecycleApiHandler } from "./pretrade-lifecycle-api.mjs";
 import { PreTradeTriggerEngine } from "./pretrade-trigger-engine.mjs";
@@ -337,6 +340,7 @@ const server = http.createServer(async (req, res) => {
       candidateIngressAuthority: true,
       candidateContractVersioning: true,
       candidateValidityAuthority: true,
+      candidateAutomatedIngressPolicy: AUTOMATED_UNTOUCHED_ONLY,
       triggerContractAuthority: true,
       triggerEngineAuthority: true,
       triggerEvidenceApi: true,
@@ -438,6 +442,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] Handoff file: ${HANDOFF_FILE}`);
   console.log(`[ExecutionOS V2.4] Handoff delivery file: ${HANDOFF_DELIVERY_FILE}`);
   console.log("[ExecutionOS V2.4] Candidate import is routed through authoritative ingress with immutable contract/version provenance.");
+  console.log(`[ExecutionOS V2.4] Automated candidate ingress policy available: ${AUTOMATED_UNTOUCHED_ONLY}.`);
   console.log("[ExecutionOS V2.4] Exact candidate validity is reconciled before PRETRADE candidate operations.");
   console.log("[ExecutionOS V2.4] Trigger contracts are versioned and evaluated by the authoritative durable trigger engine.");
   console.log("[ExecutionOS V2.4] Trigger persistence is monitored separately from pre-satisfaction trigger progress.");
