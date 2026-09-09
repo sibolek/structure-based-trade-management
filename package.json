@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "v24:pretrade": "node schwab-bridge/pretrade-api.mjs",
+    "v24:candidate-feed": "node schwab-bridge/candidate-feeder.mjs",
+    "v24:candidate-feed-test": "node --test tests/candidate-feeder.test.mjs tests/pretrade-candidate-ingress-automated-policy.test.mjs tests/pretrade-candidate-ingress-policy-envelope.test.mjs tests/pretrade-candidate-ingress.test.mjs",
     "v24:sod-export": "node schwab-bridge/sod-candidate-export.mjs",
     "v24:sod-export-test": "node --test tests/sod-candidate-export.test.mjs",
     "v24:execution-ownership-test": "node --test tests/pretrade-execution-ownership-provider.test.mjs tests/pretrade-execution-ownership-authority.test.mjs tests/pretrade-execution-ownership-api.test.mjs tests/pretrade-execution-ownership-ui.test.mjs tests/pretrade-oco.test.mjs",
