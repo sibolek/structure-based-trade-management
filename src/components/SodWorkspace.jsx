@@ -122,9 +122,9 @@ function TrustedChartSet({ sod }) {
   const maxBytes = sod?.health?.chartMaxBytes;
 
   async function upload(event) {
-    const files = event.target.files;
+    const files = Array.from(event.target.files || []);
     event.target.value = "";
-    if (!files?.length) return;
+    if (!files.length) return;
     await sod.uploadFiles(files).catch(() => {});
   }
 
