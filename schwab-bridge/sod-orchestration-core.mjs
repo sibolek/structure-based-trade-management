@@ -1,4 +1,5 @@
 import { invokeSodAnalysisProvider } from "./sod-analysis-provider.mjs";
+import { renderSodArtifacts } from "./sod-artifact-renderer.mjs";
 import { buildCanonicalSodCandidateBundle } from "./sod-candidate-export.mjs";
 import { resolveSodCandidateBundleLineage } from "./sod-candidate-lineage.mjs";
 import { publishCandidateBundleAtomically } from "./sod-candidate-publisher.mjs";
@@ -40,10 +41,17 @@ function priorCandidatesFromSnapshot(snapshot) {
   return snapshot.candidates;
 }
 
-function analysisProjection(invocation) {
+function analysisProjection(invocation, candidateContracts) {
+  const rendered = invocation.result.artifactContent
+    ? renderSodArtifacts({
+        content: invocation.result.artifactContent,
+        candidateProposals: candidateContracts,
+      })
+    : null;
   return {
-    report: invocation.result.report,
-    dashboard: invocation.result.dashboard,
+    report: rendered?.report || null,
+    dashboard: rendered?.dashboard || null,
+    rendererVersion: rendered?.rendererVersion || null,
     generationMetadata: invocation.result.generationMetadata,
   };
 }
@@ -67,7 +75,7 @@ export async function prepareSodOrchestration({
       sourceDate: invocation.request.sourceDate,
       generationMode: invocation.request.generationMode,
       generatedAt,
-      analysis: analysisProjection(invocation),
+      analysis: analysisProjection(invocation, []),
       bundle: null,
       lineage: [],
       publicationIntents: [],
@@ -107,7 +115,7 @@ export async function prepareSodOrchestration({
     sourceDate: invocation.request.sourceDate,
     generationMode: invocation.request.generationMode,
     generatedAt,
-    analysis: analysisProjection(invocation),
+    analysis: analysisProjection(invocation, resolved.bundle.candidates),
     bundle: resolved.bundle,
     lineage: resolved.lineage,
     publicationIntents,
