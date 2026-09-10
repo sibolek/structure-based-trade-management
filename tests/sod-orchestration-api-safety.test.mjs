@@ -9,12 +9,14 @@ import {
   candidateContractHash,
 } from "../schwab-bridge/pretrade-candidate-contract.mjs";
 import { buildCanonicalSodCandidateBundle } from "../schwab-bridge/sod-candidate-export.mjs";
+import { createSodChartStore } from "../schwab-bridge/sod-chart-store.mjs";
 import {
   createSodOrchestrationApiServer,
   MAX_SOD_ORCHESTRATION_BODY_BYTES,
 } from "../schwab-bridge/sod-orchestration-api.mjs";
 
 const ORIGIN = "http://127.0.0.1:5173";
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
 
 function proposal(overrides = {}) {
   return {
@@ -58,11 +60,11 @@ function proposal(overrides = {}) {
   };
 }
 
-function request() {
+function request(chart) {
   return {
     sourceDate: "2026-09-09",
     generationMode: "REFRESH",
-    charts: [{ chartId: "nvda-5m", contentRef: "chart-upload:nvda-5m" }],
+    charts: [{ chartId: chart.chartId, contentRef: chart.contentRef }],
   };
 }
 
@@ -110,9 +112,12 @@ function pretradeFetch(snapshot) {
 }
 
 async function start({ inbox, provider, snapshot = { candidates: [] } }) {
+  const chartRoot = await fs.mkdtemp(path.join(os.tmpdir(), "executionos-sod-api-safety-charts-"));
+  const chartStore = createSodChartStore({ rootPath: chartRoot });
   const api = createSodOrchestrationApiServer({
     provider,
     inboxPath: inbox,
+    chartStore,
     allowedOrigin: ORIGIN,
     fetchImpl: pretradeFetch(snapshot),
     clock: () => "2026-09-09T16:00:00.000Z",
@@ -122,8 +127,10 @@ async function start({ inbox, provider, snapshot = { candidates: [] } }) {
   const { port } = api.server.address();
   return {
     baseUrl: `http://127.0.0.1:${port}`,
+    chartStore,
     async close() {
       await new Promise((resolve) => api.server.close(resolve));
+      await fs.rm(chartRoot, { recursive: true, force: true });
     },
   };
 }
@@ -140,6 +147,7 @@ test("revised SOD remains unpublished at HTTP boundary pending authoritative PRE
     },
   });
   try {
+    const chart = await api.chartStore.ingest({ bytes: PNG_BYTES, mediaType: "image/png", displayName: "NVDA.png" });
     const response = await fetch(`${api.baseUrl}/api/sod/generate`, {
       method: "POST",
       headers: {
@@ -147,7 +155,7 @@ test("revised SOD remains unpublished at HTTP boundary pending authoritative PRE
         "content-type": "application/json",
         "x-executionos-sod-session": "safety-session",
       },
-      body: JSON.stringify(request()),
+      body: JSON.stringify(request(chart)),
     });
     const payload = await response.json();
     assert.equal(response.status, 200);
