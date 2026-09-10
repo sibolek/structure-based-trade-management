@@ -1,8 +1,9 @@
 # ExecutionOS V2.4 SOD Artifact Rendering Baseline v1.0
 
-**Status:** IMPLEMENTATION BASELINE  
+**Status:** ACCEPTED / FROZEN  
 **Date:** September 9, 2026  
-**Branch:** `v24-sod-orchestration-lineage`
+**Branch:** `v24-sod-orchestration-lineage`  
+**Accepted implementation checkpoint:** `4144c5c59494ae318bb736d64fba751a22046512`
 
 ## 1. Purpose
 
@@ -191,3 +192,38 @@ The rendering slice is accepted only if tests prove:
 6. canonical light-dashboard geometry is present;
 7. orchestration renders from canonical candidates after export/lineage;
 8. existing feeder/PRETRADE/execution authority tests remain green.
+
+## 11. Acceptance evidence
+
+Accepted on September 9, 2026 at implementation checkpoint:
+
+```text
+4144c5c59494ae318bb736d64fba751a22046512
+```
+
+Validation evidence:
+
+```text
+Focused SOD / rendering / orchestrator suite:      58 / 58 PASS
+SOD + renderer + feeder + PRETRADE regression:    111 / 111 PASS
+Canonical PRETRADE → ARM → Execution E2E:           1 / 1 PASS
+Production Vite build:                              PASS
+Worktree status:                                    CLEAN
+Broker-write authority introduced:                  NONE
+```
+
+The accepted checkpoint freezes the deterministic artifact-rendering boundary through:
+
+```text
+trusted charts
+→ structured SOD analysis contract
+→ deterministic canonical Markdown / HTML / dashboard rendering
+→ candidate lineage
+→ immutable publication
+→ Candidate Feeder
+→ PRETRADE
+```
+
+The production analysis-provider adapter is intentionally **not** part of this frozen checkpoint. It remains the next isolated implementation phase.
+
+The existing manual ChatGPT Start of Day workflow is also outside this implementation boundary and remains unchanged.
