@@ -43,7 +43,7 @@ test("valid SOD with zero A+ candidates renders report and performs no candidate
   assert.deepEqual(prepared.publicationIntents, []);
   assert.equal(prepared.requiresPretradePreflight, false);
   assert.equal(prepared.analysis.rendererVersion, 1);
-  assert.equal(prepared.analysis.report.markdown.includes("No A+ candidates"), true);
+  assert.equal(prepared.analysis.report.markdown.includes("No A\\+ candidates"), true);
   assert.equal(prepared.analysis.dashboard.html.includes("No A+ long candidates"), true);
 
   await assert.rejects(
