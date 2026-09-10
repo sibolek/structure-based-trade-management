@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { assertSodAnalysisProvider } from "./sod-analysis-provider.mjs";
+import { createSodChartStore } from "./sod-chart-store.mjs";
 import {
   prepareSodOrchestration,
   publishPreparedSodOrchestration,
@@ -20,6 +21,7 @@ export const SOD_ORCHESTRATION_SERVICE = "executionos-v24-sod-orchestrator";
 export const DEFAULT_SOD_ORCHESTRATION_HOST = "127.0.0.1";
 export const DEFAULT_SOD_ORCHESTRATION_PORT = 8790;
 export const MAX_SOD_ORCHESTRATION_BODY_BYTES = 1024 * 1024;
+export const SOD_CHART_INGESTION_CAPABILITY = "IMMUTABLE_OPAQUE_REF";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -79,7 +81,7 @@ function json(res, statusCode, payload, { origin = null, allowedOrigin = null } 
   res.end(body);
 }
 
-function readJson(req, maxBytes = MAX_SOD_ORCHESTRATION_BODY_BYTES) {
+function readBody(req, maxBytes, tooLargeCode) {
   return new Promise((resolve, reject) => {
     let size = 0;
     let tooLarge = false;
@@ -95,24 +97,40 @@ function readJson(req, maxBytes = MAX_SOD_ORCHESTRATION_BODY_BYTES) {
     });
     req.on("end", () => {
       if (tooLarge) {
-        reject(apiError("SOD orchestration request body too large", "SOD_ORCHESTRATION_BODY_TOO_LARGE"));
+        reject(apiError("SOD orchestration request body too large", tooLargeCode));
         return;
       }
-      try {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        reject(apiError("SOD orchestration request contains invalid JSON", "SOD_ORCHESTRATION_INVALID_JSON"));
-      }
+      resolve(Buffer.concat(chunks));
     });
     req.on("error", reject);
   });
 }
 
-function safeErrorMessage(error, inboxPath) {
+async function readJson(req, maxBytes = MAX_SOD_ORCHESTRATION_BODY_BYTES) {
+  const bytes = await readBody(req, maxBytes, "SOD_ORCHESTRATION_BODY_TOO_LARGE");
+  try {
+    const raw = bytes.toString("utf8");
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    throw apiError("SOD orchestration request contains invalid JSON", "SOD_ORCHESTRATION_INVALID_JSON");
+  }
+}
+
+function decodeDisplayName(value) {
+  const raw = text(value);
+  if (!raw) return "chart";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function safeErrorMessage(error, redactedPaths = []) {
   let message = text(error?.message) || "SOD orchestration request failed";
-  const inbox = text(inboxPath);
-  if (inbox) message = message.split(path.resolve(inbox)).join("[candidate-inbox]");
+  for (const configuredPath of redactedPaths.map(text).filter(Boolean)) {
+    message = message.split(path.resolve(configuredPath)).join("[local-path]");
+  }
   return message;
 }
 
@@ -140,9 +158,15 @@ function publicationResponse(publication) {
   };
 }
 
+function authorized(origin, exactAllowedOrigin, sessionToken, req) {
+  return origin === exactAllowedOrigin
+    && tokenMatches(sessionToken, req.headers["x-executionos-sod-session"]);
+}
+
 export function createSodOrchestrationApiServer({
   provider,
   inboxPath,
+  chartStore,
   allowedOrigin,
   pretradeUrl = DEFAULT_SOD_PRETRADE_URL,
   fetchImpl = globalThis.fetch,
@@ -153,6 +177,9 @@ export function createSodOrchestrationApiServer({
   const trustedProvider = assertSodAnalysisProvider(provider);
   const configuredInbox = text(inboxPath);
   if (!configuredInbox) throw apiError("SOD candidate inbox must be configured", "SOD_ORCHESTRATION_INBOX_REQUIRED");
+  if (!chartStore || typeof chartStore.ingest !== "function" || typeof chartStore.resolve !== "function") {
+    throw apiError("SOD chart store is required", "SOD_ORCHESTRATION_CHART_STORE_REQUIRED");
+  }
   const exactAllowedOrigin = validateLoopbackOrigin(allowedOrigin);
   if (!text(sessionToken)) throw apiError("SOD orchestration session token is required", "SOD_ORCHESTRATION_SESSION_INVALID");
 
@@ -169,7 +196,7 @@ export function createSodOrchestrationApiServer({
       res.writeHead(204, {
         "access-control-allow-origin": exactAllowedOrigin,
         "access-control-allow-methods": "GET,POST,OPTIONS",
-        "access-control-allow-headers": "content-type,x-executionos-sod-session",
+        "access-control-allow-headers": "content-type,x-executionos-sod-session,x-executionos-chart-name",
         "access-control-max-age": "600",
         vary: "Origin",
       });
@@ -184,6 +211,8 @@ export function createSodOrchestrationApiServer({
         providerConfigured: true,
         pretradeAccess: "READ_ONLY_HTTP",
         candidatePublication: "ATOMIC_INBOX_ONLY",
+        chartIngestion: SOD_CHART_INGESTION_CAPABILITY,
+        chartMaxBytes: chartStore.maxBytes,
         lifecycleAuthority: false,
         armAuthority: false,
         executionAuthority: false,
@@ -204,12 +233,43 @@ export function createSodOrchestrationApiServer({
       return;
     }
 
+    if (req.method === "POST" && pathname === "/api/sod/charts") {
+      if (origin !== exactAllowedOrigin) {
+        json(res, 403, { error: "SOD_ORCHESTRATION_ORIGIN_FORBIDDEN" });
+        return;
+      }
+      if (!authorized(origin, exactAllowedOrigin, sessionToken, req)) {
+        json(res, 403, { error: "SOD_ORCHESTRATION_SESSION_FORBIDDEN" }, {
+          origin,
+          allowedOrigin: exactAllowedOrigin,
+        });
+        return;
+      }
+
+      try {
+        const bytes = await readBody(req, chartStore.maxBytes, "SOD_CHART_TOO_LARGE");
+        const chart = await chartStore.ingest({
+          bytes,
+          mediaType: req.headers["content-type"],
+          displayName: decodeDisplayName(req.headers["x-executionos-chart-name"]),
+        });
+        json(res, 201, { chart }, { origin, allowedOrigin: exactAllowedOrigin });
+      } catch (error) {
+        json(res, error?.code === "SOD_CHART_TOO_LARGE" ? 413 : 400, {
+          error: error?.code || "SOD_CHART_INGEST_FAILED",
+          message: safeErrorMessage(error, [configuredInbox, chartStore.rootPath]),
+          brokerWriteAuthority: false,
+        }, { origin, allowedOrigin: exactAllowedOrigin });
+      }
+      return;
+    }
+
     if (req.method === "POST" && pathname === "/api/sod/generate") {
       if (origin !== exactAllowedOrigin) {
         json(res, 403, { error: "SOD_ORCHESTRATION_ORIGIN_FORBIDDEN" });
         return;
       }
-      if (!tokenMatches(sessionToken, req.headers["x-executionos-sod-session"])) {
+      if (!authorized(origin, exactAllowedOrigin, sessionToken, req)) {
         json(res, 403, { error: "SOD_ORCHESTRATION_SESSION_FORBIDDEN" }, {
           origin,
           allowedOrigin: exactAllowedOrigin,
@@ -224,6 +284,7 @@ export function createSodOrchestrationApiServer({
           provider: trustedProvider,
           request,
           pretradeSnapshot: snapshot,
+          resolveChart: chartStore.resolve,
           clock,
         });
 
@@ -252,7 +313,7 @@ export function createSodOrchestrationApiServer({
       } catch (error) {
         json(res, error?.code === "SOD_ORCHESTRATION_BODY_TOO_LARGE" ? 413 : 400, {
           error: error?.code || "SOD_ORCHESTRATION_API_ERROR",
-          message: safeErrorMessage(error, configuredInbox),
+          message: safeErrorMessage(error, [configuredInbox, chartStore.rootPath]),
           brokerWriteAuthority: false,
         }, { origin, allowedOrigin: exactAllowedOrigin });
       }
@@ -287,9 +348,11 @@ async function main() {
   }
 
   const provider = await loadSodAnalysisProviderModule(process.env.EXECUTIONOS_SOD_PROVIDER_MODULE);
+  const chartStore = createSodChartStore({ rootPath: process.env.EXECUTIONOS_SOD_CHART_STORE });
   const api = createSodOrchestrationApiServer({
     provider,
     inboxPath: process.env.EXECUTIONOS_CANDIDATE_INBOX,
+    chartStore,
     allowedOrigin: process.env.EXECUTIONOS_SOD_ALLOWED_ORIGIN,
     pretradeUrl: process.env.EXECUTIONOS_PRETRADE_URL || DEFAULT_SOD_PRETRADE_URL,
   });
