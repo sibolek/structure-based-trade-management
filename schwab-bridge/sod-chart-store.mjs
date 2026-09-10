@@ -107,6 +107,11 @@ async function writeExclusive(pathname, bytes) {
   }
 }
 
+async function publishExclusive(tempPath, finalPath) {
+  await fs.link(tempPath, finalPath);
+  await fs.unlink(tempPath).catch(() => {});
+}
+
 function publicDescriptor(metadata) {
   return {
     schemaVersion: metadata.schemaVersion,
@@ -160,18 +165,24 @@ export function createSodChartStore({
       ingestedAt,
     };
     const target = pathsFor(root, id);
+    let dataPublished = false;
+    let metadataPublished = false;
 
     try {
       await writeExclusive(target.tempData, bytes);
-      await fs.rename(target.tempData, target.data);
+      await publishExclusive(target.tempData, target.data);
+      dataPublished = true;
+
       const metadataBytes = Buffer.from(`${JSON.stringify(metadata, null, 2)}\n`, "utf8");
       await writeExclusive(target.tempMetadata, metadataBytes);
-      // Metadata rename is the publication boundary. A data orphan from a crash is never resolvable without metadata.
-      await fs.rename(target.tempMetadata, target.metadata);
+      // Exclusive metadata publication is the visibility boundary. Hard-link publication fails on collision.
+      await publishExclusive(target.tempMetadata, target.metadata);
+      metadataPublished = true;
       return publicDescriptor(metadata);
     } catch (error) {
       await fs.unlink(target.tempData).catch(() => {});
       await fs.unlink(target.tempMetadata).catch(() => {});
+      if (dataPublished && !metadataPublished) await fs.unlink(target.data).catch(() => {});
       if (error?.code?.startsWith?.("SOD_CHART_")) throw error;
       if (error?.code === "EEXIST") {
         throw chartError("SOD chart id collision", "SOD_CHART_ID_COLLISION");
