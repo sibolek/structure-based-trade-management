@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { createSodChartStore } from "../schwab-bridge/sod-chart-store.mjs";
 import { createSodOrchestrationApiServer } from "../schwab-bridge/sod-orchestration-api.mjs";
+import { sodArtifactContentFixture } from "./helpers/sod-artifact-content-fixture.mjs";
 
 const ALLOWED_ORIGIN = "http://127.0.0.1:5173";
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
@@ -184,7 +185,7 @@ test("SOD API requires exact browser origin and session before generation", asyn
   }
 });
 
-test("SOD API ingests chart bytes, resolves only opaque refs, reads PRETRADE, and publishes without leaking paths", async () => {
+test("SOD API ingests chart bytes, resolves opaque refs, renders deterministically, reads PRETRADE, and publishes without leaking paths", async () => {
   const inbox = await fs.mkdtemp(path.join(os.tmpdir(), "executionos-sod-api-publish-"));
   const pretrade = pretradeFetch();
   let providerResolvedChart = null;
@@ -193,8 +194,7 @@ test("SOD API ingests chart bytes, resolves only opaque refs, reads PRETRADE, an
       providerResolvedChart = await context.resolveChart(request.charts[0].contentRef);
       return {
         candidateProposals: [proposal()],
-        report: { markdown: "# SOD" },
-        dashboard: { html: "<html>SOD</html>" },
+        artifactContent: sodArtifactContentFixture(),
       };
     },
   };
@@ -224,6 +224,10 @@ test("SOD API ingests chart bytes, resolves only opaque refs, reads PRETRADE, an
     assert.equal("finalPath" in generated.payload.publication, false);
     assert.equal(JSON.stringify(generated.payload).includes(inbox), false);
     assert.equal(generated.payload.brokerWriteAuthority, false);
+    assert.equal(generated.payload.analysis.rendererVersion, 1);
+    assert.match(generated.payload.analysis.report.html, /NVDA/);
+    assert.match(generated.payload.analysis.report.markdown, /Confirm VWAP reclaim and hold/);
+    assert.match(generated.payload.analysis.dashboard.html, /Long Candidates/);
     assert.deepEqual(pretrade.calls.map((item) => item.method), ["GET", "GET"]);
     assert.equal(Buffer.compare(providerResolvedChart.bytes, PNG_BYTES), 0);
     assert.equal("path" in providerResolvedChart, false);
@@ -275,14 +279,14 @@ test("SOD API rejects fabricated chart refs before any PRETRADE read", async () 
   }
 });
 
-test("SOD API returns valid no-candidate analysis without creating a feeder publication", async () => {
+test("SOD API returns valid rendered no-candidate analysis without creating a feeder publication", async () => {
   const inbox = await fs.mkdtemp(path.join(os.tmpdir(), "executionos-sod-api-empty-"));
   const pretrade = pretradeFetch();
   const provider = {
     async generate() {
       return {
         candidateProposals: [],
-        report: { markdown: "# SOD\n\nNo A+ candidates." },
+        artifactContent: sodArtifactContentFixture({ sectionText: "No A+ candidates." }),
       };
     },
   };
@@ -301,6 +305,7 @@ test("SOD API returns valid no-candidate analysis without creating a feeder publ
     assert.equal(generated.response.status, 200);
     assert.equal(generated.payload.status, "NO_CANDIDATES");
     assert.equal(generated.payload.publication, null);
+    assert.equal(generated.payload.analysis.report.markdown.includes("No A+ candidates"), true);
     assert.deepEqual(await fs.readdir(inbox), []);
   } finally {
     await api.close();
