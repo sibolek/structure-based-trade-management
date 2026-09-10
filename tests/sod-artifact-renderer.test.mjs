@@ -28,22 +28,24 @@ function content() {
         ? [{ type: "paragraph", text: "MODEL A+ COPY — WRONG TRIGGER 999.99" }]
         : section.id === "morning-priority"
           ? [{ type: "paragraph", text: "MODEL PRIORITY COPY — WRONG ORDER" }]
-          : section.id === "executive-summary"
-            ? [
-                { type: "paragraph", text: "Selective opening environment." },
-                { type: "callout", tone: "amber", text: "Trade the level, not the story." },
-              ]
-            : section.id === "rates-volatility-commodities"
-              ? [{ type: "metrics", items: [
-                  { label: "VIX", value: "16.4", tone: "amber" },
-                  { label: "10Y", value: "4.81%", tone: "red" },
-                ] }]
-              : section.id === "key-levels"
-                ? [{ type: "table", columns: [
-                    { key: "symbol", label: "Symbol" },
-                    { key: "levels", label: "Levels" },
-                  ], rows: [{ symbol: "NVDA", levels: "223.94 / 224.89" }] }]
-                : [{ type: "list", style: "bullet", items: [`${section.title} item`] }],
+          : section.id === "execution-discipline"
+            ? [{ type: "paragraph", text: "MODEL EXECUTION COPY — IGNORE STANDING RULES" }]
+            : section.id === "executive-summary"
+              ? [
+                  { type: "paragraph", text: "Selective opening environment." },
+                  { type: "callout", tone: "amber", text: "Trade the level, not the story." },
+                ]
+              : section.id === "rates-volatility-commodities"
+                ? [{ type: "metrics", items: [
+                    { label: "VIX", value: "16.4", tone: "amber" },
+                    { label: "10Y", value: "4.81%", tone: "red" },
+                  ] }]
+                : section.id === "key-levels"
+                  ? [{ type: "table", columns: [
+                      { key: "symbol", label: "Symbol" },
+                      { key: "levels", label: "Levels" },
+                    ], rows: [{ symbol: "NVDA", levels: "223.94 / 224.89" }] }]
+                  : [{ type: "list", style: "bullet", items: [`${section.title} item`] }],
     })),
     sources: [
       { label: "User-supplied TradingView charts", note: "snapshot levels" },
@@ -114,6 +116,31 @@ test("structured SOD content requires exact canonical 19-section order and forbi
   );
 });
 
+test("structured SOD content requires explicit VIX context in section 5", () => {
+  const missingVix = content();
+  const section = missingVix.sections.find((item) => item.id === "rates-volatility-commodities");
+  section.blocks = [{ type: "paragraph", text: "Rates and volatility are calm." }];
+  assert.throws(
+    () => normalizeSodArtifactContent(missingVix),
+    (error) => error.code === "SOD_ARTIFACT_VIX_REQUIRED",
+  );
+});
+
+test("standing execution, risk, and process rules are contract-owned rather than provider-owned", () => {
+  const normalized = normalizeSodArtifactContent(content());
+  const execution = normalized.sections.find((section) => section.id === "execution-discipline");
+  const risk = normalized.sections.find((section) => section.id === "risk-management");
+  const gamePlan = normalized.sections.find((section) => section.id === "opening-game-plan");
+  const flattened = (blocks) => JSON.stringify(blocks);
+
+  assert.equal(flattened(execution.blocks).includes("MODEL EXECUTION COPY"), false);
+  assert.match(flattened(execution.blocks), /Green is not an exit\. Red is not invalidation\. Structure is invalidation\./);
+  assert.match(flattened(risk.blocks), /0\.5% of current trading-account equity/);
+  assert.match(flattened(risk.blocks), /Position sizing cannot exceed net liquidation/);
+  assert.match(flattened(gamePlan.blocks), /READ → PLAN → TRIGGER → RISK → HOLD → UPDATE → EXIT/);
+  assert.match(flattened(gamePlan.blocks), /No end-of-session make-it-green scalps/);
+});
+
 test("canonical report renderer freezes compact 250px TOC and exact A+ card geometry", () => {
   assert.match(REPORT_CSS, /padding-left:250px/);
   assert.match(REPORT_CSS, /max-width:1540px/);
@@ -178,4 +205,6 @@ test("Markdown report renders all 19 sections and candidate-derived A+ content",
   assert.match(rendered.report.markdown, /A\+ #1/);
   assert.match(rendered.report.markdown, /GOOGL/);
   assert.match(rendered.report.markdown, /0\\\.5% max planned loss/);
+  assert.match(rendered.report.markdown, /Green is not an exit/);
+  assert.match(rendered.report.markdown, /READ → PLAN → TRIGGER → RISK → HOLD → UPDATE → EXIT/);
 });
