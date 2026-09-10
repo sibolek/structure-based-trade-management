@@ -6,6 +6,7 @@ import {
   publishPreparedSodOrchestration,
   SOD_ORCHESTRATION_NO_CANDIDATES,
 } from "../schwab-bridge/sod-orchestration-core.mjs";
+import { sodArtifactContentFixture } from "./helpers/sod-artifact-content-fixture.mjs";
 
 const request = {
   sourceDate: "2026-09-09",
@@ -22,14 +23,13 @@ const provider = {
   async generate() {
     return {
       candidateProposals: [],
-      report: { markdown: "# SOD\n\nNo A+ candidates." },
-      dashboard: { html: "<html><body>No A+ candidates.</body></html>" },
+      artifactContent: sodArtifactContentFixture({ sectionText: "No A+ candidates." }),
       generationMetadata: { provider: "test-double" },
     };
   },
 };
 
-test("valid SOD with zero A+ candidates returns analysis and performs no candidate publication", async () => {
+test("valid SOD with zero A+ candidates renders report and performs no candidate publication", async () => {
   const prepared = await prepareSodOrchestration({
     provider,
     request,
@@ -42,7 +42,9 @@ test("valid SOD with zero A+ candidates returns analysis and performs no candida
   assert.deepEqual(prepared.lineage, []);
   assert.deepEqual(prepared.publicationIntents, []);
   assert.equal(prepared.requiresPretradePreflight, false);
+  assert.equal(prepared.analysis.rendererVersion, 1);
   assert.equal(prepared.analysis.report.markdown.includes("No A+ candidates"), true);
+  assert.equal(prepared.analysis.dashboard.html.includes("No A+ long candidates"), true);
 
   await assert.rejects(
     publishPreparedSodOrchestration({ prepared, inboxPath: "/must/not/be/read" }),
