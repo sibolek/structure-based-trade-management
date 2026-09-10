@@ -26,6 +26,38 @@ const TONES = new Set(["neutral", "green", "red", "amber", "blue"]);
 const BLOCK_TYPES = new Set(["paragraph", "callout", "list", "table", "metrics"]);
 const LIST_STYLES = new Set(["bullet", "numbered"]);
 
+const EXECUTION_DISCIPLINE_BLOCKS = Object.freeze([
+  Object.freeze({ type: "paragraph", text: "Capital preservation happens before entry." }),
+  Object.freeze({ type: "paragraph", text: "Green is not an exit. Red is not invalidation. Structure is invalidation." }),
+  Object.freeze({ type: "paragraph", text: "P/L-blind exit check: If I could not see my P/L, would I still exit this chart right now?" }),
+  Object.freeze({ type: "callout", tone: "blue", text: "A red day is acceptable. Two consecutive red days are allowed. The daily objective is a green process day; do not lower the quality threshold after a loser." }),
+]);
+
+const RISK_MANAGEMENT_BLOCKS = Object.freeze([
+  Object.freeze({ type: "paragraph", text: "Maximum planned loss per trade = 0.5% of current trading-account equity." }),
+  Object.freeze({ type: "list", style: "bullet", items: Object.freeze([
+    "Size from the structural/effective stop.",
+    "Do not tighten a correct stop merely to fit the risk budget; reduce size or pass.",
+    "Position sizing cannot exceed net liquidation.",
+    "Maximum two instruments live at once unless explicitly changed.",
+    "Treat correlated positions as one directional risk cluster rather than unrelated trades.",
+    "If the minimum valid size cannot fit the 0.5% risk budget, PASS.",
+  ]) }),
+  Object.freeze({ type: "callout", tone: "blue", text: "Freeze the plan before entry. Do not change the plan mid-bar unless structural invalidation actually prints." }),
+]);
+
+const PROCESS_GOAL_BLOCKS = Object.freeze([
+  Object.freeze({ type: "paragraph", text: "Primary execution sequence: READ → PLAN → TRIGGER → RISK → HOLD → UPDATE → EXIT." }),
+  Object.freeze({ type: "list", style: "numbered", items: Object.freeze([
+    "One fully structurally managed trade.",
+    "P/L-blind first 10 minutes.",
+    "Reduce size—not the stop.",
+    "Max 2 instruments live.",
+    "No end-of-session make-it-green scalps.",
+  ]) }),
+  Object.freeze({ type: "callout", tone: "green", text: "Daily objective: a green process day. A correct read is not automatically a setup; a valid setup is not automatically a trade." }),
+]);
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -138,6 +170,21 @@ function normalizeBlock(block, index, sectionId) {
   return normalizeMetrics(block);
 }
 
+function clonedCanonicalBlocks(blocks) {
+  return blocks.map((block) => structuredClone(block));
+}
+
+function applyCanonicalSectionPolicy(sectionId, providerBlocks) {
+  if (sectionId === "execution-discipline") return clonedCanonicalBlocks(EXECUTION_DISCIPLINE_BLOCKS);
+  if (sectionId === "risk-management") {
+    return [...clonedCanonicalBlocks(RISK_MANAGEMENT_BLOCKS), ...providerBlocks];
+  }
+  if (sectionId === "opening-game-plan") {
+    return [...providerBlocks, ...clonedCanonicalBlocks(PROCESS_GOAL_BLOCKS)];
+  }
+  return providerBlocks;
+}
+
 function normalizeSection(section, expected, index) {
   if (!section || typeof section !== "object" || Array.isArray(section)) {
     throw artifactError(`SOD section ${index + 1} must be an object`);
@@ -150,9 +197,10 @@ function normalizeSection(section, expected, index) {
     );
   }
   const title = text(section.title) || expected.title;
-  const blocks = Array.isArray(section.blocks)
+  const providerBlocks = Array.isArray(section.blocks)
     ? section.blocks.map((block, blockIndex) => normalizeBlock(block, blockIndex, expected.id))
     : [];
+  const blocks = applyCanonicalSectionPolicy(expected.id, providerBlocks);
   return { id: expected.id, number: expected.number, title, blocks };
 }
 
