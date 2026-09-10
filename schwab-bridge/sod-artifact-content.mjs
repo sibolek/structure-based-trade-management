@@ -169,6 +169,30 @@ function normalizeSource(source, index) {
   };
 }
 
+function searchableBlockText(block) {
+  if (block.type === "paragraph" || block.type === "callout") return block.text;
+  if (block.type === "list") return block.items.join(" ");
+  if (block.type === "metrics") return block.items.map((item) => `${item.label} ${item.value}`).join(" ");
+  if (block.type === "table") {
+    return [
+      ...block.columns.map((column) => column.label),
+      ...block.rows.flatMap((row) => block.columns.map((column) => row[column.key])),
+    ].join(" ");
+  }
+  return "";
+}
+
+function assertMandatoryVixContext(sections) {
+  const section = sections.find((item) => item.id === "rates-volatility-commodities");
+  const searchable = (section?.blocks || []).map(searchableBlockText).join(" ");
+  if (!/\bVIX\b/i.test(searchable)) {
+    throw artifactError(
+      "SOD Rates, Volatility & Commodities section must include current VIX context",
+      "SOD_ARTIFACT_VIX_REQUIRED",
+    );
+  }
+}
+
 export function normalizeSodArtifactContent(input = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw artifactError("SOD artifact content must be an object");
@@ -192,6 +216,9 @@ export function normalizeSodArtifactContent(input = {}) {
     );
   }
 
+  const sections = input.sections.map((section, index) => normalizeSection(section, SOD_REPORT_SECTIONS[index], index));
+  assertMandatoryVixContext(sections);
+
   return {
     schemaVersion: SOD_ARTIFACT_CONTENT_SCHEMA_VERSION,
     hero: {
@@ -200,7 +227,7 @@ export function normalizeSodArtifactContent(input = {}) {
       snapshot,
       badges: Array.isArray(hero.badges) ? hero.badges.map(normalizeBadge) : [],
     },
-    sections: input.sections.map((section, index) => normalizeSection(section, SOD_REPORT_SECTIONS[index], index)),
+    sections,
     sources: Array.isArray(input.sources) ? input.sources.map(normalizeSource) : [],
   };
 }
