@@ -1,3 +1,5 @@
+import { normalizeSodArtifactContent } from "./sod-artifact-content.mjs";
+
 export const SOD_ANALYSIS_SCHEMA_VERSION = 1;
 export const SOD_GENERATION_INITIAL = "INITIAL";
 export const SOD_GENERATION_REFRESH = "REFRESH";
@@ -151,11 +153,19 @@ export function normalizeSodAnalysisResult(result) {
   }
   result.candidateProposals.forEach(assertCandidateProposalAuthority);
 
+  if (Object.prototype.hasOwnProperty.call(result, "report") || Object.prototype.hasOwnProperty.call(result, "dashboard")) {
+    throw contractError(
+      "SOD analysis provider may not return rendered report or dashboard artifacts; return artifactContent instead",
+      "SOD_ANALYSIS_RENDERED_ARTIFACT_FORBIDDEN",
+    );
+  }
+
   return {
     schemaVersion: SOD_ANALYSIS_SCHEMA_VERSION,
     candidateProposals: structuredClone(result.candidateProposals),
-    report: result.report && typeof result.report === "object" ? structuredClone(result.report) : null,
-    dashboard: result.dashboard && typeof result.dashboard === "object" ? structuredClone(result.dashboard) : null,
+    artifactContent: result.artifactContent === undefined || result.artifactContent === null
+      ? null
+      : normalizeSodArtifactContent(result.artifactContent),
     generationMetadata: result.generationMetadata && typeof result.generationMetadata === "object"
       ? structuredClone(result.generationMetadata)
       : null,
