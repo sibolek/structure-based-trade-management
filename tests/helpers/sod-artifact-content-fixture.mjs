@@ -15,7 +15,12 @@ export function sodArtifactContentFixture({
     sections: SOD_REPORT_SECTIONS.map((section) => ({
       id: section.id,
       title: section.title,
-      blocks: [{ type: "paragraph", text: `${section.title}: ${sectionText}` }],
+      blocks: section.id === "rates-volatility-commodities"
+        ? [
+            { type: "paragraph", text: `${section.title}: ${sectionText}` },
+            { type: "metrics", items: [{ label: "VIX", value: "16.4", tone: "amber" }] },
+          ]
+        : [{ type: "paragraph", text: `${section.title}: ${sectionText}` }],
     })),
     sources: [{ label: "Test source", note: "deterministic fixture" }],
   };
