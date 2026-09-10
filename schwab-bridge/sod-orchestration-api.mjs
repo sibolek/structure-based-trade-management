@@ -3,7 +3,10 @@ import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { assertSodAnalysisProvider } from "./sod-analysis-provider.mjs";
+import {
+  assertSodAnalysisProvider,
+  buildSodAnalysisRequest,
+} from "./sod-analysis-provider.mjs";
 import { createSodChartStore } from "./sod-chart-store.mjs";
 import {
   prepareSodOrchestration,
@@ -23,7 +26,7 @@ export const DEFAULT_SOD_ORCHESTRATION_PORT = 8790;
 export const MAX_SOD_ORCHESTRATION_BODY_BYTES = 1024 * 1024;
 export const SOD_CHART_INGESTION_CAPABILITY = "IMMUTABLE_OPAQUE_REF";
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1"]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -278,7 +281,10 @@ export function createSodOrchestrationApiServer({
       }
 
       try {
-        const request = await readJson(req);
+        const request = buildSodAnalysisRequest(await readJson(req));
+        for (const chart of request.charts) {
+          await chartStore.assertChartReference(chart);
+        }
         const { snapshot } = await fetchSodPretradeSnapshot(pretradeUrl, { fetchImpl });
         const prepared = await prepareSodOrchestration({
           provider: trustedProvider,
