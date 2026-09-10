@@ -16,8 +16,10 @@ export default function useSodOrchestration() {
   const [health, setHealth] = useState(null);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [lastResult, setLastResult] = useState(null);
+  const [charts, setCharts] = useState([]);
 
   const refreshNow = useCallback(async () => {
     const nextHealth = await client.health();
@@ -26,6 +28,31 @@ export default function useSodOrchestration() {
     setError("");
     return nextHealth;
   }, [client]);
+
+  const uploadFiles = useCallback(async (files) => {
+    const selected = Array.from(files || []);
+    if (!selected.length) return [];
+    setUploading(true);
+    setError("");
+    try {
+      const uploaded = [];
+      for (const file of selected) {
+        uploaded.push(await client.uploadChart(file));
+      }
+      setCharts((current) => [...current, ...uploaded]);
+      setConnected(true);
+      return uploaded;
+    } catch (err) {
+      setError(errorText(err));
+      throw err;
+    } finally {
+      setUploading(false);
+    }
+  }, [client]);
+
+  const removeChart = useCallback((contentRef) => {
+    setCharts((current) => current.filter((chart) => chart.contentRef !== contentRef));
+  }, []);
 
   const generate = useCallback(async (request) => {
     setBusy(true);
@@ -75,10 +102,15 @@ export default function useSodOrchestration() {
     health,
     connected,
     busy,
+    uploading,
     error,
     lastResult,
+    charts,
     client,
     refreshNow,
+    uploadFiles,
+    removeChart,
+    clearCharts: () => setCharts([]),
     generate,
     clearResult: () => setLastResult(null),
   };
