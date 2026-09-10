@@ -305,7 +305,7 @@ test("SOD API returns valid rendered no-candidate analysis without creating a fe
     assert.equal(generated.response.status, 200);
     assert.equal(generated.payload.status, "NO_CANDIDATES");
     assert.equal(generated.payload.publication, null);
-    assert.equal(generated.payload.analysis.report.markdown.includes("No A+ candidates"), true);
+    assert.equal(generated.payload.analysis.report.markdown.includes("No A\\+ candidates"), true);
     assert.deepEqual(await fs.readdir(inbox), []);
   } finally {
     await api.close();
