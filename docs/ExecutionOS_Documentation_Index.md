@@ -1,10 +1,12 @@
 # ExecutionOS Documentation Index
 
 **Status:** Current documentation inventory  
-**Date:** 2026-09-08  
+**Date:** 2026-09-09  
 **Repository:** `sibolek/structure-based-trade-management`  
-**Current operating branch:** `main`  
-**Final merged implementation checkpoint:** `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`
+**Stable operating branch:** `main`  
+**Active SOD feature branch:** `v24-sod-orchestration-lineage`  
+**Final merged main implementation checkpoint:** `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`  
+**Accepted SOD rendering checkpoint:** `4144c5c59494ae318bb736d64fba751a22046512`
 
 ---
 
@@ -15,8 +17,9 @@
 3. `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md` is the consolidated frozen V2.4 architectural authority for Decisions 22–97.
 4. `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` is the approved decision-coverage companion to v0.5.
 5. `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` is the approved September 8 PRETRADE quantity-safety authority layered on top of Phase 4.
-6. Closeout/status records define implemented/accepted state.
-7. Earlier approved baselines/addenda remain historical approval-time evidence and do not override later frozen authority or accepted runtime behavior.
+6. `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md` is the accepted/frozen authority for deterministic SOD artifact rendering on the active SOD feature branch.
+7. Closeout/status records define implemented/accepted state.
+8. Earlier approved baselines/addenda remain historical approval-time evidence and do not override later frozen authority or accepted runtime behavior.
 
 Frozen approved design records should not be rewritten merely because implementation status later advanced.
 
@@ -28,12 +31,13 @@ Frozen approved design records should not be rewritten merely because implementa
 |---|---|---|
 | `USER-GUIDE.md` | Current operator workflow and first-time Quick Start | **Authoritative living operator guide for `main`** |
 | `docs/ExecutionOS_User_Guide.pdf` | Rendered operator guide | **Generated PDF companion to `USER-GUIDE.md`** |
-| `README.md` | Current repository overview | **Current overview** |
+| `README.md` | Current repository overview | **Current overview of merged operating system** |
 | `DOCUMENTATION-STATUS.md` | Current vs historical map | **Documentation governance** |
 | `docs/ExecutionOS_Documentation_Index.md` | Cross-document authority/status | **Current index** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md` | Consolidated PRETRADE→ARM→Execution architecture | **Current frozen V2.4 design authority** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` | Decision 22–97 traceability | **Approved implementation companion** |
 | `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` | Separate 2-ATR PRETRADE quantity-safety ceiling | **Approved current quantity-safety policy authority** |
+| `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md` | Structured SOD content + deterministic MD/HTML/dashboard rendering | **Accepted / frozen SOD rendering authority at `4144c5c`** |
 | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` | Slices 1–7 implementation/acceptance record | **Accepted implementation closeout** |
 | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` | Merge/TODO/regression/repository closeout | **Final handoff merge closeout** |
 | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` | Phase 3 accepted implementation | **Accepted implementation** |
@@ -44,11 +48,13 @@ Earlier approved handoff baselines/addenda and `ExecutionOS_V2.4_Design_Baseline
 
 The PDF user guide is generated from `USER-GUIDE.md`; if the two ever differ, the current Markdown source plus validated application behavior governs.
 
+The automated SOD workflow is still feature-branch work and is **not yet documented as an operator-ready capability in `USER-GUIDE.md` or `README.md`**. Those documents should be updated only after the production analysis provider and full operator workflow are accepted.
+
 ---
 
 ## 3. Release / branch map
 
-### Current operating branch: `main`
+### Stable operating branch: `main`
 
 The complete accepted V2.4 PRETRADE → ARM → Execution Board integration is merged to `main`.
 
@@ -59,6 +65,37 @@ Final merged **implementation** checkpoint:
 ```
 
 Later documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint.
+
+### Active SOD feature branch
+
+```text
+v24-sod-orchestration-lineage
+```
+
+This branch layers Start of Day orchestration upstream of canonical candidate ingress while preserving PRETRADE and downstream execution authorities.
+
+Current accepted SOD rendering checkpoint:
+
+```text
+4144c5c59494ae318bb736d64fba751a22046512
+```
+
+Accepted through this checkpoint:
+
+- strict automated candidate ingress policy;
+- local Candidate Feeder core;
+- lineage resolution for NEW / UNCHANGED / REVISED;
+- publication-intent separation from PRETRADE supersession authority;
+- atomic candidate publication;
+- vendor-neutral analysis-provider contract;
+- SOD orchestration core and loopback HTTP service;
+- SOD React workspace/client boundary;
+- immutable trusted chart ingestion using opaque refs;
+- deterministic canonical Markdown, dark HTML report, and light SOD dashboard rendering;
+- candidate-derived A+ Trades and Morning Priority sections;
+- preserved read-only broker boundary.
+
+The production analysis-provider adapter is **not yet implemented/accepted**. Therefore this branch does not yet represent a complete operator-ready automated SOD workflow.
 
 ### Retired feature branch
 
@@ -84,7 +121,40 @@ PR #14
 
 ---
 
-## 4. Accepted end-to-end model
+## 4. Accepted SOD orchestration model on the feature branch
+
+Accepted upstream flow through checkpoint `4144c5c`:
+
+```text
+TRUSTED CHART INGESTION
+→ OPAQUE CHART REFS
+→ STRUCTURED ANALYSIS PROVIDER CONTRACT
+→ CANONICAL CANDIDATE EXPORT
+→ LINEAGE RESOLUTION
+→ DETERMINISTIC SOD RENDERER
+   ├── 19-section Markdown
+   ├── canonical dark 19-section HTML
+   └── light SOD dashboard
+→ ATOMIC CANDIDATE PUBLICATION
+→ CANDIDATE FEEDER
+→ CANONICAL PRETRADE INGRESS
+```
+
+Authority invariants:
+
+- the provider may propose trade substance but cannot establish version, lineage, lifecycle, ARM, execution, output-path, or broker authority;
+- Sections 15 and 16 are rendered from canonical candidate contracts, not free-form provider prose;
+- provider-supplied HTML/Markdown/CSS rendering authority is rejected;
+- chart paths never cross the provider boundary; only trusted bytes are resolved from orchestrator-issued refs;
+- PRETRADE remains final authority for automated supersession eligibility;
+- imported candidates remain proposals only;
+- broker-write authority remains false.
+
+Manual ChatGPT SOD generation remains a separate workflow and is unchanged by this feature branch.
+
+---
+
+## 5. Accepted end-to-end model
 
 Governing invariant:
 
@@ -120,7 +190,7 @@ Browser code is presentation/intent only. Server-side PRETRADE authorities own c
 
 ---
 
-## 5. Accepted PRETRADE / ARM capabilities
+## 6. Accepted PRETRADE / ARM capabilities
 
 Implemented/accepted on `main`:
 
@@ -160,7 +230,7 @@ The quantity-safety layer does **not** move structural invalidation, synthesize 
 
 ---
 
-## 6. Accepted downstream/runtime capabilities
+## 7. Accepted downstream/runtime capabilities
 
 Implemented/accepted:
 
@@ -186,7 +256,7 @@ Implemented/accepted:
 
 ---
 
-## 7. Slice 7 live-management authority
+## 8. Slice 7 live-management authority
 
 Accepted Slice 7 behavior includes:
 
@@ -214,7 +284,7 @@ Accepted Slice 7 behavior includes:
 
 ---
 
-## 8. Read-only broker boundary
+## 9. Read-only broker boundary
 
 Accepted invariant:
 
@@ -227,11 +297,19 @@ ExecutionOS does not place, replace, cancel, modify, reduce, or flatten broker o
 
 Actual equity order entry remains manual in thinkorswim/Schwab. Schwab observation is exact-account and authoritative `executionTime` based.
 
-**Broker write authority introduced by the V2.4 handoff integration: NONE.**
+**Broker write authority introduced by the V2.4 handoff integration or SOD orchestration work: NONE.**
 
 ---
 
-## 9. Current intentionally incomplete/deferred areas
+## 10. Current intentionally incomplete/deferred areas
+
+### SOD feature branch
+
+- production analysis-provider adapter not yet implemented/accepted;
+- operator-ready automated SOD workflow not yet released to `main`;
+- authoritative PRETRADE supersession preflight for REVISED automated candidates remains a later explicit design/implementation decision.
+
+### Broader ExecutionOS
 
 - no broker order placement/modification/cancellation/flattening;
 - no general broker-write Governor;
@@ -243,7 +321,7 @@ Actual equity order entry remains manual in thinkorswim/Schwab. Schwab observati
 
 ---
 
-## 10. Router model
+## 11. Router model
 
 Runtime router is default-on.
 
@@ -278,7 +356,7 @@ Reconciliation remains ownership/trade state rather than router health.
 
 ---
 
-## 11. EOD semantics
+## 12. EOD semantics
 
 Current origin-aware planned-risk stop rule:
 
@@ -293,23 +371,35 @@ The separate PRETRADE 2-ATR quantity-safety policy also does not replace or rewr
 
 ---
 
-## 12. Acceptance evidence
+## 13. Acceptance evidence
 
-Accepted final handoff closeout state:
+### Stable `main` handoff closeout
 
 ```text
-Focused Slice 7:                       26 / 26 PASS
-Downstream lifecycle E2E:               1 / 1 PASS
-Canonical PRETRADE→Execution E2E:       1 / 1 PASS
-September 8 comprehensive regression:  GREEN
-Production build:                       PASS
+Focused Slice 7:                        26 / 26 PASS
+Downstream lifecycle E2E:                1 / 1 PASS
+Canonical PRETRADE→Execution E2E:        1 / 1 PASS
+September 8 comprehensive regression:   GREEN
+Production build:                        PASS
 Final merged implementation checkpoint: 26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
-Broker-write authority introduced:      NONE
+Broker-write authority introduced:       NONE
 ```
 
-The final aggregate numeric repository-wide test count is intentionally not restated here because the September 8 acceptance was established by an all-green multi-command regression/build sequence after the final quantity-safety fixture update. The final merged implementation checkpoint includes the synthetic E2E DSS fixture update required by the approved quantity-safety policy.
+### SOD orchestration / deterministic rendering checkpoint
 
-Dedicated validation includes:
+```text
+Focused SOD / rendering / orchestrator:  58 / 58 PASS
+SOD + renderer + feeder + PRETRADE:     111 / 111 PASS
+Canonical PRETRADE→Execution E2E:         1 / 1 PASS
+Production Vite build:                    PASS
+Worktree:                                 CLEAN
+Accepted SOD rendering checkpoint:        4144c5c59494ae318bb736d64fba751a22046512
+Broker-write authority introduced:        NONE
+```
+
+The accepted SOD checkpoint proves that upstream chart ingestion, structured analysis boundaries, deterministic human artifacts, candidate lineage/publication, Candidate Feeder behavior, canonical PRETRADE ingress, and the downstream execution-authority lifecycle remain compatible.
+
+Dedicated validation for the stable main release includes:
 
 ```text
 node --test tests/execution-v24-live-management.test.mjs \
@@ -324,11 +414,9 @@ npm run analytics:test
 npm run build
 ```
 
-The September 8 full regression also covered the current V2.4 router, store-authority, V2.3 compatibility/install, retirement, activation, fill ownership, live lifecycle, and PRETRADE integration paths documented by the final closeout.
-
 ---
 
-## 13. Pull requests, issues, and closeout records
+## 14. Pull requests, issues, and closeout records
 
 - PR #1 — V2.3 execution system; merged.
 - PR #7 — read-only EOD reporting; merged.
@@ -339,10 +427,11 @@ The September 8 full regression also covered the current V2.4 router, store-auth
 - Issue #18 — completed/closed.
 - Issue #19 — completed/closed.
 - September 8 final merge closeout — `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md`.
+- SOD artifact rendering — accepted/frozen on `v24-sod-orchestration-lineage` at `4144c5c59494ae318bb736d64fba751a22046512`; baseline: `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md`.
 
 ---
 
-## 14. Operator-document generation
+## 15. Operator-document generation
 
 The living operator source is:
 
@@ -360,6 +449,8 @@ A repository GitHub Actions workflow regenerates the PDF when the guide or rende
 
 The Markdown guide remains the editable source of truth for operator documentation.
 
+The automated SOD feature is intentionally **not yet added to the operator guide** because the production analysis-provider adapter and final end-to-end operator workflow are not yet accepted.
+
 ---
 
-**Maintenance principle:** current code/runtime and accepted closeout evidence govern current truth. Preserve frozen approved documents, but synchronize `USER-GUIDE.md`, its generated PDF, `README.md`, `DOCUMENTATION-STATUS.md`, this index, and current operational references whenever accepted behavior changes.
+**Maintenance principle:** current code/runtime and accepted closeout evidence govern current truth. Preserve frozen approved documents. Keep stable `main` operator documentation distinct from active feature-branch documentation until a feature is accepted for release.
