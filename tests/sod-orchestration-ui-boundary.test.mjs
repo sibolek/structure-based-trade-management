@@ -19,7 +19,7 @@ test("ExecutionOS shell exposes SOD as third workspace without changing PRETRADE
   assert.match(nav, /grid-cols-3/);
 });
 
-test("SOD workspace does not expose browser-controlled filesystem or PRETRADE mutation inputs", async () => {
+test("SOD workspace accepts chart bytes without browser-controlled filesystem or PRETRADE mutation inputs", async () => {
   const workspace = await source("src/components/SodWorkspace.jsx");
   const client = await source("src/sod/sod-orchestration-api-client.js");
 
@@ -37,8 +37,12 @@ test("SOD workspace does not expose browser-controlled filesystem or PRETRADE mu
     assert.equal(client.includes(forbidden), false, `client must not contain ${forbidden}`);
   }
 
-  assert.match(workspace, /trustedGenerationRequest/);
-  assert.match(workspace, /No free-form filesystem or content-reference input is accepted here/);
+  assert.match(workspace, /type="file"/);
+  assert.match(workspace, /accept="image\/png,image\/jpeg,image\/webp"/);
+  assert.match(workspace, /The browser never supplies a storage path/);
+  assert.equal(workspace.includes('name="contentRef"'), false);
+  assert.equal(workspace.includes('name="filePath"'), false);
+  assert.match(client, /\/api\/sod\/charts/);
   assert.match(client, /\/api\/sod\/generate/);
 });
 
