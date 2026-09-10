@@ -1,7 +1,9 @@
 export const DEFAULT_SOD_ORCHESTRATION_URL = "http://127.0.0.1:8790";
 export const SOD_ORCHESTRATION_SERVICE = "executionos-v24-sod-orchestrator";
+export const SOD_CHART_INGESTION_CAPABILITY = "IMMUTABLE_OPAQUE_REF";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+const CHART_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -46,6 +48,7 @@ function assertHealthCapabilities(health) {
   if (health?.service !== SOD_ORCHESTRATION_SERVICE) violations.push("service identity mismatch");
   if (health?.pretradeAccess !== "READ_ONLY_HTTP") violations.push("PRETRADE access must remain READ_ONLY_HTTP");
   if (health?.candidatePublication !== "ATOMIC_INBOX_ONLY") violations.push("candidate publication must remain ATOMIC_INBOX_ONLY");
+  if (health?.chartIngestion !== SOD_CHART_INGESTION_CAPABILITY) violations.push("chart ingestion capability mismatch");
   if (health?.lifecycleAuthority !== false) violations.push("lifecycle authority must remain false");
   if (health?.armAuthority !== false) violations.push("ARM authority must remain false");
   if (health?.executionAuthority !== false) violations.push("execution authority must remain false");
@@ -59,6 +62,24 @@ function assertHealthCapabilities(health) {
     );
   }
   return health;
+}
+
+function assertChartFile(file) {
+  if (!file || typeof file !== "object") {
+    throw clientError("SOD chart file is required", "SOD_CLIENT_CHART_FILE_REQUIRED");
+  }
+  const mediaType = text(file.type).toLowerCase();
+  if (!CHART_MEDIA_TYPES.has(mediaType)) {
+    throw clientError(
+      `Unsupported SOD chart media type ${mediaType || "(empty)"}`,
+      "SOD_CLIENT_CHART_MEDIA_UNSUPPORTED",
+    );
+  }
+  const size = Number(file.size);
+  if (!Number.isFinite(size) || size <= 0) {
+    throw clientError("SOD chart file is empty", "SOD_CLIENT_CHART_FILE_INVALID");
+  }
+  return { mediaType, displayName: text(file.name) || "chart" };
 }
 
 export function createSodOrchestrationApiClient({
@@ -77,7 +98,7 @@ export function createSodOrchestrationApiClient({
       cache: "no-store",
       ...options,
       headers: {
-        ...(options.body ? { "content-type": "application/json" } : {}),
+        ...(options.body && !options.headers?.["content-type"] ? { "content-type": "application/json" } : {}),
         ...(options.headers || {}),
       },
     }).then(parseJsonResponse);
@@ -96,14 +117,16 @@ export function createSodOrchestrationApiClient({
     return { service: payload.service };
   }
 
-  async function generate(generationRequest) {
+  async function authorizedRequest(pathname, options) {
     await health();
     if (!sessionToken) await bootstrapSession();
 
-    const execute = () => request("/api/sod/generate", {
-      method: "POST",
-      body: JSON.stringify(generationRequest || {}),
-      headers: { "x-executionos-sod-session": sessionToken },
+    const execute = () => request(pathname, {
+      ...options,
+      headers: {
+        ...(options?.headers || {}),
+        "x-executionos-sod-session": sessionToken,
+      },
     });
 
     try {
@@ -116,9 +139,34 @@ export function createSodOrchestrationApiClient({
     }
   }
 
+  async function uploadChart(file) {
+    const { mediaType, displayName } = assertChartFile(file);
+    const payload = await authorizedRequest("/api/sod/charts", {
+      method: "POST",
+      body: file,
+      headers: {
+        "content-type": mediaType,
+        "x-executionos-chart-name": encodeURIComponent(displayName),
+      },
+    });
+    const chart = payload?.chart;
+    if (!text(chart?.chartId) || !text(chart?.contentRef)) {
+      throw clientError("SOD chart ingestion response is invalid", "SOD_CLIENT_CHART_RESPONSE_INVALID");
+    }
+    return chart;
+  }
+
+  async function generate(generationRequest) {
+    return authorizedRequest("/api/sod/generate", {
+      method: "POST",
+      body: JSON.stringify(generationRequest || {}),
+    });
+  }
+
   return Object.freeze({
     baseUrl: resolvedBaseUrl,
     health,
+    uploadChart,
     generate,
     resetSession() {
       sessionToken = null;
