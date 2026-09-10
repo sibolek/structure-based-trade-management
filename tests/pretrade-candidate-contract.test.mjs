@@ -158,7 +158,7 @@ test("validity and management are material contract content and change the immut
   assert.notEqual(first.contentHash, third.contentHash);
 });
 
-test("conflicting legacy timeframe/entryTimeframe and management aliases fail closed", () => {
+test("conflicting legacy timeframe/entryTimeframe fails closed while managementPlan stays independent", () => {
   let result = normalizeCanonicalCandidateProposal(proposal({ timeframe: "2m", entryTimeframe: "5m" }), {
     bundleSource: "SOD_A_PLUS_TRADES",
   });
@@ -168,5 +168,7 @@ test("conflicting legacy timeframe/entryTimeframe and management aliases fail cl
     managementPlan: { mode: "A" },
     managementContract: { mode: "B" },
   }), { bundleSource: "SOD_A_PLUS_TRADES" });
-  assert.match(result.errors.join(" "), /managementContract.*conflict/i);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.normalized.managementContract, { mode: "B" });
+  assert.deepEqual(result.normalized.managementPlan, { mode: "A" });
 });

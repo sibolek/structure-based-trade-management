@@ -11,12 +11,24 @@ import {
 } from "./pretrade-candidate-contract.mjs";
 
 export const AUTOMATED_UNTOUCHED_ONLY = "AUTOMATED_UNTOUCHED_ONLY";
+export const MANUAL_AUTHORIZED = "MANUAL_AUTHORIZED";
 export const AUTOMATED_VERSION_GAP = "AUTOMATED_VERSION_GAP";
 export const AUTOMATED_SUPERSESSION_REQUIRES_UNTOUCHED_WAITING_REVISION_0 =
   "AUTOMATED_SUPERSESSION_REQUIRES_UNTOUCHED_WAITING_REVISION_0";
+export const MANUAL_SUPERSESSION_AUTHORIZATION_REQUIRED =
+  "MANUAL_SUPERSESSION_AUTHORIZATION_REQUIRED";
+export const MANUAL_SUPERSESSION_AUTHORIZATION_INVALID =
+  "MANUAL_SUPERSESSION_AUTHORIZATION_INVALID";
 
 const ACTIVE_PRETRADE_STATES = new Set([
   "INGESTED",
+  "WAITING",
+  PRETRADE_TRIGGER_EVALUATING,
+  "PERMISSION_EVALUATING",
+  "READY",
+  "CAUTION",
+]);
+const MANUAL_SUPERSESSION_ALLOWED_STATES = new Set([
   "WAITING",
   PRETRADE_TRIGGER_EVALUATING,
   "PERMISSION_EVALUATING",
@@ -55,6 +67,7 @@ function normalizeIngressPolicy(value) {
   const policy = upper(value);
   if (!policy) return null;
   if (policy === AUTOMATED_UNTOUCHED_ONLY) return policy;
+  if (policy === MANUAL_AUTHORIZED) return policy;
   throw ingressError(`Unsupported candidate ingress policy: ${policy}`, "INVALID_INGRESS_POLICY");
 }
 
@@ -68,7 +81,14 @@ function resolveIngressPolicy(bundlePolicy, optionPolicy) {
   ) {
     throw ingressError("Candidate ingress policy sources disagree", "INVALID_INGRESS_POLICY");
   }
-  return normalizedOptionPolicy || normalizedBundlePolicy;
+  const resolved = normalizedOptionPolicy || normalizedBundlePolicy;
+  if (!resolved) {
+    throw ingressError(
+      "Production candidate import requires an explicit recognized ingress policy",
+      "INGRESS_POLICY_REQUIRED",
+    );
+  }
+  return resolved;
 }
 
 function candidateLifecycleProjection(candidate) {
@@ -85,6 +105,33 @@ function rejectedPolicyOutcome(candidate, reason) {
     status: "REJECTED",
     reasons: [reason],
   };
+}
+
+function findManualSupersessionAuthorization({
+  authorizations,
+  candidateId,
+  priorContractVersion,
+  priorLifecycleState,
+  priorStateRevision,
+  priorContentHash,
+  proposedContractVersion,
+  proposedContentHash,
+}) {
+  if (!MANUAL_SUPERSESSION_ALLOWED_STATES.has(priorLifecycleState)) return { status: "INELIGIBLE_PRIOR_STATE" };
+  const matches = (Array.isArray(authorizations) ? authorizations : []).filter((authorization) => (
+    text(authorization?.candidateId) === candidateId
+    && Number(authorization?.priorContractVersion) === priorContractVersion
+    && upper(authorization?.priorLifecycleState) === priorLifecycleState
+    && Number(authorization?.priorStateRevision) === priorStateRevision
+    && text(authorization?.priorContentHash) === priorContentHash
+    && Number(authorization?.proposedContractVersion) === proposedContractVersion
+    && text(authorization?.proposedContentHash) === proposedContentHash
+  ));
+  if (matches.length !== 1) return null;
+  const authorization = matches[0];
+  if (!text(authorization.authorizationId)) return { status: "MISSING_AUTHORIZATION_ID" };
+  if (upper(authorization.decision || "AUTHORIZED") !== "AUTHORIZED") return { status: "DECLINED" };
+  return { status: "AUTHORIZED", authorizationId: text(authorization.authorizationId), authorization };
 }
 
 function ensureCandidateAuthorityShape(candidate) {
@@ -127,7 +174,7 @@ export class PreTradeCandidateIngress {
     this.idFactory = idFactory;
   }
 
-  importBundle(bundle, { ingressPolicy = null } = {}) {
+  importBundle(bundle, { ingressPolicy = null, manualSupersessionAuthorizations = [] } = {}) {
     if (!bundle || typeof bundle !== "object" || !Array.isArray(bundle.candidates)) {
       throw ingressError("Import bundle must be an object with a candidates array", "INVALID_BUNDLE");
     }
@@ -150,6 +197,7 @@ export class PreTradeCandidateIngress {
         bundleSource,
         bundleId,
         ingressPolicy: normalizedIngressPolicy,
+        manualSupersessionAuthorizations,
       }));
 
       this.store.state.updatedAt = importedAt;
@@ -178,7 +226,14 @@ export class PreTradeCandidateIngress {
     }
   }
 
-  #importCandidate({ input, importedAt, bundleSource, bundleId, ingressPolicy }) {
+  #importCandidate({
+    input,
+    importedAt,
+    bundleSource,
+    bundleId,
+    ingressPolicy,
+    manualSupersessionAuthorizations,
+  }) {
     const { normalized, errors } = normalizeCanonicalCandidateProposal(input, { bundleSource });
     if (errors.length) {
       return {
@@ -256,6 +311,39 @@ export class PreTradeCandidateIngress {
       }
     }
 
+    let manualSupersessionAuthorization = null;
+    if (ingressPolicy === MANUAL_AUTHORIZED && versions.length && normalized.contractVersion > newestVersion) {
+      if (normalized.contractVersion !== newestVersion + 1) {
+        return rejectedPolicyOutcome(normalized, AUTOMATED_VERSION_GAP);
+      }
+      for (const existingRaw of versions) assertCanonicalCandidateIntegrity(existingRaw);
+      const newestRaw = versions.find((item) => Number(item.contractVersion) === newestVersion);
+      const newest = ensureCandidateAuthorityShape(newestRaw);
+      const newestProjection = candidateLifecycleProjection(newest);
+      const priorHash = candidateContractHash(newest);
+      manualSupersessionAuthorization = findManualSupersessionAuthorization({
+        authorizations: manualSupersessionAuthorizations,
+        candidateId: normalized.candidateId,
+        priorContractVersion: newestVersion,
+        priorLifecycleState: newestProjection.lifecycleState,
+        priorStateRevision: newestProjection.stateRevision,
+        priorContentHash: priorHash,
+        proposedContractVersion: normalized.contractVersion,
+        proposedContentHash: hash,
+      });
+      if (!manualSupersessionAuthorization) {
+        return {
+          candidateId: normalized.candidateId,
+          contractVersion: normalized.contractVersion,
+          status: "ACTION_REQUIRED",
+          reasons: [MANUAL_SUPERSESSION_AUTHORIZATION_REQUIRED],
+        };
+      }
+      if (manualSupersessionAuthorization.status !== "AUTHORIZED") {
+        return rejectedPolicyOutcome(normalized, MANUAL_SUPERSESSION_AUTHORIZATION_INVALID);
+      }
+    }
+
     for (const existingRaw of versions) {
       const existing = ensureCandidateAuthorityShape(existingRaw);
       assertCanonicalCandidateIntegrity(existing);
@@ -271,6 +359,7 @@ export class PreTradeCandidateIngress {
           bundleSource,
           bundleId,
           ingressPolicy,
+          manualSupersessionAuthorization,
         });
       }
     }
@@ -374,6 +463,7 @@ export class PreTradeCandidateIngress {
     bundleSource,
     bundleId,
     ingressPolicy,
+    manualSupersessionAuthorization,
   }) {
     const beforeState = existing.lifecycleState;
     const beforeRevision = existing.stateRevision;
@@ -406,6 +496,9 @@ export class PreTradeCandidateIngress {
         supersededByVersion,
         supersedingContentHash,
         ...(ingressPolicy ? { ingressPolicy } : {}),
+        ...(manualSupersessionAuthorization ? {
+          manualSupersessionAuthorizationId: manualSupersessionAuthorization.authorizationId,
+        } : {}),
       },
       metadata: null,
     };

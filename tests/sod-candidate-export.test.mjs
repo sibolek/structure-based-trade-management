@@ -3,9 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildCanonicalSodCandidateBundle } from "../schwab-bridge/sod-candidate-export.mjs";
+import {
+  buildCanonicalSodCandidateBundle,
+  buildManualSodIngestionEnvelope,
+} from "../schwab-bridge/sod-candidate-export.mjs";
+import { validateManualIngestionEnvelope } from "../schwab-bridge/manual-sod-ingestion.mjs";
 import { PreTradeStore } from "../schwab-bridge/pretrade-state.mjs";
-import { PreTradeCandidateIngress } from "../schwab-bridge/pretrade-candidate-ingress.mjs";
+import { MANUAL_AUTHORIZED, PreTradeCandidateIngress } from "../schwab-bridge/pretrade-candidate-ingress.mjs";
 
 function draft(overrides = {}) {
   return {
@@ -87,6 +91,27 @@ test("SOD exporter builds canonical V2.4 bundle and normalizes common SOD fields
   assert.equal(candidate.armPolicy.finalAuthorizationMode, "MANUAL");
 });
 
+test("SOD exporter builds an ingestion-ready manual proposal envelope without canonical authority fields", () => {
+  const manualEnvelope = buildManualSodIngestionEnvelope(draft({
+    submissionId: "manual-generated-001",
+  }), {
+    idFactory: () => "unused",
+  });
+
+  assert.deepEqual(validateManualIngestionEnvelope(manualEnvelope), []);
+  assert.equal(manualEnvelope.ingestionSchemaVersion, 1);
+  assert.equal(manualEnvelope.submission.submissionId, "manual-generated-001");
+  assert.equal(manualEnvelope.submission.submissionType, "MANUAL_SOD");
+  assert.equal(manualEnvelope.source, "SOD_A_PLUS_TRADES");
+  const candidate = manualEnvelope.candidates[0];
+  assert.equal(candidate.candidateId, "sod-2026-09-08-nvda-long-breakout-continuation-p1");
+  assert.equal(Object.prototype.hasOwnProperty.call(candidate, "contractVersion"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(candidate, "schemaVersion"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(candidate, "generatedAt"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(candidate, "source"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(candidate.armPolicy, "finalAuthorizationMode"), false);
+});
+
 test("exported SOD bundle is accepted by authoritative ingress as WAITING", () => {
   const bundle = buildCanonicalSodCandidateBundle(draft());
   const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "executionos-sod-export-")), "state.json");
@@ -98,7 +123,7 @@ test("exported SOD bundle is accepted by authoritative ingress as WAITING", () =
     idFactory: () => "sod-export-ingress-event",
   });
 
-  const result = ingress.importBundle(bundle);
+  const result = ingress.importBundle(bundle, { ingressPolicy: MANUAL_AUTHORIZED });
   assert.equal(result.outcomes[0].status, "ACCEPTED");
   assert.equal(result.outcomes[0].lifecycleState, "WAITING");
   assert.equal(store.snapshot().candidates[0].contractAuthority.authority, "CANONICAL_CANDIDATE_INGRESS");
@@ -227,7 +252,7 @@ test("SOD exporter rejects ambiguous free-text legacy management plans", () => {
   );
 });
 
-test("SOD exporter rejects conflicting managementContract and legacy managementPlan", () => {
+test("SOD exporter preserves independent managementContract and managementPlan", () => {
   const input = draft();
   input.candidates[0].managementContract = {
     mode: "SINGLE_ENTRY",
@@ -238,14 +263,15 @@ test("SOD exporter rejects conflicting managementContract and legacy managementP
     mode: "FLEXIBLE_WITHIN_CEILING",
   };
 
-  assert.throws(
-    () => buildCanonicalSodCandidateBundle(input),
-    (error) => {
-      assert.equal(error.code, "SOD_CANDIDATE_EXPORT_INVALID");
-      assert.match(error.message, /managementContract and legacy managementPlan may not conflict/);
-      return true;
-    },
-  );
+  const bundle = buildCanonicalSodCandidateBundle(input);
+  assert.deepEqual(bundle.candidates[0].managementContract, {
+    mode: "SINGLE_ENTRY",
+    allowReAdd: false,
+    allowFlatReEntry: false,
+  });
+  assert.deepEqual(bundle.candidates[0].managementPlan, {
+    mode: "FLEXIBLE_WITHIN_CEILING",
+  });
 });
 
 test("SOD exporter rejects duplicate generated candidate identities", () => {

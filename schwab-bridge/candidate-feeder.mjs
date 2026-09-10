@@ -5,7 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { AUTOMATED_UNTOUCHED_ONLY } from "./pretrade-candidate-ingress.mjs";
+import { AUTOMATED_UNTOUCHED_ONLY, MANUAL_AUTHORIZED } from "./pretrade-candidate-ingress.mjs";
 
 export const CANDIDATE_FEEDER_TRANSPORT_SCHEMA_VERSION = 1;
 export const CANDIDATE_FEEDER_SOURCE = "SOD_A_PLUS_TRADES";
@@ -15,6 +15,7 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const TERMINAL_CANONICAL_STATUSES = new Set(["REJECTED", "CONFLICT", "STALE"]);
 const SUCCESS_CANONICAL_STATUSES = new Set(["ACCEPTED", "DUPLICATE"]);
+const RECOGNIZED_FEEDER_POLICIES = new Set([AUTOMATED_UNTOUCHED_ONLY, MANUAL_AUTHORIZED]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -253,8 +254,8 @@ export function validateCandidateBundle(bundle, bytes, {
     errors.push(`bundle source must equal ${CANDIDATE_FEEDER_SOURCE}`);
   }
   if (!text(bundle.bundleId)) errors.push("bundleId is required");
-  if (bundle.ingressPolicy !== AUTOMATED_UNTOUCHED_ONLY) {
-    errors.push(`ingressPolicy must equal ${AUTOMATED_UNTOUCHED_ONLY}`);
+  if (!RECOGNIZED_FEEDER_POLICIES.has(bundle.ingressPolicy)) {
+    errors.push(`ingressPolicy must be recognized: ${[...RECOGNIZED_FEEDER_POLICIES].join(", ")}`);
   }
   if (!Array.isArray(bundle.candidates)) {
     errors.push("candidates must be an array");
@@ -304,6 +305,9 @@ export async function verifyPretradeHealth(pretradeUrl = DEFAULT_PRETRADE_URL, o
   if (health.candidateAutomatedIngressPolicy !== AUTOMATED_UNTOUCHED_ONLY) {
     violations.push(`automated ingress policy capability must equal ${AUTOMATED_UNTOUCHED_ONLY}`);
   }
+  if (health.candidateManualIngressPolicy !== undefined && health.candidateManualIngressPolicy !== MANUAL_AUTHORIZED) {
+    violations.push(`manual ingress policy capability must equal ${MANUAL_AUTHORIZED}`);
+  }
   if (health.readOnlyBrokerBoundary !== true) violations.push("read-only broker boundary not asserted");
   if (health.brokerWriteAuthority === true) violations.push("broker write authority must remain absent");
 
@@ -345,9 +349,10 @@ export async function postCandidateBundleExact(bytes, pretradeUrl = DEFAULT_PRET
   if (!Array.isArray(json.outcomes)) {
     throw feederError("PRETRADE import response is missing outcomes", "INVALID_PRETRADE_IMPORT_RESPONSE");
   }
-  if (json.ingressPolicy !== AUTOMATED_UNTOUCHED_ONLY) {
+  const parsedBundle = JSON.parse(bytes.toString("utf8"));
+  if (json.ingressPolicy !== parsedBundle.ingressPolicy) {
     throw feederError(
-      "PRETRADE import response did not attest restrictive automated policy",
+      "PRETRADE import response did not attest the transported ingress policy",
       "PRETRADE_IMPORT_POLICY_ATTESTATION_MISSING",
       { retryable: true, details: json },
     );

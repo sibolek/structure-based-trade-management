@@ -46,7 +46,7 @@ function candidate(overrides = {}) {
     },
     plannedEntryReference: 225.25,
     targets: [226.5, 228],
-    managementPlan: { mode: "FLEXIBLE_WITHIN_CEILING" },
+    managementContract: { mode: "FLEXIBLE_WITHIN_CEILING" },
     validity: {
       validFrom: "2026-09-09T13:30:00.000Z",
       validUntil: "2026-09-09T20:00:00.000Z",
@@ -54,9 +54,7 @@ function candidate(overrides = {}) {
       session: "RTH",
       provenance: { source: "SOD", label: "RTH opportunity window" },
     },
-    armPolicy: { requestedMode: "MANUAL", armAuthorized: false },
-    armAuthorized: false,
-    status: "WAITING",
+    armPolicy: { requestedMode: "MANUAL" },
     ...overrides,
   };
 }
@@ -214,26 +212,13 @@ test("automated version gap v1 to v3 is rejected without mutating v1", () => {
   assert.deepEqual(store.snapshot().candidates[0], before);
 });
 
-test("default ingress semantics remain unchanged when restrictive policy is absent", () => {
+test("no-policy production ingress fails closed before mutation", () => {
   const { store, ingress } = createIngress();
-  ingress.importBundle(bundle([candidate()], { bundleId: "manual-v1" }));
-  setLifecycle(store, "READY", 2);
-
-  const result = ingress.importBundle(bundle([
-    candidate({
-      contractVersion: 2,
-      generatedAt: "2026-09-09T14:05:00.000Z",
-      thesis: "Manual/default higher-version import",
-    }),
-  ], { bundleId: "manual-v2" }));
-
-  assert.equal(result.outcomes[0].status, "ACCEPTED");
-  const state = store.snapshot();
-  const v1 = state.candidates.find((item) => item.contractVersion === 1);
-  const v2 = state.candidates.find((item) => item.contractVersion === 2);
-  assert.equal(v1.lifecycleState, "SUPERSEDED");
-  assert.equal(v1.stateRevision, 3);
-  assert.equal(v2.lifecycleState, "WAITING");
+  assert.throws(
+    () => ingress.importBundle(bundle([candidate()], { bundleId: "manual-v1" })),
+    (error) => error.code === "INGRESS_POLICY_REQUIRED",
+  );
+  assert.equal(store.snapshot().candidates.length, 0);
 });
 
 test("unsupported ingress policy fails closed before candidate mutation", () => {

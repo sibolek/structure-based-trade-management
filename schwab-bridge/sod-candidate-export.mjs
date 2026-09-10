@@ -8,6 +8,9 @@ import {
 import { AUTOMATED_UNTOUCHED_ONLY } from "./pretrade-candidate-ingress.mjs";
 
 export const SOD_EXPORT_SCHEMA_VERSION = 1;
+export const MANUAL_INGESTION_SCHEMA_VERSION = 1;
+export const MANUAL_SOD_SUBMISSION = "MANUAL_SOD";
+export const MANUAL_STANDALONE_TRADE_CARD_SUBMISSION = "MANUAL_STANDALONE_TRADE_CARD";
 
 const FORBIDDEN_RUNTIME_AUTHORITY_FIELDS = [
   "arm",
@@ -186,9 +189,7 @@ function resolvedManagementContract(candidate, candidateId) {
     );
   }
 
-  const managementContract = candidate.managementContract
-    ?? candidate.managementPlan
-    ?? defaultManagementContract();
+  const managementContract = candidate.managementContract ?? defaultManagementContract();
 
   if (!managementContract || typeof managementContract !== "object" || Array.isArray(managementContract)) {
     throw exportError(`SOD candidate ${candidateId} managementContract must be a structured object`, { candidateId });
@@ -317,6 +318,46 @@ export function buildCanonicalSodCandidateBundle(input, {
     bundleId,
     ...(automatedPublication ? { ingressPolicy: AUTOMATED_UNTOUCHED_ONLY } : {}),
     candidates: normalizedCandidates,
+  };
+}
+
+function candidateProposalFromCanonical(candidate) {
+  const proposal = clone(candidate);
+  delete proposal.contractVersion;
+  delete proposal.schemaVersion;
+  delete proposal.source;
+  delete proposal.sourceDate;
+  delete proposal.generatedAt;
+  if (proposal.armPolicy && typeof proposal.armPolicy === "object") {
+    delete proposal.armPolicy.finalAuthorizationMode;
+  }
+  return proposal;
+}
+
+export function buildManualSodIngestionEnvelope(input, {
+  clock = () => new Date().toISOString(),
+  idFactory = () => crypto.randomUUID(),
+  submissionType = MANUAL_SOD_SUBMISSION,
+} = {}) {
+  if (![MANUAL_SOD_SUBMISSION, MANUAL_STANDALONE_TRADE_CARD_SUBMISSION].includes(submissionType)) {
+    throw exportError("manual submissionType is unsupported", "SOD_MANUAL_ENVELOPE_SUBMISSION_TYPE_INVALID");
+  }
+  const bundle = buildCanonicalSodCandidateBundle(input, { clock, automatedPublication: false });
+  if (submissionType === MANUAL_STANDALONE_TRADE_CARD_SUBMISSION && bundle.candidates.length !== 1) {
+    throw exportError("standalone trade-card manual envelope requires exactly one candidate", "SOD_MANUAL_ENVELOPE_STANDALONE_COUNT_INVALID");
+  }
+  return {
+    ingestionSchemaVersion: MANUAL_INGESTION_SCHEMA_VERSION,
+    submission: {
+      submissionId: text(input?.submissionId) || text(idFactory()),
+      submissionType,
+      preparedAt: bundle.generatedAt,
+    },
+    source: SOD_A_PLUS_TRADES_SOURCE,
+    sourceDate: bundle.sourceDate,
+    bundleId: bundle.bundleId,
+    validity: clone(input.validity ?? {}),
+    candidates: bundle.candidates.map(candidateProposalFromCanonical),
   };
 }
 

@@ -6,41 +6,73 @@ export const CANONICAL_CANDIDATE_CONTRACT_SCHEMA_VERSION = 1;
 export const SOD_A_PLUS_TRADES_SOURCE = "SOD_A_PLUS_TRADES";
 
 const ABSOLUTE_TIMESTAMP_PATTERN = /(?:Z|[+-]\d{2}:\d{2})$/i;
-const CONTRACT_FIELDS = [
-  "candidateId",
-  "contractVersion",
-  "schemaVersion",
-  "source",
-  "sourceDate",
-  "generatedAt",
-  "symbol",
-  "direction",
-  "setup",
-  "decisionTimeframe",
-  "entryTimeframe",
-  "volatilityTimeframe",
-  "timeframe",
-  "thesis",
-  "plan",
-  "trigger",
-  "structuralInvalidation",
-  "entryIntent",
-  "plannedEntryReference",
-  "entryConstraints",
-  "disqualifiers",
-  "noTradeConditions",
-  "targets",
-  "managementContract",
-  "managementPlan",
-  "bestLocation",
-  "context",
-  "catalyst",
-  "rating",
-  "morningPriority",
-  "sourceProvenance",
-  "validity",
-  "armPolicy",
-];
+export const CANDIDATE_STRUCTURAL_LIMITS = Object.freeze({
+  maxSerializedBytes: 768 * 1024,
+  maxDepth: 48,
+  maxNodes: 25000,
+  maxObjectKeys: 500,
+  maxArrayLength: 5000,
+  maxStringBytes: 64 * 1024,
+});
+
+const CANONICAL_AUTHORITY_FIELDS = new Set([
+  "contentHash",
+  "contractAuthority",
+  "lifecycleState",
+  "status",
+  "stateRevision",
+  "lifecycleJournal",
+  "lifecycleEvents",
+  "lifecycleOperations",
+  "importedAt",
+  "supersededAt",
+  "supersededByVersion",
+  "lastLifecycleMutationAt",
+  "evaluation",
+  "prerequisiteStatus",
+  "activation",
+  "triggerSatisfaction",
+  "permissionEvaluationStatus",
+  "permissionBlocker",
+  "currentPermissionOutcome",
+  "recoveryGate",
+  "currentDssEvaluationId",
+  "currentDssEvaluationStale",
+  "currentDssEvaluationStaleAt",
+  "currentDssEvaluationStaleReason",
+  "currentDssEvaluationStaleBarTimestamp",
+  "runtimeOnlyMarker",
+  "armAuthorized",
+  "arm",
+  "armState",
+  "handoff",
+  "handoffAuthority",
+  "permissionOutcome",
+  "riskEvaluation",
+  "authorizedDssEvaluationId",
+  "authorizedRiskEvaluationId",
+  "selectedQuantity",
+  "executionState",
+]);
+
+const PROHIBITED_AUTHORITY_FIELDS = new Set([
+  "contentHash",
+  "contractAuthority",
+  "lifecycleState",
+  "status",
+  "stateRevision",
+  "armAuthorized",
+  "arm",
+  "armState",
+  "handoff",
+  "handoffAuthority",
+  "permissionOutcome",
+  "riskEvaluation",
+  "authorizedDssEvaluationId",
+  "authorizedRiskEvaluationId",
+  "selectedQuantity",
+  "executionState",
+]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -52,6 +84,73 @@ function upper(value) {
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
+}
+
+function byteLength(value) {
+  return Buffer.byteLength(String(value), "utf8");
+}
+
+export function assertJsonStructuralSafety(value, {
+  limits = CANDIDATE_STRUCTURAL_LIMITS,
+  rootName = "candidate",
+} = {}) {
+  let nodes = 0;
+  let serializedBytes = 0;
+  const stack = [{ value, path: rootName, depth: 0 }];
+  const seen = new WeakSet();
+
+  while (stack.length) {
+    const current = stack.pop();
+    nodes += 1;
+    if (nodes > limits.maxNodes) {
+      throw new Error(`${rootName} exceeds structural node limit ${limits.maxNodes}`);
+    }
+    if (current.depth > limits.maxDepth) {
+      throw new Error(`${current.path} exceeds nesting depth limit ${limits.maxDepth}`);
+    }
+
+    const item = current.value;
+    if (item === undefined || typeof item === "function" || typeof item === "symbol" || typeof item === "bigint") {
+      throw new Error(`${current.path} must contain strict JSON values only`);
+    }
+    if (typeof item === "number" && !Number.isFinite(item)) {
+      throw new Error(`${current.path} must contain finite JSON numbers only`);
+    }
+    if (typeof item === "string" && byteLength(item) > limits.maxStringBytes) {
+      throw new Error(`${current.path} exceeds string byte limit ${limits.maxStringBytes}`);
+    }
+
+    if (item && typeof item === "object") {
+      if (seen.has(item)) throw new Error(`${current.path} contains a cycle`);
+      seen.add(item);
+      if (Array.isArray(item)) {
+        if (item.length > limits.maxArrayLength) {
+          throw new Error(`${current.path} exceeds array length limit ${limits.maxArrayLength}`);
+        }
+        for (let index = item.length - 1; index >= 0; index -= 1) {
+          stack.push({ value: item[index], path: `${current.path}[${index}]`, depth: current.depth + 1 });
+        }
+      } else {
+        const keys = Object.keys(item);
+        if (keys.length > limits.maxObjectKeys) {
+          throw new Error(`${current.path} exceeds object breadth limit ${limits.maxObjectKeys}`);
+        }
+        for (const key of keys.reverse()) {
+          stack.push({ value: item[key], path: `${current.path}.${key}`, depth: current.depth + 1 });
+        }
+      }
+    }
+  }
+
+  try {
+    serializedBytes = Buffer.byteLength(JSON.stringify(value), "utf8");
+  } catch {
+    throw new Error(`${rootName} cannot be deterministically serialized as JSON`);
+  }
+  if (serializedBytes > limits.maxSerializedBytes) {
+    throw new Error(`${rootName} exceeds serialized byte limit ${limits.maxSerializedBytes}`);
+  }
+  return { nodes, serializedBytes, limits };
 }
 
 function finiteNumber(value) {
@@ -123,28 +222,16 @@ function normalizeValidity(input, errors) {
 
 function forbiddenAuthorityErrors(candidate) {
   const errors = [];
-  const lifecycle = upper(candidate.lifecycleState || candidate.status);
-  if (lifecycle && lifecycle !== "WAITING") {
-    errors.push("upstream candidate proposals may not establish lifecycle state other than WAITING");
+  for (const field of PROHIBITED_AUTHORITY_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(candidate, field)) {
+      errors.push(`${field} is system-owned authority and may not be supplied by a candidate proposal`);
+    }
   }
-
-  if (candidate.armAuthorized === true || candidate.armPolicy?.armAuthorized === true) {
-    errors.push("upstream candidate proposals may not establish ARM authorization");
-  }
-
-  const forbidden = [
-    ["arm", candidate.arm],
-    ["handoff", candidate.handoff],
-    ["permissionOutcome", candidate.permissionOutcome],
-    ["riskEvaluation", candidate.riskEvaluation],
-    ["authorizedDssEvaluationId", candidate.authorizedDssEvaluationId],
-    ["authorizedRiskEvaluationId", candidate.authorizedRiskEvaluationId],
-    ["selectedQuantity", candidate.selectedQuantity],
-    ["executionState", candidate.executionState],
-  ];
-  for (const [field, value] of forbidden) {
-    if (value !== undefined && value !== null && value !== false && value !== "") {
-      errors.push(`${field} is runtime authority/review state and may not be imported as candidate authority`);
+  if (candidate.armPolicy && typeof candidate.armPolicy === "object") {
+    for (const field of ["armAuthorized", "manualApproved", "forceImport", "supersessionApproved"]) {
+      if (Object.prototype.hasOwnProperty.call(candidate.armPolicy, field)) {
+        errors.push(`armPolicy.${field} is system-owned authority and may not be supplied by a candidate proposal`);
+      }
     }
   }
   return errors;
@@ -153,6 +240,11 @@ function forbiddenAuthorityErrors(candidate) {
 export function normalizeCanonicalCandidateProposal(input, { bundleSource = null } = {}) {
   const candidate = input && typeof input === "object" ? input : {};
   const errors = forbiddenAuthorityErrors(candidate);
+  try {
+    assertJsonStructuralSafety(candidate);
+  } catch (error) {
+    errors.push(error.message);
+  }
   const normalizedBundleSource = upper(bundleSource);
   const candidateSource = upper(candidate.source || normalizedBundleSource);
 
@@ -189,17 +281,18 @@ export function normalizeCanonicalCandidateProposal(input, { bundleSource = null
     errors.push("legacy timeframe and entryTimeframe may not conflict");
   }
 
-  const managementContractInput = candidate.managementContract ?? candidate.managementPlan ?? null;
-  if (
-    candidate.managementContract !== undefined
-    && candidate.managementPlan !== undefined
-    && !equivalent(candidate.managementContract, candidate.managementPlan)
-  ) {
-    errors.push("managementContract and legacy managementPlan may not conflict");
-  }
+  const managementContractInput = candidate.managementContract ?? null;
   const managementContract = managementContractInput && typeof managementContractInput === "object"
+    && !Array.isArray(managementContractInput)
     ? clone(managementContractInput)
     : null;
+  const managementPlan = candidate.managementPlan !== undefined ? clone(candidate.managementPlan) : null;
+  if (
+    candidate.managementPlan !== undefined
+    && (!candidate.managementPlan || typeof candidate.managementPlan !== "object" || Array.isArray(candidate.managementPlan))
+  ) {
+    errors.push("managementPlan must be an optional structured JSON object when supplied");
+  }
 
   const generatedAt = absoluteTimestamp(candidate.generatedAt);
   const sourceDate = text(candidate.sourceDate);
@@ -214,7 +307,9 @@ export function normalizeCanonicalCandidateProposal(input, { bundleSource = null
 
   const validity = normalizeValidity(candidate.validity, errors);
 
-  const normalized = {
+  const normalized = clone(candidate);
+  for (const field of CANONICAL_AUTHORITY_FIELDS) delete normalized[field];
+  Object.assign(normalized, {
     candidateId: text(candidate.candidateId),
     contractVersion: Number(candidate.contractVersion),
     schemaVersion: Number(candidate.schemaVersion ?? PRETRADE_SCHEMA_VERSION),
@@ -239,7 +334,7 @@ export function normalizeCanonicalCandidateProposal(input, { bundleSource = null
     noTradeConditions: candidate.noTradeConditions ?? null,
     targets: Array.isArray(candidate.targets) ? clone(candidate.targets) : [],
     managementContract,
-    managementPlan: managementContract,
+    ...(candidate.managementPlan !== undefined ? { managementPlan } : {}),
     bestLocation: candidate.bestLocation ?? null,
     context: candidate.context ?? null,
     catalyst: candidate.catalyst ?? null,
@@ -251,7 +346,7 @@ export function normalizeCanonicalCandidateProposal(input, { bundleSource = null
       requestedMode,
       finalAuthorizationMode: "MANUAL",
     },
-  };
+  });
 
   if (!normalized.candidateId) errors.push("candidateId is required");
   if (!Number.isInteger(normalized.contractVersion) || normalized.contractVersion < 1) {
@@ -284,8 +379,8 @@ export function normalizeCanonicalCandidateProposal(input, { bundleSource = null
 }
 
 export function canonicalCandidateContent(candidate) {
-  const content = {};
-  for (const field of CONTRACT_FIELDS) content[field] = clone(candidate?.[field]);
+  const content = clone(candidate || {});
+  for (const field of CANONICAL_AUTHORITY_FIELDS) delete content[field];
   return content;
 }
 

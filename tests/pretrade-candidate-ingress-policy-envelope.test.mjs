@@ -31,7 +31,7 @@ function candidate() {
       reason: "long thesis invalid below reclaim structure",
     },
     targets: [162, 164],
-    managementPlan: { mode: "FLEXIBLE_WITHIN_CEILING" },
+    managementContract: { mode: "FLEXIBLE_WITHIN_CEILING" },
     validity: {
       validFrom: "2026-09-09T13:30:00.000Z",
       validUntil: "2026-09-09T20:00:00.000Z",

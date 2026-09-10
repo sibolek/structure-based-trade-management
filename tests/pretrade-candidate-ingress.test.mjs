@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { PreTradeStore } from "../schwab-bridge/pretrade-state.mjs";
-import { PreTradeCandidateIngress } from "../schwab-bridge/pretrade-candidate-ingress.mjs";
+import {
+  AUTOMATED_UNTOUCHED_ONLY,
+  MANUAL_AUTHORIZED,
+  MANUAL_SUPERSESSION_AUTHORIZATION_REQUIRED,
+  PreTradeCandidateIngress,
+} from "../schwab-bridge/pretrade-candidate-ingress.mjs";
 
 const SOURCE = "SOD_A_PLUS_TRADES";
 
@@ -34,7 +39,7 @@ function candidate(overrides = {}) {
     },
     plannedEntryReference: 177.25,
     targets: [178.5, 180],
-    managementPlan: { mode: "FLEXIBLE_WITHIN_CEILING" },
+    managementContract: { mode: "FLEXIBLE_WITHIN_CEILING" },
     validity: {
       validFrom: "2026-09-05T13:00:00.000Z",
       validUntil: "2026-09-05T20:00:00.000Z",
@@ -42,9 +47,7 @@ function candidate(overrides = {}) {
       session: "RTH",
       provenance: { source: "SOD", label: "RTH opportunity window" },
     },
-    armPolicy: { requestedMode: "MANUAL", armAuthorized: false },
-    armAuthorized: false,
-    status: "WAITING",
+    armPolicy: { requestedMode: "MANUAL" },
     ...overrides,
   };
 }
@@ -56,6 +59,14 @@ function bundle(candidates, overrides = {}) {
     candidates,
     ...overrides,
   };
+}
+
+function automatedImport(ingress, payload) {
+  return ingress.importBundle(payload, { ingressPolicy: AUTOMATED_UNTOUCHED_ONLY });
+}
+
+function manualImport(ingress, payload, options = {}) {
+  return ingress.importBundle(payload, { ingressPolicy: MANUAL_AUTHORIZED, ...options });
 }
 
 function createIngress({ filePath = tempStatePath(), times = [] } = {}) {
@@ -73,7 +84,7 @@ function createIngress({ filePath = tempStatePath(), times = [] } = {}) {
 
 test("accepted canonical candidate starts WAITING with exact validity and immutable ingress provenance", () => {
   const { store, ingress, filePath } = createIngress({ times: ["2026-09-05T13:01:00.000Z"] });
-  const result = ingress.importBundle(bundle([candidate()]));
+  const result = automatedImport(ingress, bundle([candidate()]));
 
   assert.equal(result.outcomes[0].status, "ACCEPTED");
   assert.equal(result.outcomes[0].lifecycleState, "WAITING");
@@ -108,22 +119,22 @@ test("accepted canonical candidate starts WAITING with exact validity and immuta
 test("canonical ingress requires authoritative bundle source and bundleId", () => {
   const { ingress } = createIngress();
   assert.throws(
-    () => ingress.importBundle({ bundleId: "x", candidates: [candidate()] }),
+    () => automatedImport(ingress, { bundleId: "x", candidates: [candidate()] }),
     (error) => error.code === "INVALID_BUNDLE_SOURCE",
   );
   assert.throws(
-    () => ingress.importBundle({ source: SOURCE, candidates: [candidate()] }),
+    () => automatedImport(ingress, { source: SOURCE, candidates: [candidate()] }),
     (error) => error.code === "INVALID_BUNDLE_ID",
   );
 });
 
 test("candidate source must match bundle source and SOD requires manual ARM intent", () => {
   const { ingress } = createIngress();
-  const mismatch = ingress.importBundle(bundle([candidate({ source: "SCANNER" })]));
+  const mismatch = automatedImport(ingress, bundle([candidate({ source: "SCANNER" })]));
   assert.equal(mismatch.outcomes[0].status, "REJECTED");
   assert.match(mismatch.outcomes[0].reasons.join(" "), /source must match/i);
 
-  const autoSod = ingress.importBundle(bundle([candidate({ armPolicy: { requestedMode: "AUTO" } })], { bundleId: "auto-sod" }));
+  const autoSod = automatedImport(ingress, bundle([candidate({ armPolicy: { requestedMode: "AUTO" } })], { bundleId: "auto-sod" }));
   assert.equal(autoSod.outcomes[0].status, "REJECTED");
   assert.match(autoSod.outcomes[0].reasons.join(" "), /SOD_A_PLUS_TRADES.*MANUAL/i);
 });
@@ -131,8 +142,8 @@ test("candidate source must match bundle source and SOD requires manual ARM inte
 test("non-SOD upstream AUTO intent may be preserved but final ARM authority remains MANUAL", () => {
   const { store, ingress } = createIngress();
   const source = "CHATGPT_AD_HOC";
-  const proposed = candidate({ source, armPolicy: { requestedMode: "AUTO", armAuthorized: false }, armAuthorized: false });
-  const result = ingress.importBundle({ source, bundleId: "adhoc-1", candidates: [proposed] });
+  const proposed = candidate({ source, armPolicy: { requestedMode: "AUTO" } });
+  const result = automatedImport(ingress, { source, bundleId: "adhoc-1", candidates: [proposed] });
   assert.equal(result.outcomes[0].status, "ACCEPTED");
   const accepted = store.snapshot().candidates[0];
   assert.equal(accepted.armPolicy.requestedMode, "AUTO");
@@ -151,7 +162,7 @@ test("upstream proposal cannot import permission ARM risk quantity or execution 
 
   for (const [index, overrides] of authorityOverrides.entries()) {
     const { ingress } = createIngress();
-    const result = ingress.importBundle(bundle([candidate(overrides)], { bundleId: `forbidden-${index}` }));
+    const result = automatedImport(ingress, bundle([candidate(overrides)], { bundleId: `forbidden-${index}` }));
     assert.equal(result.outcomes[0].status, "REJECTED");
   }
 });
@@ -168,14 +179,14 @@ test("finite exact validity is mandatory and friendly labels alone cannot be acc
 
   for (const [index, validity] of invalidValidity.entries()) {
     const { ingress } = createIngress();
-    const result = ingress.importBundle(bundle([candidate({ validity })], { bundleId: `invalid-validity-${index}` }));
+    const result = automatedImport(ingress, bundle([candidate({ validity })], { bundleId: `invalid-validity-${index}` }));
     assert.equal(result.outcomes[0].status, "REJECTED");
   }
 });
 
 test("equivalent absolute validity representations normalize to one idempotent contract", () => {
   const { store, ingress } = createIngress();
-  ingress.importBundle(bundle([candidate()], { bundleId: "bundle-a" }));
+  automatedImport(ingress, bundle([candidate()], { bundleId: "bundle-a" }));
   const equivalent = candidate({
     generatedAt: "2026-09-05T09:00:00-04:00",
     validity: {
@@ -186,7 +197,7 @@ test("equivalent absolute validity representations normalize to one idempotent c
       provenance: { source: "SOD", label: "RTH opportunity window" },
     },
   });
-  const result = ingress.importBundle(bundle([equivalent], { bundleId: "bundle-b" }));
+  const result = automatedImport(ingress, bundle([equivalent], { bundleId: "bundle-b" }));
 
   assert.equal(result.outcomes[0].status, "DUPLICATE");
   const accepted = store.snapshot().candidates[0];
@@ -196,8 +207,8 @@ test("equivalent absolute validity representations normalize to one idempotent c
 
 test("material validity change on same contractVersion is a fail-closed conflict", () => {
   const { ingress } = createIngress();
-  ingress.importBundle(bundle([candidate()], { bundleId: "v1-a" }));
-  const conflict = ingress.importBundle(bundle([candidate({
+  automatedImport(ingress, bundle([candidate()], { bundleId: "v1-a" }));
+  const conflict = automatedImport(ingress, bundle([candidate({
     validity: {
       ...candidate().validity,
       validUntil: "2026-09-05T19:30:00.000Z",
@@ -211,8 +222,8 @@ test("newer accepted version supersedes active prior version with revision and d
     times: ["2026-09-05T13:01:00.000Z", "2026-09-05T13:05:00.000Z"],
   });
 
-  ingress.importBundle(bundle([candidate()], { bundleId: "v1" }));
-  const result = ingress.importBundle(bundle([
+  automatedImport(ingress, bundle([candidate()], { bundleId: "v1" }));
+  const result = automatedImport(ingress, bundle([
     candidate({ contractVersion: 2, thesis: "Updated H2 continuation thesis" }),
   ], { bundleId: "v2" }));
 
@@ -238,15 +249,16 @@ test("newer accepted version supersedes active prior version with revision and d
 
 test("older version is stale and terminal prior version is not rewritten by a newer version", () => {
   const { store, ingress } = createIngress();
-  ingress.importBundle(bundle([candidate({ contractVersion: 2 })], { bundleId: "v2-first" }));
-  const stale = ingress.importBundle(bundle([candidate({ contractVersion: 1 })], { bundleId: "v1-late" }));
+  manualImport(ingress, bundle([candidate({ contractVersion: 2 })], { bundleId: "v2-first" }));
+  const stale = automatedImport(ingress, bundle([candidate({ contractVersion: 1 })], { bundleId: "v1-late" }));
   assert.equal(stale.outcomes[0].status, "STALE");
 
   const existing = store.state.candidates[0];
   existing.lifecycleState = "DECLINED";
   existing.stateRevision = 1;
   store.save();
-  ingress.importBundle(bundle([candidate({ contractVersion: 3, thesis: "third version" })], { bundleId: "v3" }));
+  const terminalResult = automatedImport(ingress, bundle([candidate({ contractVersion: 3, thesis: "third version" })], { bundleId: "v3" }));
+  assert.equal(terminalResult.outcomes[0].status, "REJECTED");
   const prior = store.snapshot().candidates.find((item) => item.contractVersion === 2);
   assert.equal(prior.lifecycleState, "DECLINED");
   assert.equal(prior.stateRevision, 1);
@@ -254,14 +266,15 @@ test("older version is stale and terminal prior version is not rewritten by a ne
 
 test("ARMED prior version is immutable and is never superseded operationally", () => {
   const { store, ingress } = createIngress();
-  ingress.importBundle(bundle([candidate()], { bundleId: "v1" }));
+  automatedImport(ingress, bundle([candidate()], { bundleId: "v1" }));
   const prior = store.state.candidates[0];
   prior.lifecycleState = "ARMED";
   prior.stateRevision = 1;
   prior.armAuthorized = true;
   store.save();
 
-  ingress.importBundle(bundle([candidate({ contractVersion: 2, thesis: "new opportunity version" })], { bundleId: "v2" }));
+  const result = manualImport(ingress, bundle([candidate({ contractVersion: 2, thesis: "new opportunity version" })], { bundleId: "v2" }));
+  assert.equal(result.outcomes[0].status, "REJECTED");
   const persistedPrior = store.snapshot().candidates.find((item) => item.contractVersion === 1);
   assert.equal(persistedPrior.lifecycleState, "ARMED");
   assert.equal(persistedPrior.stateRevision, 1);
@@ -270,23 +283,23 @@ test("ARMED prior version is immutable and is never superseded operationally", (
 
 test("canonical contract tampering fails closed before duplicate or supersession processing", () => {
   const { store, ingress } = createIngress();
-  ingress.importBundle(bundle([candidate()], { bundleId: "v1" }));
+  automatedImport(ingress, bundle([candidate()], { bundleId: "v1" }));
   store.state.candidates[0].thesis = "tampered without contractVersion";
   store.save();
 
   assert.throws(
-    () => ingress.importBundle(bundle([candidate()], { bundleId: "duplicate-after-tamper" })),
+    () => automatedImport(ingress, bundle([candidate()], { bundleId: "duplicate-after-tamper" })),
     (error) => error.code === "CANDIDATE_CONTRACT_INTEGRITY_ERROR",
   );
   assert.throws(
-    () => ingress.importBundle(bundle([candidate({ contractVersion: 2, thesis: "valid new version" })], { bundleId: "v2-after-tamper" })),
+    () => automatedImport(ingress, bundle([candidate({ contractVersion: 2, thesis: "valid new version" })], { bundleId: "v2-after-tamper" })),
     (error) => error.code === "CANDIDATE_CONTRACT_INTEGRITY_ERROR",
   );
 });
 
 test("legacy split lifecycle arrays migrate into canonical lifecycleJournal when ingress touches candidate", () => {
   const { store, ingress } = createIngress();
-  ingress.importBundle(bundle([candidate()], { bundleId: "v1" }));
+  automatedImport(ingress, bundle([candidate()], { bundleId: "v1" }));
   const existing = store.state.candidates[0];
   existing.lifecycleEvents = existing.lifecycleJournal.events;
   existing.lifecycleOperations = existing.lifecycleJournal.operations.map((operation) => ({
@@ -297,7 +310,7 @@ test("legacy split lifecycle arrays migrate into canonical lifecycleJournal when
   delete existing.lifecycleJournal;
   store.save();
 
-  ingress.importBundle(bundle([candidate({ contractVersion: 2, thesis: "new version" })], { bundleId: "v2" }));
+  automatedImport(ingress, bundle([candidate({ contractVersion: 2, thesis: "new version" })], { bundleId: "v2" }));
   const migrated = store.snapshot().candidates.find((item) => item.contractVersion === 1);
   assert.equal(migrated.lifecycleJournal.events.length, 2);
   assert.equal(migrated.lifecycleJournal.operations.length, 2);
@@ -308,7 +321,7 @@ test("legacy split lifecycle arrays migrate into canonical lifecycleJournal when
 
 test("persistence failure rolls back acceptance and supersession mutations", () => {
   const { store, ingress } = createIngress();
-  ingress.importBundle(bundle([candidate()], { bundleId: "v1" }));
+  automatedImport(ingress, bundle([candidate()], { bundleId: "v1" }));
   const before = store.snapshot();
 
   const originalSave = store.save.bind(store);
@@ -317,7 +330,7 @@ test("persistence failure rolls back acceptance and supersession mutations", () 
   };
 
   assert.throws(
-    () => ingress.importBundle(bundle([candidate({ contractVersion: 2, thesis: "new version" })], { bundleId: "v2" })),
+    () => automatedImport(ingress, bundle([candidate({ contractVersion: 2, thesis: "new version" })], { bundleId: "v2" })),
     (error) => error.code === "SIMULATED_SAVE_FAILURE",
   );
 

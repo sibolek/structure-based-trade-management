@@ -3,6 +3,7 @@ import { isAllowedLocalOrigin } from "./local-origin.mjs";
 import { PreTradeStore, DEFAULT_PRETRADE_STATE_FILE } from "./pretrade-state.mjs";
 import {
   AUTOMATED_UNTOUCHED_ONLY,
+  MANUAL_AUTHORIZED,
   PreTradeCandidateIngress,
 } from "./pretrade-candidate-ingress.mjs";
 import { PreTradeLifecycleCoordinator } from "./pretrade-lifecycle-coordinator.mjs";
@@ -341,6 +342,7 @@ const server = http.createServer(async (req, res) => {
       candidateContractVersioning: true,
       candidateValidityAuthority: true,
       candidateAutomatedIngressPolicy: AUTOMATED_UNTOUCHED_ONLY,
+      candidateManualIngressPolicy: MANUAL_AUTHORIZED,
       triggerContractAuthority: true,
       triggerEngineAuthority: true,
       triggerEvidenceApi: true,
@@ -414,7 +416,9 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const payload = await readJson(req);
-      const result = candidateIngress.importBundle(payload);
+      const result = candidateIngress.importBundle(payload, {
+        manualSupersessionAuthorizations: payload.manualSupersessionAuthorizations,
+      });
       const validityReconciliation = lifecycleCoordinator.reconcileAllValidity({
         source: "INGRESS_VALIDITY_RECONCILIATION",
       });
@@ -442,7 +446,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] Handoff file: ${HANDOFF_FILE}`);
   console.log(`[ExecutionOS V2.4] Handoff delivery file: ${HANDOFF_DELIVERY_FILE}`);
   console.log("[ExecutionOS V2.4] Candidate import is routed through authoritative ingress with immutable contract/version provenance.");
-  console.log(`[ExecutionOS V2.4] Automated candidate ingress policy available: ${AUTOMATED_UNTOUCHED_ONLY}.`);
+  console.log(`[ExecutionOS V2.4] Candidate ingress policies available: ${AUTOMATED_UNTOUCHED_ONLY}, ${MANUAL_AUTHORIZED}; no-policy import fails closed.`);
   console.log("[ExecutionOS V2.4] Exact candidate validity is reconciled before PRETRADE candidate operations.");
   console.log("[ExecutionOS V2.4] Trigger contracts are versioned and evaluated by the authoritative durable trigger engine.");
   console.log("[ExecutionOS V2.4] Trigger persistence is monitored separately from pre-satisfaction trigger progress.");
