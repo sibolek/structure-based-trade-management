@@ -1,13 +1,17 @@
+import { useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  FileText,
+  FileImage,
   Layers3,
   Play,
   RefreshCw,
   ShieldCheck,
   Sparkles,
+  Trash2,
+  Upload,
   WifiOff,
+  X,
 } from "lucide-react";
 
 function text(value) {
@@ -18,14 +22,12 @@ function upper(value) {
   return text(value).toUpperCase();
 }
 
-function trustedRequestReady(request) {
-  return Boolean(
-    request
-    && text(request.sourceDate)
-    && Array.isArray(request.charts)
-    && request.charts.length > 0
-    && request.charts.every((chart) => text(chart?.chartId) && text(chart?.contentRef)),
-  );
+function localDateValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function StatusChip({ good, children }) {
@@ -39,6 +41,14 @@ function StatusChip({ good, children }) {
       {children}
     </span>
   );
+}
+
+function byteLabel(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function ResultSummary({ result }) {
@@ -107,16 +117,108 @@ function ResultSummary({ result }) {
   );
 }
 
-export default function SodWorkspace({ sod, trustedGenerationRequest = null }) {
-  const inputsReady = trustedRequestReady(trustedGenerationRequest);
-  const serviceReady = Boolean(sod?.connected && sod?.health?.providerConfigured === true);
-  const canGenerate = serviceReady && inputsReady && !sod?.busy;
+function TrustedChartSet({ sod }) {
+  const charts = Array.isArray(sod?.charts) ? sod.charts : [];
+  const maxBytes = sod?.health?.chartMaxBytes;
+
+  async function upload(event) {
+    const files = event.target.files;
+    event.target.value = "";
+    if (!files?.length) return;
+    await sod.uploadFiles(files).catch(() => {});
+  }
+
+  return (
+    <section className="rounded border border-white/10 bg-ink-850/95 shadow-terminal">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+        <div>
+          <p className="section-label">Trusted Chart Set</p>
+          <h3 className="text-lg font-semibold text-zinc-100">Immutable chart ingestion</h3>
+          <p className="mt-1 text-xs text-zinc-500">PNG, JPEG, or WebP screenshots are uploaded as bytes and replaced by opaque orchestrator-issued references.</p>
+        </div>
+        <label className={`inline-flex items-center gap-2 rounded border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-bold text-sky-100 ${sod?.uploading || !sod?.connected ? "cursor-not-allowed opacity-40" : "cursor-pointer"}`}>
+          <Upload size={14} />
+          {sod?.uploading ? "UPLOADING" : "ADD CHARTS"}
+          <input
+            type="file"
+            multiple
+            accept="image/png,image/jpeg,image/webp"
+            disabled={sod?.uploading || !sod?.connected}
+            onChange={upload}
+            className="hidden"
+          />
+        </label>
+      </header>
+
+      <div className="p-4">
+        {charts.length ? (
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {charts.map((chart) => (
+              <div key={chart.contentRef} className="rounded border border-emerald-400/20 bg-emerald-950/10 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <FileImage size={15} className="shrink-0 text-emerald-300" />
+                      <p className="truncate text-sm font-semibold text-zinc-200">{chart.displayName || "chart"}</p>
+                    </div>
+                    <p className="mt-2 font-mono text-[10px] text-zinc-500">{chart.mediaType} · {byteLabel(chart.byteLength)}</p>
+                    <p className="mt-1 font-mono text-[10px] text-zinc-600">SHA {text(chart.sha256).slice(0, 12)}…</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => sod.removeChart(chart.contentRef)}
+                    className="rounded border border-white/10 p-1.5 text-zinc-500 hover:border-red-400/30 hover:text-red-300"
+                    title="Remove from current SOD selection"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded border border-dashed border-white/10 bg-black/10 px-4 py-8 text-center">
+            <FileImage size={24} className="mx-auto text-zinc-600" />
+            <p className="mt-2 text-sm font-semibold text-zinc-300">No charts selected</p>
+            <p className="mt-1 text-xs text-zinc-500">Choose chart screenshots above. The browser never supplies a storage path.</p>
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-500">
+          <span>{Number.isFinite(Number(maxBytes)) ? `Maximum ${byteLabel(maxBytes)} per chart` : "Server size limit unavailable"}</span>
+          {charts.length ? (
+            <button type="button" onClick={sod.clearCharts} className="inline-flex items-center gap-1.5 text-zinc-500 hover:text-red-300">
+              <Trash2 size={12} />
+              Clear selection
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export default function SodWorkspace({ sod }) {
+  const [sourceDate, setSourceDate] = useState(localDateValue);
+  const charts = Array.isArray(sod?.charts) ? sod.charts : [];
+  const inputsReady = Boolean(sourceDate && charts.length > 0);
+  const serviceReady = Boolean(
+    sod?.connected
+    && sod?.health?.providerConfigured === true
+    && sod?.health?.chartIngestion === "IMMUTABLE_OPAQUE_REF",
+  );
+  const canGenerate = serviceReady && inputsReady && !sod?.busy && !sod?.uploading;
 
   async function generate(mode) {
     if (!canGenerate) return;
     await sod.generate({
-      ...trustedGenerationRequest,
+      sourceDate,
       generationMode: mode,
+      charts: charts.map((chart) => ({
+        chartId: chart.chartId,
+        contentRef: chart.contentRef,
+        label: chart.displayName || null,
+      })),
     }).catch(() => {});
   }
 
@@ -148,10 +250,10 @@ export default function SodWorkspace({ sod, trustedGenerationRequest = null }) {
           <div className="rounded border border-white/10 bg-black/10 p-3">
             <div className="flex items-center gap-2">
               <Layers3 size={16} className={inputsReady ? "text-emerald-300" : "text-amber-300"} />
-              <p className="section-label">Trusted Chart Set</p>
+              <p className="section-label">Trusted Inputs</p>
             </div>
-            <p className="mt-2 font-semibold text-zinc-200">{inputsReady ? `${trustedGenerationRequest.charts.length} chart reference(s) ready` : "Not loaded"}</p>
-            <p className="mt-2 text-xs text-zinc-500">No free-form filesystem or content-reference input is accepted here. Chart ingestion will supply trusted references.</p>
+            <p className="mt-2 font-semibold text-zinc-200">{charts.length ? `${charts.length} chart reference(s) ready` : "No chart set"}</p>
+            <p className="mt-2 text-xs text-zinc-500">References are issued only after local immutable ingestion and integrity validation.</p>
           </div>
 
           <div className="rounded border border-white/10 bg-black/10 p-3">
@@ -164,45 +266,45 @@ export default function SodWorkspace({ sod, trustedGenerationRequest = null }) {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 px-4 py-3">
-          <div className="text-xs text-zinc-500">
-            {sod?.error ? <span className="text-amber-200">{sod.error}</span> : inputsReady ? `Source date ${trustedGenerationRequest.sourceDate}` : "Load a trusted chart set before generation."}
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => generate("INITIAL")}
-              disabled={!canGenerate}
-              className="inline-flex items-center gap-2 rounded border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-bold text-sky-100 disabled:cursor-not-allowed disabled:opacity-35"
-            >
-              <Play size={14} />
-              {sod?.busy ? "GENERATING" : "GENERATE SOD"}
-            </button>
-            <button
-              type="button"
-              onClick={() => generate("REFRESH")}
-              disabled={!canGenerate}
-              className="inline-flex items-center gap-2 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-bold text-zinc-300 disabled:cursor-not-allowed disabled:opacity-35"
-            >
-              <RefreshCw size={14} />
-              REFRESH SOD
-            </button>
+        <div className="flex flex-wrap items-end justify-between gap-3 border-t border-white/10 px-4 py-3">
+          <label className="text-xs text-zinc-500">
+            SOD source date
+            <input
+              type="date"
+              value={sourceDate}
+              onChange={(event) => setSourceDate(event.target.value)}
+              className="mt-1 block rounded border border-white/10 bg-ink-900 px-2.5 py-2 font-mono text-xs text-zinc-200"
+            />
+          </label>
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
+            <div className="text-xs text-zinc-500">
+              {sod?.error ? <span className="text-amber-200">{sod.error}</span> : inputsReady ? `${charts.length} trusted chart(s) · ${sourceDate}` : "Add at least one trusted chart before generation."}
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => generate("INITIAL")}
+                disabled={!canGenerate}
+                className="inline-flex items-center gap-2 rounded border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-bold text-sky-100 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <Play size={14} />
+                {sod?.busy ? "GENERATING" : "GENERATE SOD"}
+              </button>
+              <button
+                type="button"
+                onClick={() => generate("REFRESH")}
+                disabled={!canGenerate}
+                className="inline-flex items-center gap-2 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-bold text-zinc-300 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <RefreshCw size={14} />
+                REFRESH SOD
+              </button>
+            </div>
           </div>
         </div>
       </section>
 
-      {!inputsReady ? (
-        <section className="rounded border border-amber-400/20 bg-amber-950/10 p-4">
-          <div className="flex items-start gap-3">
-            <FileText size={18} className="mt-0.5 text-amber-300" />
-            <div>
-              <p className="font-semibold text-amber-100">Chart ingestion is the remaining input boundary.</p>
-              <p className="mt-1 text-xs text-amber-100/60">The workspace is intentionally connected but generation-disabled until ExecutionOS can issue trusted chart references. This prevents browser-controlled local paths or fabricated content references from becoming analysis inputs.</p>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
+      <TrustedChartSet sod={sod} />
       <ResultSummary result={sod?.lastResult} />
     </div>
   );
