@@ -52,11 +52,12 @@ export async function prepareSodOrchestration({
   provider,
   request,
   pretradeSnapshot,
+  resolveChart = null,
   clock = () => new Date().toISOString(),
   bundleIdFactory = ({ sourceDate, generatedAt }) => `sod-${sourceDate}-a-plus-trades-${safeBundleTimestamp(generatedAt)}`,
 } = {}) {
   const priorCandidates = priorCandidatesFromSnapshot(pretradeSnapshot);
-  const invocation = await invokeSodAnalysisProvider(provider, request);
+  const invocation = await invokeSodAnalysisProvider(provider, request, { resolveChart });
   const generatedAt = text(clock());
   safeBundleTimestamp(generatedAt);
 
