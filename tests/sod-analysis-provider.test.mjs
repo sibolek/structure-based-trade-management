@@ -8,6 +8,7 @@ import {
   SOD_GENERATION_INITIAL,
   SOD_GENERATION_REFRESH,
 } from "../schwab-bridge/sod-analysis-provider.mjs";
+import { sodArtifactContentFixture } from "./helpers/sod-artifact-content-fixture.mjs";
 
 function request(overrides = {}) {
   return {
@@ -37,8 +38,7 @@ function result(overrides = {}) {
         thesis: "Reclaim and continuation.",
       },
     ],
-    report: { markdown: "# SOD" },
-    dashboard: { html: "<html></html>" },
+    artifactContent: sodArtifactContentFixture(),
     ...overrides,
   };
 }
@@ -70,6 +70,7 @@ test("analysis request refuses caller-controlled orchestration output paths and 
 test("analysis provider may propose trade substance but not version lineage lifecycle or execution authority", () => {
   const normalized = normalizeSodAnalysisResult(result());
   assert.equal(normalized.candidateProposals.length, 1);
+  assert.equal(normalized.artifactContent.sections.length, 19);
 
   for (const field of [
     "contractVersion",
@@ -90,6 +91,18 @@ test("analysis provider may propose trade substance but not version lineage life
   }
 });
 
+test("analysis provider may return structured artifact content but never rendered report or dashboard output", () => {
+  assert.equal(normalizeSodAnalysisResult(result()).artifactContent.sections.length, 19);
+  assert.throws(
+    () => normalizeSodAnalysisResult({ ...result(), report: { markdown: "# provider-owned" } }),
+    (error) => error.code === "SOD_ANALYSIS_RENDERED_ARTIFACT_FORBIDDEN",
+  );
+  assert.throws(
+    () => normalizeSodAnalysisResult({ ...result(), dashboard: { html: "<html>provider-owned</html>" } }),
+    (error) => error.code === "SOD_ANALYSIS_RENDERED_ARTIFACT_FORBIDDEN",
+  );
+});
+
 test("provider invocation validates both request and result around injected provider", async () => {
   const seen = [];
   const provider = {
@@ -103,4 +116,5 @@ test("provider invocation validates both request and result around injected prov
   assert.equal(seen.length, 1);
   assert.equal(seen[0].generationMode, SOD_GENERATION_INITIAL);
   assert.equal(invocation.result.generationMetadata.provider, "test-double");
+  assert.equal(invocation.result.artifactContent.sections.length, 19);
 });
