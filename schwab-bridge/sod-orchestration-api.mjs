@@ -26,7 +26,7 @@ export const DEFAULT_SOD_ORCHESTRATION_PORT = 8790;
 export const MAX_SOD_ORCHESTRATION_BODY_BYTES = 1024 * 1024;
 export const SOD_CHART_INGESTION_CAPABILITY = "IMMUTABLE_OPAQUE_REF";
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1"]);
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
 function text(value) {
   return String(value ?? "").trim();
