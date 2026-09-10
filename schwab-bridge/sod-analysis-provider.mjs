@@ -172,10 +172,69 @@ export function assertSodAnalysisProvider(provider) {
   return provider;
 }
 
-export async function invokeSodAnalysisProvider(provider, requestInput) {
+function assertTrustedChartResolver(resolveChart) {
+  if (resolveChart === undefined || resolveChart === null) return null;
+  if (typeof resolveChart !== "function") {
+    throw contractError(
+      "SOD chart resolver must be a function",
+      "SOD_ANALYSIS_CHART_RESOLVER_INVALID",
+    );
+  }
+  return resolveChart;
+}
+
+async function buildProviderContext(request, { resolveChart = null } = {}) {
+  const trustedResolver = assertTrustedChartResolver(resolveChart);
+  if (!trustedResolver) return Object.freeze({ resolveChart: null });
+
+  const trustedCharts = new Map();
+  for (const chart of request.charts) {
+    const resolved = await trustedResolver(chart.contentRef);
+    if (!resolved || typeof resolved !== "object") {
+      throw contractError("SOD chart resolver returned invalid result", "SOD_ANALYSIS_CHART_RESOLUTION_INVALID");
+    }
+    if (text(resolved.contentRef) !== chart.contentRef || text(resolved.chartId) !== chart.chartId) {
+      throw contractError(
+        "SOD chart resolver identity does not match analysis request",
+        "SOD_ANALYSIS_CHART_IDENTITY_MISMATCH",
+      );
+    }
+    if (!Buffer.isBuffer(resolved.bytes) && !(resolved.bytes instanceof Uint8Array)) {
+      throw contractError("SOD chart resolver must return chart bytes", "SOD_ANALYSIS_CHART_BYTES_INVALID");
+    }
+    trustedCharts.set(chart.contentRef, Object.freeze({
+      chartId: resolved.chartId,
+      contentRef: resolved.contentRef,
+      mediaType: text(resolved.mediaType),
+      byteLength: Number(resolved.byteLength),
+      sha256: text(resolved.sha256),
+      displayName: text(resolved.displayName) || null,
+      bytes: Buffer.from(resolved.bytes),
+    }));
+  }
+
+  return Object.freeze({
+    async resolveChart(contentRef) {
+      const resolved = trustedCharts.get(text(contentRef));
+      if (!resolved) {
+        throw contractError(
+          "Provider requested chart outside the trusted analysis request",
+          "SOD_ANALYSIS_CHART_NOT_AUTHORIZED",
+        );
+      }
+      return Object.freeze({
+        ...resolved,
+        bytes: Buffer.from(resolved.bytes),
+      });
+    },
+  });
+}
+
+export async function invokeSodAnalysisProvider(provider, requestInput, contextOptions = {}) {
   const trustedProvider = assertSodAnalysisProvider(provider);
   const request = buildSodAnalysisRequest(requestInput);
-  const result = await trustedProvider.generate(request);
+  const providerContext = await buildProviderContext(request, contextOptions);
+  const result = await trustedProvider.generate(request, providerContext);
   return {
     request,
     result: normalizeSodAnalysisResult(result),
