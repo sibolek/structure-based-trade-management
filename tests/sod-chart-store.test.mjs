@@ -82,6 +82,30 @@ test("SOD chart store rejects unsupported media, signature mismatch, and oversiz
   }
 });
 
+test("SOD chart store refuses deterministic id collision without overwriting immutable prior bytes", async () => {
+  const fixture = await tempStore({ idFactory: () => "charttest0006" });
+  try {
+    const first = await fixture.store.ingest({ bytes: PNG_BYTES, mediaType: "image/png", displayName: "first.png" });
+    const before = await fixture.store.resolve(first.contentRef);
+
+    await assert.rejects(
+      fixture.store.ingest({
+        bytes: Buffer.concat([PNG_BYTES, Buffer.from([0x01])]),
+        mediaType: "image/png",
+        displayName: "second.png",
+      }),
+      (error) => error.code === "SOD_CHART_ID_COLLISION",
+    );
+
+    const after = await fixture.store.resolve(first.contentRef);
+    assert.equal(after.displayName, "first.png");
+    assert.equal(after.sha256, before.sha256);
+    assert.equal(Buffer.compare(after.bytes, PNG_BYTES), 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("SOD chart store detects immutable byte tampering before provider consumption", async () => {
   const fixture = await tempStore({ idFactory: () => "charttest0004" });
   try {
