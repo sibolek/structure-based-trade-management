@@ -21,6 +21,7 @@ import {
   SOD_PUBLICATION_NEW,
   SOD_PUBLICATION_PRETRADE_PREFLIGHT_REQUIRED,
 } from "../schwab-bridge/sod-publication-intent.mjs";
+import { sodArtifactContentFixture } from "./helpers/sod-artifact-content-fixture.mjs";
 
 const SOURCE_DATE = "2026-09-09";
 const CANDIDATE_ID = "sod-2026-09-09-nvda-vwap-reclaim-long";
@@ -103,8 +104,7 @@ function provider(candidateProposal) {
     async generate() {
       return {
         candidateProposals: [candidateProposal],
-        report: { markdown: "# SOD" },
-        dashboard: { html: "<html>SOD</html>" },
+        artifactContent: sodArtifactContentFixture(),
         generationMetadata: { provider: "test-double" },
       };
     },
@@ -135,7 +135,7 @@ function canonicalPrior(candidateProposal, generatedAt = "2026-09-09T14:00:00.00
   };
 }
 
-test("new SOD proposal prepares canonical NEW publication and atomically hands it to feeder inbox", async () => {
+test("new SOD proposal prepares canonical NEW publication and deterministic human artifacts", async () => {
   const prepared = await prepareSodOrchestration({
     provider: provider(proposal()),
     request: request(),
@@ -149,6 +149,10 @@ test("new SOD proposal prepares canonical NEW publication and atomically hands i
   assert.equal(prepared.lineage[0].classification, "NEW");
   assert.equal(prepared.publicationIntents[0].publicationIntent, SOD_PUBLICATION_NEW);
   assert.equal(prepared.bundle.candidates[0].contractVersion, 1);
+  assert.equal(prepared.analysis.rendererVersion, 1);
+  assert.match(prepared.analysis.report.html, /NVDA/);
+  assert.match(prepared.analysis.report.markdown, /Confirm VWAP reclaim and hold/);
+  assert.match(prepared.analysis.dashboard.html, /Long Candidates/);
 
   const inbox = await fs.mkdtemp(path.join(os.tmpdir(), "executionos-sod-orchestrate-"));
   try {
@@ -196,6 +200,7 @@ test("revised SOD proposal is lineage vNext but publication blocks pending autho
     prepared.publicationIntents[0].publicationIntent,
     SOD_PUBLICATION_PRETRADE_PREFLIGHT_REQUIRED,
   );
+  assert.match(prepared.analysis.report.html, /Updated reclaim thesis with stronger relative strength/);
 
   await assert.rejects(
     publishPreparedSodOrchestration({ prepared, inboxPath: os.tmpdir() }),
