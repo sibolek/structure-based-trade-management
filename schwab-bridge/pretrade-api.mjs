@@ -6,6 +6,7 @@ import {
   MANUAL_AUTHORIZED,
   PreTradeCandidateIngress,
 } from "./pretrade-candidate-ingress.mjs";
+import { createPreTradeCandidateApiHandler } from "./pretrade-candidate-api.mjs";
 import { PreTradeLifecycleCoordinator } from "./pretrade-lifecycle-coordinator.mjs";
 import { createPreTradeLifecycleApiHandler } from "./pretrade-lifecycle-api.mjs";
 import { PreTradeTriggerEngine } from "./pretrade-trigger-engine.mjs";
@@ -234,6 +235,11 @@ const handleHandoffApi = createExecutionBoardHandoffApiHandler({
   deliveryRepository: handoffDeliveryRepository,
   maxBodyBytes: MAX_BODY_BYTES,
 });
+const handleCandidateApi = createPreTradeCandidateApiHandler({
+  candidateIngress,
+  lifecycleCoordinator,
+  ocoService,
+});
 
 function json(res, statusCode, payload, origin = null) {
   const body = JSON.stringify(payload);
@@ -343,6 +349,7 @@ const server = http.createServer(async (req, res) => {
       candidateValidityAuthority: true,
       candidateAutomatedIngressPolicy: AUTOMATED_UNTOUCHED_ONLY,
       candidateManualIngressPolicy: MANUAL_AUTHORIZED,
+      candidateManualSupersessionReviewAuthority: true,
       triggerContractAuthority: true,
       triggerEngineAuthority: true,
       triggerEvidenceApi: true,
@@ -374,7 +381,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pathname.startsWith("/api/candidates") || pathname.startsWith("/api/oco-groups")) {
+  if (pathname.startsWith("/api/oco-groups")) {
     try {
       lifecycleCoordinator.reconcileAllValidity({ source: "REQUEST_VALIDITY_RECONCILIATION" });
       ocoService.reconcileBlockedHandoffRetirements();
@@ -392,6 +399,7 @@ const server = http.createServer(async (req, res) => {
   if (await handleLifecycleApi(req, res)) return;
   if (await handleOcoApi(req, res)) return;
   if (await handleHandoffApi(req, res)) return;
+  if (await handleCandidateApi(req, res)) return;
 
   if (req.method === "GET" && pathname === "/api/candidates") {
     try {
@@ -404,29 +412,6 @@ const server = http.createServer(async (req, res) => {
       }, origin);
     } catch (error) {
       failPreTradeRequest(res, error, origin, "CANDIDATE_SNAPSHOT_ERROR");
-    }
-    return;
-  }
-
-  if (req.method === "POST" && pathname === "/api/candidates/import") {
-    if (origin && !isAllowedLocalOrigin(origin)) {
-      json(res, 403, { error: "origin not allowed" });
-      return;
-    }
-
-    try {
-      const payload = await readJson(req);
-      const result = candidateIngress.importBundle(payload, {
-        manualSupersessionAuthorizations: payload.manualSupersessionAuthorizations,
-      });
-      const validityReconciliation = lifecycleCoordinator.reconcileAllValidity({
-        source: "INGRESS_VALIDITY_RECONCILIATION",
-      });
-      const blockedHandoffRetirementReconciliation = ocoService.reconcileBlockedHandoffRetirements();
-      const ocoReconciliation = ocoService.reconcileClosedNoArm();
-      json(res, 200, { ...result, validityReconciliation, blockedHandoffRetirementReconciliation, ocoReconciliation }, origin);
-    } catch (error) {
-      failPreTradeRequest(res, error, origin, "IMPORT_ERROR");
     }
     return;
   }

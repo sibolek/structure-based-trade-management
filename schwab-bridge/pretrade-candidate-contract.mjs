@@ -53,6 +53,16 @@ const CANONICAL_AUTHORITY_FIELDS = new Set([
   "authorizedRiskEvaluationId",
   "selectedQuantity",
   "executionState",
+  "authorizationId",
+  "reviewId",
+  "manualSupersessionReviews",
+  "manualSupersessionReview",
+  "manualSupersessionAuthorizations",
+  "manualSupersessionAuthorization",
+  "manualSupersessionApproval",
+  "manualApproved",
+  "forceImport",
+  "supersessionApproved",
 ]);
 
 const PROHIBITED_AUTHORITY_FIELDS = new Set([
@@ -72,6 +82,16 @@ const PROHIBITED_AUTHORITY_FIELDS = new Set([
   "authorizedRiskEvaluationId",
   "selectedQuantity",
   "executionState",
+  "authorizationId",
+  "reviewId",
+  "manualSupersessionReviews",
+  "manualSupersessionReview",
+  "manualSupersessionAuthorizations",
+  "manualSupersessionAuthorization",
+  "manualSupersessionApproval",
+  "manualApproved",
+  "forceImport",
+  "supersessionApproved",
 ]);
 
 function text(value) {

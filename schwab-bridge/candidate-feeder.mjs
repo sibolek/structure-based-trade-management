@@ -250,6 +250,11 @@ export function validateCandidateBundle(bundle, bytes, {
     errors.push("bundle must be a JSON object");
     return errors;
   }
+  for (const field of ["manualSupersessionReviews", "manualSupersessionReview", "manualSupersessionAuthorizations", "manualSupersessionAuthorization", "manualSupersessionApproval", "authorizationId", "reviewId", "manualApproved", "forceImport", "supersessionApproved"]) {
+    if (Object.prototype.hasOwnProperty.call(bundle, field)) {
+      errors.push(`${field} cannot establish candidate ingress or supersession authority`);
+    }
+  }
   if (bundle.source !== CANDIDATE_FEEDER_SOURCE) {
     errors.push(`bundle source must equal ${CANDIDATE_FEEDER_SOURCE}`);
   }
@@ -278,6 +283,11 @@ export function validateCandidateBundle(bundle, bytes, {
     }
     if (candidate.source !== CANDIDATE_FEEDER_SOURCE) {
       errors.push(`candidates[${index}].source must equal bundle source ${CANDIDATE_FEEDER_SOURCE}`);
+    }
+    for (const field of ["manualSupersessionReviews", "manualSupersessionReview", "manualSupersessionAuthorizations", "manualSupersessionAuthorization", "manualSupersessionApproval", "authorizationId", "reviewId", "manualApproved", "forceImport", "supersessionApproved"]) {
+      if (Object.prototype.hasOwnProperty.call(candidate, field)) {
+        errors.push(`candidates[${index}].${field} cannot establish candidate ingress or supersession authority`);
+      }
     }
   }
 

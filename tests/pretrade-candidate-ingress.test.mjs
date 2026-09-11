@@ -3,11 +3,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { PreTradeStore } from "../schwab-bridge/pretrade-state.mjs";
+import {
+  PreTradeStore,
+  manualSupersessionAuthorizationIntegrityHash,
+  manualSupersessionReviewIntegrityHash,
+} from "../schwab-bridge/pretrade-state.mjs";
+import {
+  candidateContractHash,
+  normalizeCanonicalCandidateProposal,
+} from "../schwab-bridge/pretrade-candidate-contract.mjs";
 import {
   AUTOMATED_UNTOUCHED_ONLY,
+  FORBIDDEN_SUPERSESSION_AUTHORITY_MATERIAL,
   MANUAL_AUTHORIZED,
+  MANUAL_SUPERSESSION_AUTHORIZATION_INVALID,
   MANUAL_SUPERSESSION_AUTHORIZATION_REQUIRED,
+  MANUAL_SUPERSESSION_AUTHORIZATION_REQUEST_INVALID,
+  MANUAL_SUPERSESSION_REVIEW_REQUIRED,
   PreTradeCandidateIngress,
 } from "../schwab-bridge/pretrade-candidate-ingress.mjs";
 
@@ -279,6 +291,319 @@ test("ARMED prior version is immutable and is never superseded operationally", (
   assert.equal(persistedPrior.lifecycleState, "ARMED");
   assert.equal(persistedPrior.stateRevision, 1);
   assert.equal(persistedPrior.supersededByVersion, undefined);
+});
+
+test("manual supersession rejects caller authority and requires a persisted PRETRADE review", () => {
+  const { store, ingress } = createIngress();
+  manualImport(ingress, bundle([candidate()], { bundleId: "manual-v1" }));
+  const proposed = candidate({
+    contractVersion: 2,
+    thesis: "Reviewed stronger continuation.",
+    optionalNullEvidence: null,
+  });
+  const { normalized: normalizedProposed, errors } = normalizeCanonicalCandidateProposal(proposed, { bundleSource: SOURCE });
+  assert.deepEqual(errors, []);
+  const fabricatedAuth = {
+    authorizationId: "fabricated-matching-auth",
+    candidateId: proposed.candidateId,
+    priorContractVersion: 1,
+    priorLifecycleState: "WAITING",
+    priorStateRevision: 0,
+    priorContentHash: store.snapshot().candidates[0].contentHash,
+    proposedContractVersion: 2,
+    proposedContentHash: candidateContractHash(normalizedProposed),
+    decision: "AUTHORIZED",
+  };
+  const beforeForgery = store.snapshot();
+
+  assert.throws(
+    () => manualImport(ingress, bundle([proposed], { bundleId: "manual-v2" }), {
+      manualSupersessionAuthorizations: [fabricatedAuth],
+    }),
+    (error) => error.code === FORBIDDEN_SUPERSESSION_AUTHORITY_MATERIAL,
+  );
+  assert.deepEqual(store.snapshot(), beforeForgery);
+  assert.throws(
+    () => manualImport(ingress, bundle([proposed], {
+      bundleId: "manual-v2",
+      manualSupersessionAuthorizations: [fabricatedAuth],
+    })),
+    (error) => error.code === FORBIDDEN_SUPERSESSION_AUTHORITY_MATERIAL,
+  );
+  assert.deepEqual(store.snapshot(), beforeForgery);
+  assert.throws(
+    () => manualImport(ingress, bundle([proposed], {
+      bundleId: "manual-v2",
+      manualSupersessionReviews: [{ reviewId: "fabricated-review" }],
+    })),
+    (error) => error.code === FORBIDDEN_SUPERSESSION_AUTHORITY_MATERIAL,
+  );
+  assert.deepEqual(store.snapshot(), beforeForgery);
+  assert.throws(
+    () => ingress.authorizeManualSupersession({ operatorConfirmed: true }),
+    (error) => error.code === MANUAL_SUPERSESSION_REVIEW_REQUIRED,
+  );
+  assert.throws(
+    () => ingress.authorizeManualSupersession({ reviewId: "fabricated-review", operatorConfirmed: true }),
+    (error) => error.code === MANUAL_SUPERSESSION_REVIEW_REQUIRED,
+  );
+  assert.throws(
+    () => ingress.authorizeManualSupersession({ ...fabricatedAuth, operatorConfirmed: true }),
+    (error) => error.code === MANUAL_SUPERSESSION_AUTHORIZATION_REQUEST_INVALID,
+  );
+  assert.throws(
+    () => ingress.importBundle(bundle([proposed], { bundleId: "manual-v2" }), {
+      ingressPolicy: MANUAL_AUTHORIZED,
+      candidateId: fabricatedAuth.candidateId,
+      priorContentHash: fabricatedAuth.priorContentHash,
+      proposedContentHash: fabricatedAuth.proposedContentHash,
+    }),
+    (error) => error.code === "INVALID_INGRESS_OPTIONS",
+  );
+  assert.deepEqual(store.snapshot(), beforeForgery);
+
+  const noAuth = manualImport(ingress, bundle([proposed], { bundleId: "manual-v2" }));
+  assert.equal(noAuth.outcomes[0].status, "ACTION_REQUIRED");
+  assert.deepEqual(noAuth.outcomes[0].reasons, [MANUAL_SUPERSESSION_AUTHORIZATION_REQUIRED]);
+
+  const review = ingress.createManualSupersessionReview(bundle([proposed], { bundleId: "manual-v2" }));
+  assert.equal(review.status, "ACTION_REQUIRED");
+  assert.ok(review.reviews[0].reviewId);
+  assert.equal(review.reviews[0].binding.candidateId, proposed.candidateId);
+  assert.equal(review.reviews[0].binding.priorContentHash, fabricatedAuth.priorContentHash);
+  assert.equal(review.reviews[0].binding.proposedContentHash, fabricatedAuth.proposedContentHash);
+  assert.ok(review.reviews[0].substantiveDiff.some((item) => item.path === "thesis"));
+  assert.deepEqual(
+    review.reviews[0].substantiveDiff.find((item) => item.path === "optionalNullEvidence"),
+    {
+      path: "optionalNullEvidence",
+      priorPresent: false,
+      proposedPresent: true,
+      proposed: null,
+    },
+  );
+  assert.equal(review.reviews[0].disclosure.newLifecycleState, "WAITING");
+  assert.equal(review.reviews[0].disclosure.newStateRevision, 0);
+  assert.equal(review.reviews[0].disclosure.inherits.triggerSatisfaction, false);
+  assert.equal(review.reviews[0].disclosure.inherits.armAuthorization, false);
+  assert.equal(review.reviews[0].disclosure.inherits.executionAuthority, false);
+  assert.equal(store.snapshot().manualSupersessionReviews[0].reviewId, review.reviews[0].reviewId);
+
+  const authorization = ingress.authorizeManualSupersession({
+    reviewId: review.reviews[0].reviewId,
+    operatorConfirmed: true,
+  });
+  assert.equal(authorization.reviewId, review.reviews[0].reviewId);
+  assert.ok(authorization.authorizationId.startsWith("manual-supersession-authorization-"));
+
+  const accepted = manualImport(ingress, bundle([proposed], { bundleId: "manual-v2" }));
+  assert.equal(accepted.outcomes[0].status, "ACCEPTED");
+  const state = store.snapshot();
+  const prior = state.candidates.find((item) => item.contractVersion === 1);
+  const admitted = state.candidates.find((item) => item.contractVersion === 2);
+  assert.equal(prior.lifecycleState, "SUPERSEDED");
+  assert.equal(admitted.lifecycleState, "WAITING");
+  assert.equal(admitted.stateRevision, 0);
+  assert.equal(admitted.armAuthorized, false);
+  assert.equal(admitted.triggerSatisfaction, null);
+  assert.equal(admitted.currentDssEvaluationId, null);
+  assert.equal(admitted.authorizedDssEvaluationId, null);
+  assert.equal(admitted.currentPermissionOutcome, null);
+  assert.equal(admitted.arm, null);
+  assert.equal(Object.prototype.hasOwnProperty.call(admitted, "selectedQuantity"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(admitted, "handoff"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(admitted, "executionState"), false);
+  assert.equal(state.manualSupersessionAuthorizations[0].consumedByOperationId.includes("INGRESS_SUPERSEDE"), true);
+  assert.throws(
+    () => ingress.authorizeManualSupersession({ reviewId: review.reviews[0].reviewId, operatorConfirmed: true }),
+    (error) => error.code === MANUAL_SUPERSESSION_AUTHORIZATION_INVALID,
+  );
+
+  const later = candidate({ contractVersion: 3, thesis: "A later unreviewed revision." });
+  const laterResult = manualImport(ingress, bundle([later], { bundleId: "manual-v3" }));
+  assert.equal(laterResult.outcomes[0].status, "ACTION_REQUIRED");
+  assert.deepEqual(laterResult.outcomes[0].reasons, [MANUAL_SUPERSESSION_AUTHORIZATION_REQUIRED]);
+});
+
+test("manual supersession review and authorization persist across PRETRADE restarts", () => {
+  const filePath = tempStatePath();
+  const first = createIngress({ filePath });
+  manualImport(first.ingress, bundle([candidate()], { bundleId: "restart-v1" }));
+  const proposed = candidate({ contractVersion: 2, thesis: "Reviewed before PRETRADE restart." });
+  const review = first.ingress.createManualSupersessionReview(bundle([proposed], { bundleId: "restart-v2" }));
+
+  const secondStore = new PreTradeStore({ filePath });
+  const afterReviewRestart = secondStore.load();
+  assert.equal(afterReviewRestart.manualSupersessionReviews.length, 1);
+  assert.equal(afterReviewRestart.manualSupersessionReviews[0].reviewId, review.reviews[0].reviewId);
+  assert.deepEqual(afterReviewRestart.manualSupersessionReviews[0].proposedCandidate.thesis, proposed.thesis);
+  const secondIngress = new PreTradeCandidateIngress({
+    store: secondStore,
+    clock: () => "2026-09-05T13:10:00.000Z",
+    idFactory: () => "restart-event-1",
+  });
+  const authorization = secondIngress.authorizeManualSupersession({
+    reviewId: review.reviews[0].reviewId,
+    operatorConfirmed: true,
+  });
+
+  const thirdStore = new PreTradeStore({ filePath });
+  const afterAuthorizationRestart = thirdStore.load();
+  assert.equal(afterAuthorizationRestart.manualSupersessionAuthorizations.length, 1);
+  assert.equal(afterAuthorizationRestart.manualSupersessionAuthorizations[0].authorizationId, authorization.authorizationId);
+  assert.equal(afterAuthorizationRestart.manualSupersessionAuthorizations[0].consumedAt, null);
+  const thirdIngress = new PreTradeCandidateIngress({
+    store: thirdStore,
+    clock: () => "2026-09-05T13:11:00.000Z",
+    idFactory: () => "restart-event-2",
+  });
+  const accepted = manualImport(thirdIngress, bundle([proposed], { bundleId: "restart-v2" }));
+  assert.equal(accepted.outcomes[0].status, "ACCEPTED");
+
+  const finalStore = new PreTradeStore({ filePath });
+  const finalState = finalStore.load();
+  assert.equal(finalState.candidates.find((item) => item.contractVersion === 1).lifecycleState, "SUPERSEDED");
+  assert.equal(finalState.candidates.find((item) => item.contractVersion === 2).lifecycleState, "WAITING");
+  assert.ok(finalState.manualSupersessionAuthorizations[0].consumedAt);
+});
+
+test("legacy PRETRADE state without manual authority collections initializes them empty", () => {
+  const { store, filePath } = createIngress();
+  store.save();
+  const legacy = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  delete legacy.manualSupersessionReviews;
+  delete legacy.manualSupersessionAuthorizations;
+  fs.writeFileSync(filePath, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
+
+  const reloaded = new PreTradeStore({ filePath }).load();
+  assert.deepEqual(reloaded.manualSupersessionReviews, []);
+  assert.deepEqual(reloaded.manualSupersessionAuthorizations, []);
+});
+
+test("manual supersession review is invalidated by authoritative prior state changes", () => {
+  for (const mutation of [
+    { name: "stateRevision", apply: (prior) => { prior.stateRevision += 1; }, code: MANUAL_SUPERSESSION_AUTHORIZATION_INVALID },
+    { name: "lifecycleState", apply: (prior) => { prior.lifecycleState = "READY"; }, code: MANUAL_SUPERSESSION_AUTHORIZATION_INVALID },
+    { name: "content", apply: (prior) => { prior.thesis = "Tampered prior content."; }, code: "CANDIDATE_CONTRACT_INTEGRITY_ERROR" },
+  ]) {
+    const { store, ingress } = createIngress();
+    manualImport(ingress, bundle([candidate()], { bundleId: `${mutation.name}-v1` }));
+    const proposed = candidate({ contractVersion: 2, thesis: `Reviewed before ${mutation.name} changed.` });
+    const review = ingress.createManualSupersessionReview(bundle([proposed], { bundleId: `${mutation.name}-v2` }));
+    mutation.apply(store.state.candidates[0]);
+    assert.throws(
+      () => ingress.authorizeManualSupersession({ reviewId: review.reviews[0].reviewId, operatorConfirmed: true }),
+      (error) => error.code === mutation.code,
+      mutation.name,
+    );
+    assert.equal(store.snapshot().manualSupersessionAuthorizations.length, 0);
+  }
+});
+
+test("authorization is exact-proposal bound and stale authorization fails closed", () => {
+  const { store, ingress, filePath } = createIngress();
+  manualImport(ingress, bundle([candidate()], { bundleId: "exact-v1" }));
+  const reviewed = candidate({ contractVersion: 2, thesis: "Exact reviewed proposal A." });
+  const different = candidate({ contractVersion: 2, thesis: "Different proposal B." });
+  const review = ingress.createManualSupersessionReview(bundle([reviewed], { bundleId: "exact-v2" }));
+  ingress.authorizeManualSupersession({ reviewId: review.reviews[0].reviewId, operatorConfirmed: true });
+
+  const mismatch = manualImport(ingress, bundle([different], { bundleId: "different-v2" }));
+  assert.equal(mismatch.outcomes[0].status, "ACTION_REQUIRED");
+  assert.equal(store.snapshot().candidates.length, 1);
+
+  store.state.candidates[0].stateRevision += 1;
+  store.save();
+  const restartedStore = new PreTradeStore({ filePath });
+  restartedStore.load();
+  const restartedIngress = new PreTradeCandidateIngress({
+    store: restartedStore,
+    clock: () => "2026-09-05T13:20:00.000Z",
+    idFactory: () => "stale-restart-event",
+  });
+  const stale = manualImport(restartedIngress, bundle([reviewed], { bundleId: "stale-v2" }));
+  assert.equal(stale.outcomes[0].status, "REJECTED");
+  assert.deepEqual(stale.outcomes[0].reasons, [MANUAL_SUPERSESSION_AUTHORIZATION_INVALID]);
+  assert.equal(restartedStore.snapshot().candidates.length, 1);
+});
+
+test("corrupt persisted manual review or authorization evidence fails closed", () => {
+  const reviewCase = createIngress();
+  manualImport(reviewCase.ingress, bundle([candidate()], { bundleId: "corrupt-review-v1" }));
+  const proposed = candidate({ contractVersion: 2, thesis: "Persisted review integrity." });
+  reviewCase.ingress.createManualSupersessionReview(bundle([proposed], { bundleId: "corrupt-review-v2" }));
+  const corruptReviewState = JSON.parse(fs.readFileSync(reviewCase.filePath, "utf8"));
+  corruptReviewState.manualSupersessionReviews[0].substantiveDiff[0].path = "tampered.path";
+  fs.writeFileSync(reviewCase.filePath, `${JSON.stringify(corruptReviewState, null, 2)}\n`, "utf8");
+  assert.throws(
+    () => new PreTradeStore({ filePath: reviewCase.filePath }).load(),
+    (error) => error.code === "CORRUPT_MANUAL_SUPERSESSION_REVIEW_STATE",
+  );
+
+  const authorizationCase = createIngress();
+  manualImport(authorizationCase.ingress, bundle([candidate()], { bundleId: "corrupt-auth-v1" }));
+  const authReview = authorizationCase.ingress.createManualSupersessionReview(bundle([proposed], { bundleId: "corrupt-auth-v2" }));
+  authorizationCase.ingress.authorizeManualSupersession({ reviewId: authReview.reviews[0].reviewId, operatorConfirmed: true });
+  const corruptAuthorizationState = JSON.parse(fs.readFileSync(authorizationCase.filePath, "utf8"));
+  corruptAuthorizationState.manualSupersessionAuthorizations[0].proposedContentHash = "0".repeat(64);
+  fs.writeFileSync(authorizationCase.filePath, `${JSON.stringify(corruptAuthorizationState, null, 2)}\n`, "utf8");
+  assert.throws(
+    () => new PreTradeStore({ filePath: authorizationCase.filePath }).load(),
+    (error) => error.code === "CORRUPT_MANUAL_SUPERSESSION_AUTHORIZATION_STATE",
+  );
+});
+
+test("internally inconsistent reviewed proposal fails closed even with a recomputed record hash", () => {
+  const { store, ingress } = createIngress();
+  manualImport(ingress, bundle([candidate()], { bundleId: "semantic-v1" }));
+  const proposed = candidate({ contractVersion: 2, thesis: "Original reviewed proposal." });
+  ingress.createManualSupersessionReview(bundle([proposed], { bundleId: "semantic-v2" }));
+  const corrupt = structuredClone(store.state.manualSupersessionReviews[0]);
+  corrupt.proposedCandidate.thesis = "Different content without matching proposed hash.";
+  corrupt.reviewIntegrityHash = manualSupersessionReviewIntegrityHash(corrupt);
+  store.state.manualSupersessionReviews[0] = corrupt;
+
+  assert.throws(
+    () => ingress.authorizeManualSupersession({ reviewId: corrupt.reviewId, operatorConfirmed: true }),
+    (error) => error.code === "CORRUPT_MANUAL_SUPERSESSION_REVIEW_STATE",
+  );
+  assert.equal(store.snapshot().manualSupersessionAuthorizations.length, 0);
+});
+
+test("authorization consumption evidence remains integrity-verifiable", () => {
+  const { store, ingress } = createIngress();
+  manualImport(ingress, bundle([candidate()], { bundleId: "integrity-v1" }));
+  const proposed = candidate({ contractVersion: 2, thesis: "Authorization consumption integrity." });
+  const review = ingress.createManualSupersessionReview(bundle([proposed], { bundleId: "integrity-v2" }));
+  ingress.authorizeManualSupersession({ reviewId: review.reviews[0].reviewId, operatorConfirmed: true });
+  manualImport(ingress, bundle([proposed], { bundleId: "integrity-v2" }));
+  const authorization = store.snapshot().manualSupersessionAuthorizations[0];
+  assert.equal(
+    authorization.authorizationIntegrityHash,
+    manualSupersessionAuthorizationIntegrityHash(authorization),
+  );
+});
+
+test("manual supersession persistence failure rolls back prior, admission, and authorization consumption", () => {
+  const { store, ingress } = createIngress();
+  manualImport(ingress, bundle([candidate()], { bundleId: "rollback-v1" }));
+  const proposed = candidate({ contractVersion: 2, thesis: "Atomic manual supersession rollback." });
+  const review = ingress.createManualSupersessionReview(bundle([proposed], { bundleId: "rollback-v2" }));
+  ingress.authorizeManualSupersession({ reviewId: review.reviews[0].reviewId, operatorConfirmed: true });
+  const before = store.snapshot();
+  const originalSave = store.save.bind(store);
+  store.save = () => {
+    throw Object.assign(new Error("simulated manual supersession persistence failure"), { code: "SIMULATED_SAVE_FAILURE" });
+  };
+
+  assert.throws(
+    () => manualImport(ingress, bundle([proposed], { bundleId: "rollback-v2" })),
+    (error) => error.code === "SIMULATED_SAVE_FAILURE",
+  );
+  store.save = originalSave;
+  assert.deepEqual(store.snapshot(), before);
+  assert.equal(store.snapshot().candidates[0].lifecycleState, "WAITING");
+  assert.equal(store.snapshot().manualSupersessionAuthorizations[0].consumedAt, null);
 });
 
 test("canonical contract tampering fails closed before duplicate or supersession processing", () => {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -116,6 +117,34 @@ async function tempDirs() {
   await fs.mkdir(manualInbox, { recursive: true });
   await fs.mkdir(candidateInbox, { recursive: true });
   return { root, manualInbox, candidateInbox };
+}
+
+function jsonResponse(res, statusCode, value) {
+  const body = Buffer.from(JSON.stringify(value));
+  res.writeHead(statusCode, {
+    "content-type": "application/json",
+    "content-length": body.length,
+  });
+  res.end(body);
+}
+
+async function startPretradeSnapshotStub({ candidates = [] } = {}) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    requests.push({ method: req.method, url: req.url });
+    if (req.method === "GET" && req.url === "/api/candidates") {
+      jsonResponse(res, 200, { candidates });
+      return;
+    }
+    jsonResponse(res, 404, { error: "not found" });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
 }
 
 test("A envelope contract is closed and standalone trade cards require exactly one candidate", () => {
@@ -316,6 +345,32 @@ test("O single submission journal writer lock prevents concurrent processors", a
   } finally {
     await release();
   }
+
+  const staleLock = path.join(directories.journal, "stale-submission", ".lock");
+  await fs.mkdir(staleLock, { recursive: true });
+  await fs.writeFile(path.join(staleLock, "owner.json"), JSON.stringify({
+    pid: 99999999,
+    lockId: "dead-owner",
+    acquiredAt: "2026-09-10T12:00:00.000Z",
+  }));
+  const reclaimed = await acquireSubmissionJournalLock({
+    journalDir: directories.journal,
+    submissionId: "stale-submission",
+    clock: () => "2026-09-10T13:01:00.000Z",
+  });
+  await reclaimed();
+
+  const corruptLock = path.join(directories.journal, "corrupt-submission", ".lock");
+  await fs.mkdir(corruptLock, { recursive: true });
+  await fs.writeFile(path.join(corruptLock, "owner.json"), "{not-json");
+  await assert.rejects(
+    () => acquireSubmissionJournalLock({
+      journalDir: directories.journal,
+      submissionId: "corrupt-submission",
+      clock: () => "2026-09-10T13:02:00.000Z",
+    }),
+    (error) => error.code === "MANUAL_SUBMISSION_LOCK_UNVERIFIABLE",
+  );
 });
 
 test("I L M N manual revised candidates require bound authorization and commit atomically in PRETRADE", () => {
@@ -342,20 +397,14 @@ test("I L M N manual revised candidates require bound authorization and commit a
   assert.equal(store.snapshot().candidates.length, 1);
 
   const proposed = revised.canonicalBundle.candidates[0];
-  const auth = {
-    authorizationId: "manual-auth-1",
-    candidateId: proposed.candidateId,
-    priorContractVersion: 1,
-    priorLifecycleState: "WAITING",
-    priorStateRevision: 0,
-    priorContentHash: prior.contentHash,
-    proposedContractVersion: 2,
-    proposedContentHash: candidateContractHash(proposed),
-    decision: "AUTHORIZED",
-  };
+  const review = ingress.createManualSupersessionReview(revised.canonicalBundle);
+  const auth = ingress.authorizeManualSupersession({
+    reviewId: review.reviews[0].reviewId,
+    operatorConfirmed: true,
+  });
+  assert.equal(auth.reviewId, review.reviews[0].reviewId);
   const accepted = ingress.importBundle(revised.canonicalBundle, {
     ingressPolicy: MANUAL_AUTHORIZED,
-    manualSupersessionAuthorizations: [auth],
   });
   assert.equal(accepted.outcomes[0].status, "ACCEPTED");
   const state = store.snapshot();
@@ -369,7 +418,6 @@ test("I L M N manual revised candidates require bound authorization and commit a
   const terminalIngress = new PreTradeCandidateIngress({ store: terminalStore });
   const blocked = terminalIngress.importBundle(revised.canonicalBundle, {
     ingressPolicy: MANUAL_AUTHORIZED,
-    manualSupersessionAuthorizations: [auth],
   });
   assert.equal(blocked.outcomes[0].status, "REJECTED");
 });
@@ -404,6 +452,32 @@ test("R Manual Proposal Inbox drain ignores unrelated directories and archives o
   assert.ok(fsSync.existsSync(path.join(unrelated, "ignored.json")));
   assert.ok((await fs.readdir(path.join(root, "manual-ingestion-archive"))).some((name) => name === "valid.json"));
   assert.ok((await fs.readdir(path.join(root, "manual-ingestion-quarantine"))).some((name) => name === "bad.json"));
+});
+
+test("R production drain reads authoritative PRETRADE snapshot before lineage preflight", async () => {
+  const { manualInbox, candidateInbox } = await tempDirs();
+  const prior = canonicalPrior();
+  await fs.writeFile(path.join(manualInbox, "revised.json"), `${JSON.stringify(envelope({
+    candidates: [candidate({ thesis: "Substantive revision discovered from PRETRADE snapshot." })],
+  }), null, 2)}\n`);
+  const pretrade = await startPretradeSnapshotStub({ candidates: [prior] });
+  try {
+    const drained = await drainManualProposalInbox({
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      recover: false,
+      clock: () => "2026-09-10T13:10:00.000Z",
+      stableFileOptions: { initialDelayMs: 0, intervalMs: 0, stableChecks: 1, maxChecks: 2, parseAttempts: 1 },
+    });
+    assert.equal(drained.results[0].status, "ACTION_REQUIRED");
+    assert.equal(drained.results[0].receipt.preflightPlan[0].classification, "REVISED");
+    assert.equal(drained.results[0].receipt.preflightPlan[0].contractVersion, 2);
+    assert.equal((await fs.readdir(candidateInbox)).length, 0);
+    assert.ok(pretrade.requests.some((request) => request.method === "GET" && request.url === "/api/candidates"));
+  } finally {
+    await pretrade.close();
+  }
 });
 
 test("R ACTION_REQUIRED and PARTIAL_SUCCESS are valid submissions archived rather than quarantined", async () => {
@@ -446,6 +520,7 @@ test("R ACTION_REQUIRED and PARTIAL_SUCCESS are valid submissions archived rathe
   const recoveredPartial = await recoverClaimedManualSubmissions({
     manualInboxPath: manualInbox,
     candidateInboxPath: candidateInbox,
+    pretradeCandidates: [],
     clock: () => "2026-09-10T13:12:30.000Z",
   });
   const partialRecovery = recoveredPartial.results.find((item) => item.submissionId === "partial-success");
@@ -474,6 +549,53 @@ test("P recovery reconciles publication or PRETRADE evidence after source leaves
     clock: () => "2026-09-10T13:14:00.000Z",
   });
   assert.equal(recovered.results[0].status, "RECOVERED");
+});
+
+test("P recovery observes authoritative PRETRADE admission after candidate feeder consumed publication", async () => {
+  const { manualInbox, candidateInbox } = await tempDirs();
+  const filePath = path.join(manualInbox, "pretrade-recovery.json");
+  await fs.writeFile(filePath, JSON.stringify(envelope({
+    submission: { ...envelope().submission, submissionId: "pretrade-recovery" },
+  })));
+  const first = await processManualProposalFile(filePath, {
+    manualInboxPath: manualInbox,
+    candidateInboxPath: candidateInbox,
+    priorCandidates: [],
+    clock: () => "2026-09-10T13:15:00.000Z",
+    idFactory: () => "pretrade-recovery-publication",
+    stableFileOptions: { initialDelayMs: 0, intervalMs: 0, stableChecks: 1, maxChecks: 2, parseAttempts: 1 },
+  });
+  assert.equal(first.status, "SUCCESS");
+  const publishedBundle = JSON.parse(await fs.readFile(first.publication.finalPath, "utf8"));
+  const admittedCandidate = {
+    ...publishedBundle.candidates[0],
+    contentHash: candidateContractHash(publishedBundle.candidates[0]),
+  };
+  await fs.rm(first.receiptPath);
+  await fs.rm(first.publication.finalPath);
+
+  const staleLock = path.join(manualIngestionDirectories(manualInbox).journal, "pretrade-recovery", ".lock");
+  await fs.mkdir(staleLock, { recursive: true });
+  await fs.writeFile(path.join(staleLock, "owner.json"), JSON.stringify({
+    pid: 99999999,
+    lockId: "dead-recovery-owner",
+    acquiredAt: "2026-09-10T13:15:01.000Z",
+  }));
+
+  const pretrade = await startPretradeSnapshotStub({ candidates: [admittedCandidate] });
+  try {
+    const recovered = await recoverClaimedManualSubmissions({
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:16:00.000Z",
+    });
+    assert.equal(recovered.results[0].status, "RECOVERED");
+    assert.equal(recovered.results[0].result.status, "SUCCESS");
+    assert.equal(recovered.results[0].result.receipt.recovery.pretradeAdmissionObserved, true);
+  } finally {
+    await pretrade.close();
+  }
 });
 
 test("S legacy bare candidate conversion is not implicit in the manual inbox", () => {

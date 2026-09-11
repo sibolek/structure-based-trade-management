@@ -13,6 +13,16 @@ export const MANUAL_SOD_SUBMISSION = "MANUAL_SOD";
 export const MANUAL_STANDALONE_TRADE_CARD_SUBMISSION = "MANUAL_STANDALONE_TRADE_CARD";
 
 const FORBIDDEN_RUNTIME_AUTHORITY_FIELDS = [
+  "authorizationId",
+  "reviewId",
+  "manualSupersessionReviews",
+  "manualSupersessionReview",
+  "manualSupersessionAuthorizations",
+  "manualSupersessionAuthorization",
+  "manualSupersessionApproval",
+  "manualApproved",
+  "forceImport",
+  "supersessionApproved",
   "arm",
   "handoff",
   "permissionOutcome",
@@ -226,7 +236,27 @@ function buildCandidate(candidate, {
   const validity = hasOwn(candidate, "validity") ? clone(candidate.validity) : clone(bundleValidity);
   const managementContract = resolvedManagementContract(candidate, candidateId);
 
-  const proposal = {
+  const proposal = clone(candidate);
+  for (const field of [
+    "contentHash",
+    "contractAuthority",
+    "lifecycleState",
+    "status",
+    "stateRevision",
+    "armAuthorized",
+    "arm",
+    "handoff",
+    "handoffAuthority",
+    "permissionOutcome",
+    "riskEvaluation",
+    "authorizedDssEvaluationId",
+    "authorizedRiskEvaluationId",
+    "selectedQuantity",
+    "executionState",
+  ]) {
+    delete proposal[field];
+  }
+  Object.assign(proposal, {
     candidateId,
     contractVersion: Number(candidate.contractVersion ?? 1),
     schemaVersion: Number(candidate.schemaVersion ?? 1),
@@ -252,7 +282,6 @@ function buildCandidate(candidate, {
       ?? (text(candidate.plan?.noTradeZone) ? [text(candidate.plan.noTradeZone)] : null),
     targets: normalizedTargets(candidate.targets),
     managementContract,
-    ...(candidate.managementPlan !== undefined ? { managementPlan: clone(candidate.managementPlan) } : {}),
     bestLocation: clone(candidate.bestLocation ?? candidate.plan?.bestLocation) ?? null,
     context: clone(candidate.context)
       ?? (candidate.riskPolicy ? { riskPolicy: clone(candidate.riskPolicy) } : null),
@@ -264,7 +293,8 @@ function buildCandidate(candidate, {
     armPolicy: {
       requestedMode: upper(candidate.armPolicy?.requestedMode || "MANUAL"),
     },
-  };
+  });
+  if (candidate.managementPlan !== undefined) proposal.managementPlan = clone(candidate.managementPlan);
 
   const result = normalizeCanonicalCandidateProposal(proposal, {
     bundleSource: SOD_A_PLUS_TRADES_SOURCE,

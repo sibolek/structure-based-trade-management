@@ -5,8 +5,13 @@ import path from "node:path";
 export const PRETRADE_SCHEMA_VERSION = 1;
 export const DEFAULT_PRETRADE_STATE_FILE = ".executionos-v24-state.json";
 export const PRETRADE_TRIGGER_EVALUATING = "PRETRADE_TRIGGER_EVALUATING";
+export const MANUAL_SUPERSESSION_REVIEW_SCHEMA_VERSION = 1;
+export const MANUAL_SUPERSESSION_REVIEW_AUTHORITY = "PRETRADE_MANUAL_SUPERSESSION_REVIEW";
+export const MANUAL_SUPERSESSION_AUTHORIZATION_SCHEMA_VERSION = 1;
+export const MANUAL_SUPERSESSION_AUTHORIZATION_AUTHORITY = "PRETRADE_MANUAL_SUPERSESSION_AUTHORIZATION";
 
 const LEGACY_TRIGGER_EVALUATING = "TRIGGER_EVALUATING";
+const ABSOLUTE_TIMESTAMP_PATTERN = /(?:Z|[+-]\d{2}:\d{2})$/i;
 const DSS_STATUSES = new Set(["VALID", "BLOCKED", "ERROR"]);
 const DSS_PERMISSION_ACTIVE_STATES = new Set([
   "PERMISSION_EVALUATING",
@@ -92,6 +97,251 @@ export function contentHash(value) {
     .digest("hex");
 }
 
+const MANUAL_SUPERSESSION_REVIEW_KEYS = new Set([
+  "schemaVersion",
+  "authority",
+  "reviewId",
+  "candidateId",
+  "priorContractVersion",
+  "priorLifecycleState",
+  "priorStateRevision",
+  "priorContentHash",
+  "proposedContractVersion",
+  "proposedContentHash",
+  "proposedCandidate",
+  "substantiveDiff",
+  "createdAt",
+  "disclosure",
+  "reviewIntegrityHash",
+]);
+
+const MANUAL_SUPERSESSION_AUTHORIZATION_KEYS = new Set([
+  "schemaVersion",
+  "authority",
+  "authorizationId",
+  "reviewId",
+  "candidateId",
+  "priorContractVersion",
+  "priorLifecycleState",
+  "priorStateRevision",
+  "priorContentHash",
+  "proposedContractVersion",
+  "proposedContentHash",
+  "decision",
+  "authorizedAt",
+  "consumedAt",
+  "consumedByOperationId",
+  "authorizationIntegrityHash",
+]);
+const MANUAL_SUPERSESSION_AUTHORITY_LIMITS = Object.freeze({
+  maxSerializedBytes: 8 * 1024 * 1024,
+  maxDepth: 64,
+  maxNodes: 250000,
+  maxObjectKeys: 1000,
+  maxArrayLength: 50000,
+  maxStringBytes: 1024 * 1024,
+});
+
+function withoutField(record, field) {
+  const material = structuredClone(record);
+  delete material[field];
+  return material;
+}
+
+function exactTimestamp(value) {
+  const raw = text(value);
+  return raw && ABSOLUTE_TIMESTAMP_PATTERN.test(raw) && Number.isFinite(Date.parse(raw)) ? raw : null;
+}
+
+function assertClosedRecord(record, allowedKeys, code) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    throw storeError("PRETRADE manual supersession authority record must be an object", code);
+  }
+  const unexpected = Object.keys(record).filter((key) => !allowedKeys.has(key));
+  if (unexpected.length) {
+    throw storeError(`PRETRADE manual supersession authority record has unexpected fields: ${unexpected.join(", ")}`, code);
+  }
+}
+
+function assertHash(value, field, code) {
+  if (!/^[0-9a-f]{64}$/.test(text(value))) {
+    throw storeError(`${field} must be a SHA-256 hash`, code);
+  }
+}
+
+function assertManualSupersessionAuthorityRecordSafety(record, code) {
+  const limits = MANUAL_SUPERSESSION_AUTHORITY_LIMITS;
+  const stack = [{ value: record, depth: 0 }];
+  const seen = new WeakSet();
+  let nodes = 0;
+  while (stack.length) {
+    const current = stack.pop();
+    nodes += 1;
+    if (nodes > limits.maxNodes || current.depth > limits.maxDepth) {
+      throw storeError("PRETRADE manual supersession authority record exceeds structural limits", code);
+    }
+    const value = current.value;
+    if (value === undefined || typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {
+      throw storeError("PRETRADE manual supersession authority record contains non-JSON data", code);
+    }
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      throw storeError("PRETRADE manual supersession authority record contains a non-finite number", code);
+    }
+    if (typeof value === "string" && Buffer.byteLength(value, "utf8") > limits.maxStringBytes) {
+      throw storeError("PRETRADE manual supersession authority record contains an oversized string", code);
+    }
+    if (!value || typeof value !== "object") continue;
+    if (seen.has(value)) throw storeError("PRETRADE manual supersession authority record contains a cycle", code);
+    seen.add(value);
+    if (Array.isArray(value)) {
+      if (value.length > limits.maxArrayLength) {
+        throw storeError("PRETRADE manual supersession authority record contains an oversized array", code);
+      }
+      for (let index = value.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: value[index], depth: current.depth + 1 });
+      }
+      continue;
+    }
+    const keys = Object.keys(value);
+    if (keys.length > limits.maxObjectKeys) {
+      throw storeError("PRETRADE manual supersession authority record contains an oversized object", code);
+    }
+    for (const key of keys) stack.push({ value: value[key], depth: current.depth + 1 });
+  }
+  let serializedBytes;
+  try {
+    serializedBytes = Buffer.byteLength(JSON.stringify(record), "utf8");
+  } catch {
+    throw storeError("PRETRADE manual supersession authority record is not deterministic JSON", code);
+  }
+  if (serializedBytes > limits.maxSerializedBytes) {
+    throw storeError("PRETRADE manual supersession authority record exceeds its byte limit", code);
+  }
+}
+
+export function manualSupersessionReviewId(record) {
+  return `manual-supersession-review-${contentHash({
+    schemaVersion: record?.schemaVersion,
+    authority: record?.authority,
+    candidateId: record?.candidateId,
+    priorContractVersion: record?.priorContractVersion,
+    priorLifecycleState: record?.priorLifecycleState,
+    priorStateRevision: record?.priorStateRevision,
+    priorContentHash: record?.priorContentHash,
+    proposedContractVersion: record?.proposedContractVersion,
+    proposedContentHash: record?.proposedContentHash,
+    proposedCandidate: record?.proposedCandidate,
+    substantiveDiff: record?.substantiveDiff,
+    disclosure: record?.disclosure,
+  })}`;
+}
+
+export function manualSupersessionReviewIntegrityHash(record) {
+  return contentHash(withoutField(record, "reviewIntegrityHash"));
+}
+
+export function manualSupersessionAuthorizationId(record) {
+  return `manual-supersession-authorization-${contentHash({
+    schemaVersion: record?.schemaVersion,
+    authority: record?.authority,
+    reviewId: record?.reviewId,
+  })}`;
+}
+
+export function manualSupersessionAuthorizationIntegrityHash(record) {
+  return contentHash(withoutField(record, "authorizationIntegrityHash"));
+}
+
+export function assertManualSupersessionReviewRecordIntegrity(record) {
+  const code = "CORRUPT_MANUAL_SUPERSESSION_REVIEW_STATE";
+  assertManualSupersessionAuthorityRecordSafety(record, code);
+  assertClosedRecord(record, MANUAL_SUPERSESSION_REVIEW_KEYS, code);
+  if (Number(record.schemaVersion) !== MANUAL_SUPERSESSION_REVIEW_SCHEMA_VERSION) {
+    throw storeError("Unsupported manual supersession review schemaVersion", code);
+  }
+  if (record.authority !== MANUAL_SUPERSESSION_REVIEW_AUTHORITY) {
+    throw storeError("Invalid manual supersession review authority", code);
+  }
+  if (!text(record.candidateId) || !text(record.priorLifecycleState)) {
+    throw storeError("Manual supersession review prior identity is incomplete", code);
+  }
+  if (
+    !Number.isInteger(Number(record.priorContractVersion))
+    || Number(record.priorContractVersion) < 1
+    || !Number.isInteger(Number(record.priorStateRevision))
+    || Number(record.priorStateRevision) < 0
+    || !Number.isInteger(Number(record.proposedContractVersion))
+    || Number(record.proposedContractVersion) !== Number(record.priorContractVersion) + 1
+  ) {
+    throw storeError("Manual supersession review version/state binding is invalid", code);
+  }
+  assertHash(record.priorContentHash, "priorContentHash", code);
+  assertHash(record.proposedContentHash, "proposedContentHash", code);
+  if (!record.proposedCandidate || typeof record.proposedCandidate !== "object" || Array.isArray(record.proposedCandidate)) {
+    throw storeError("Manual supersession review proposedCandidate is invalid", code);
+  }
+  if (!Array.isArray(record.substantiveDiff) || !record.substantiveDiff.length) {
+    throw storeError("Manual supersession review substantiveDiff is invalid", code);
+  }
+  if (!record.disclosure || typeof record.disclosure !== "object" || Array.isArray(record.disclosure)) {
+    throw storeError("Manual supersession review disclosure is invalid", code);
+  }
+  if (!exactTimestamp(record.createdAt)) {
+    throw storeError("Manual supersession review createdAt is invalid", code);
+  }
+  if (text(record.reviewId) !== manualSupersessionReviewId(record)) {
+    throw storeError("Manual supersession reviewId does not match reviewed material", code);
+  }
+  assertHash(record.reviewIntegrityHash, "reviewIntegrityHash", code);
+  if (record.reviewIntegrityHash !== manualSupersessionReviewIntegrityHash(record)) {
+    throw storeError("Manual supersession review integrity hash mismatch", code);
+  }
+  return record;
+}
+
+export function assertManualSupersessionAuthorizationRecordIntegrity(record) {
+  const code = "CORRUPT_MANUAL_SUPERSESSION_AUTHORIZATION_STATE";
+  assertManualSupersessionAuthorityRecordSafety(record, code);
+  assertClosedRecord(record, MANUAL_SUPERSESSION_AUTHORIZATION_KEYS, code);
+  if (Number(record.schemaVersion) !== MANUAL_SUPERSESSION_AUTHORIZATION_SCHEMA_VERSION) {
+    throw storeError("Unsupported manual supersession authorization schemaVersion", code);
+  }
+  if (record.authority !== MANUAL_SUPERSESSION_AUTHORIZATION_AUTHORITY) {
+    throw storeError("Invalid manual supersession authorization authority", code);
+  }
+  if (!text(record.reviewId) || !text(record.candidateId) || !text(record.priorLifecycleState)) {
+    throw storeError("Manual supersession authorization binding is incomplete", code);
+  }
+  if (
+    !Number.isInteger(Number(record.priorContractVersion))
+    || Number(record.priorContractVersion) < 1
+    || !Number.isInteger(Number(record.priorStateRevision))
+    || Number(record.priorStateRevision) < 0
+    || !Number.isInteger(Number(record.proposedContractVersion))
+    || Number(record.proposedContractVersion) !== Number(record.priorContractVersion) + 1
+  ) {
+    throw storeError("Manual supersession authorization version/state binding is invalid", code);
+  }
+  assertHash(record.priorContentHash, "priorContentHash", code);
+  assertHash(record.proposedContentHash, "proposedContentHash", code);
+  if (record.decision !== "AUTHORIZED" || !exactTimestamp(record.authorizedAt)) {
+    throw storeError("Manual supersession authorization decision evidence is invalid", code);
+  }
+  const consumedAt = text(record.consumedAt);
+  const consumedByOperationId = text(record.consumedByOperationId);
+  if (Boolean(consumedAt) !== Boolean(consumedByOperationId) || (consumedAt && !exactTimestamp(consumedAt))) {
+    throw storeError("Manual supersession authorization consumption evidence is invalid", code);
+  }
+  if (text(record.authorizationId) !== manualSupersessionAuthorizationId(record)) {
+    throw storeError("Manual supersession authorizationId does not match review provenance", code);
+  }
+  assertHash(record.authorizationIntegrityHash, "authorizationIntegrityHash", code);
+  if (record.authorizationIntegrityHash !== manualSupersessionAuthorizationIntegrityHash(record)) {
+    throw storeError("Manual supersession authorization integrity hash mismatch", code);
+  }
+  return record;
+}
+
 export function normalizeCandidate(input) {
   const candidate = input && typeof input === "object" ? input : {};
   const structural = candidate.structuralInvalidation && typeof candidate.structuralInvalidation === "object"
@@ -155,8 +405,32 @@ function emptyState() {
     updatedAt: null,
     candidates: [],
     dssEvaluations: [],
+    manualSupersessionReviews: [],
+    manualSupersessionAuthorizations: [],
     importLog: [],
   };
+}
+
+function normalizeManualSupersessionRecords(state, {
+  field,
+  idField,
+  validator,
+  freeze = false,
+  corruptCode,
+}) {
+  if (!Object.prototype.hasOwnProperty.call(state, field)) return [];
+  if (!Array.isArray(state[field])) {
+    throw storeError(`PRETRADE ${field} must be an array`, corruptCode);
+  }
+  const seen = new Set();
+  return state[field].map((record) => {
+    validator(record);
+    const id = text(record[idField]);
+    if (seen.has(id)) throw storeError(`Duplicate PRETRADE ${idField}: ${id}`, corruptCode);
+    seen.add(id);
+    const cloned = structuredClone(record);
+    return freeze ? deepFreeze(cloned) : cloned;
+  });
 }
 
 function normalizeState(raw) {
@@ -179,12 +453,53 @@ function normalizeState(raw) {
         return normalized;
       })
     : [];
+  const manualSupersessionReviews = normalizeManualSupersessionRecords(state, {
+    field: "manualSupersessionReviews",
+    idField: "reviewId",
+    validator: assertManualSupersessionReviewRecordIntegrity,
+    freeze: true,
+    corruptCode: "CORRUPT_MANUAL_SUPERSESSION_REVIEW_STATE",
+  });
+  const manualSupersessionAuthorizations = normalizeManualSupersessionRecords(state, {
+    field: "manualSupersessionAuthorizations",
+    idField: "authorizationId",
+    validator: assertManualSupersessionAuthorizationRecordIntegrity,
+    corruptCode: "CORRUPT_MANUAL_SUPERSESSION_AUTHORIZATION_STATE",
+  });
+  const reviewsById = new Map(manualSupersessionReviews.map((review) => [review.reviewId, review]));
+  for (const authorization of manualSupersessionAuthorizations) {
+    const review = reviewsById.get(authorization.reviewId);
+    if (!review) {
+      throw storeError(
+        `Manual supersession authorization references unknown reviewId ${authorization.reviewId}`,
+        "CORRUPT_MANUAL_SUPERSESSION_AUTHORIZATION_STATE",
+      );
+    }
+    for (const field of [
+      "candidateId",
+      "priorContractVersion",
+      "priorLifecycleState",
+      "priorStateRevision",
+      "priorContentHash",
+      "proposedContractVersion",
+      "proposedContentHash",
+    ]) {
+      if (!Object.is(authorization[field], review[field])) {
+        throw storeError(
+          `Manual supersession authorization does not match review field ${field}`,
+          "CORRUPT_MANUAL_SUPERSESSION_AUTHORIZATION_STATE",
+        );
+      }
+    }
+  }
 
   return {
     schemaVersion: PRETRADE_SCHEMA_VERSION,
     updatedAt: state.updatedAt || null,
     candidates,
     dssEvaluations,
+    manualSupersessionReviews,
+    manualSupersessionAuthorizations,
     importLog: Array.isArray(state.importLog) ? state.importLog : [],
   };
 }

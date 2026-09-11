@@ -5,7 +5,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { publishCandidateBundleAtomically } from "./sod-candidate-publisher.mjs";
-import { waitForStableFile } from "./candidate-feeder.mjs";
+import {
+  DEFAULT_PRETRADE_URL,
+  fetchCandidateSnapshot,
+  waitForStableFile,
+} from "./candidate-feeder.mjs";
 import {
   assertJsonStructuralSafety,
   candidateContractHash,
@@ -55,6 +59,13 @@ const PROHIBITED_MANUAL_CANDIDATE_FIELDS = new Set([
   "handoff",
   "handoffAuthority",
   "executionState",
+  "authorizationId",
+  "reviewId",
+  "manualSupersessionReviews",
+  "manualSupersessionReview",
+  "manualSupersessionAuthorizations",
+  "manualSupersessionAuthorization",
+  "manualSupersessionApproval",
   "manualApproved",
   "forceImport",
   "supersessionApproved",
@@ -486,36 +497,80 @@ async function readJsonFile(filePath, code) {
   }
 }
 
+async function pidIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== "ESRCH";
+  }
+}
+
+async function reclaimableStaleLock(lockDir) {
+  let owner;
+  try {
+    owner = JSON.parse(await fs.readFile(path.join(lockDir, "owner.json"), "utf8"));
+  } catch {
+    throw manualError(
+      `Manual submission lock exists but its owner cannot be verified: ${lockDir}`,
+      "MANUAL_SUBMISSION_LOCK_UNVERIFIABLE",
+      { retryable: false },
+    );
+  }
+  if (!owner || typeof owner !== "object" || !Number.isInteger(Number(owner.pid)) || !text(owner.lockId)) {
+    throw manualError(
+      `Manual submission lock owner is ambiguous: ${lockDir}`,
+      "MANUAL_SUBMISSION_LOCK_UNVERIFIABLE",
+      { retryable: false },
+    );
+  }
+  return !(await pidIsAlive(Number(owner.pid)));
+}
+
 export async function acquireSubmissionJournalLock({ journalDir, submissionId, clock = nowIso } = {}) {
   const safeSubmissionId = text(submissionId).replace(/[^a-zA-Z0-9._-]+/g, "-");
   if (!safeSubmissionId) throw manualError("submissionId is required for journal lock", "MANUAL_JOURNAL_SUBMISSION_ID_REQUIRED");
   const lockDir = path.join(journalDir, safeSubmissionId, ".lock");
   await fs.mkdir(path.dirname(lockDir), { recursive: true });
-  try {
-    await fs.mkdir(lockDir, { mode: 0o700 });
-    await atomicCreateJson(path.join(lockDir, "owner.json"), {
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const owner = {
       submissionId,
       pid: process.pid,
       lockId: crypto.randomUUID(),
       acquiredAt: clock(),
-    });
-  } catch (error) {
-    if (error.code === "EEXIST") {
-      throw manualError(
-        `Manual submission ${submissionId} is already being processed`,
-        "MANUAL_SUBMISSION_LOCK_HELD",
-        { retryable: true, submissionId },
-      );
+    };
+    try {
+      await fs.mkdir(lockDir, { mode: 0o700 });
+      await atomicCreateJson(path.join(lockDir, "owner.json"), owner);
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        try {
+          const current = JSON.parse(await fs.readFile(path.join(lockDir, "owner.json"), "utf8"));
+          if (current.lockId !== owner.lockId) return;
+          await fs.rm(lockDir, { recursive: true, force: true });
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+      };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      const stale = await reclaimableStaleLock(lockDir);
+      if (!stale) {
+        throw manualError(
+          `Manual submission ${submissionId} is already being processed`,
+          "MANUAL_SUBMISSION_LOCK_HELD",
+          { retryable: true, submissionId },
+        );
+      }
+      await fs.rm(lockDir, { recursive: true, force: true });
     }
-    throw error;
   }
 
-  let released = false;
-  return async () => {
-    if (released) return;
-    released = true;
-    await fs.rm(lockDir, { recursive: true, force: true });
-  };
+  throw manualError("Unable to acquire manual submission lock", "MANUAL_SUBMISSION_LOCK_FAILED", { retryable: true });
 }
 
 export async function appendSubmissionJournalEvent({ journalDir, submissionId, event }) {
@@ -705,14 +760,27 @@ function pretradeContainsPublishedCandidates(pretradeCandidates, bundle) {
   )));
 }
 
+async function resolvePretradeCandidates({ candidates, pretradeUrl = DEFAULT_PRETRADE_URL, requestOptions = {} } = {}) {
+  if (Array.isArray(candidates)) return candidates;
+  const snapshot = await fetchCandidateSnapshot(pretradeUrl, requestOptions);
+  return snapshot.candidates;
+}
+
 export async function reconcileManualSubmission({
   directories,
   submissionId,
   contentHash,
   candidateInboxPath,
-  pretradeCandidates = [],
+  pretradeCandidates,
+  pretradeUrl = DEFAULT_PRETRADE_URL,
+  requestOptions = {},
   clock = nowIso,
 } = {}) {
+  const authoritativePretradeCandidates = await resolvePretradeCandidates({
+    candidates: pretradeCandidates,
+    pretradeUrl,
+    requestOptions,
+  });
   const journal = await loadSubmissionJournal({ directories, submissionId, contentHash });
   const terminal = await findTerminalReceipt(directories, submissionId, journal.claim.contentHash);
   if (terminal) {
@@ -764,7 +832,7 @@ export async function reconcileManualSubmission({
   const publishedEvent = [...journal.events].reverse().find((event) => event.eventType === "PUBLISHED");
   const publication = publishedEvent?.publication
     ?? await findExactPublication(candidateInboxPath, publishable);
-  const admitted = pretradeContainsPublishedCandidates(pretradeCandidates, publishable);
+  const admitted = pretradeContainsPublishedCandidates(authoritativePretradeCandidates, publishable);
   if (!publication && !admitted) {
     return {
       terminal: false,
@@ -813,7 +881,9 @@ export async function reconcileManualSubmission({
 export async function processManualProposalFile(filePath, {
   manualInboxPath = path.dirname(filePath),
   candidateInboxPath,
-  priorCandidates = [],
+  priorCandidates,
+  pretradeUrl = DEFAULT_PRETRADE_URL,
+  requestOptions = {},
   clock = nowIso,
   idFactory = () => crypto.randomUUID(),
   stableFileOptions = {},
@@ -871,12 +941,17 @@ export async function processManualProposalFile(filePath, {
     clock,
   });
   try {
+    const authoritativePriorCandidates = await resolvePretradeCandidates({
+      candidates: priorCandidates,
+      pretradeUrl,
+      requestOptions,
+    });
     const existingTerminal = await reconcileManualSubmission({
       directories,
       submissionId,
       contentHash,
       candidateInboxPath,
-      pretradeCandidates: priorCandidates,
+      pretradeCandidates: authoritativePriorCandidates,
       clock,
     }).catch((error) => {
       if (error.code === "MANUAL_RECOVERY_NOT_FOUND") return null;
@@ -894,7 +969,7 @@ export async function processManualProposalFile(filePath, {
       event: { eventType: "RECEIVED", occurredAt: observedAt, contentHash, claimStatus: claim.status },
     });
 
-    const preflight = preflightManualSubmission(envelope, priorCandidates);
+    const preflight = preflightManualSubmission(envelope, authoritativePriorCandidates);
     await appendSubmissionJournalEvent({
       journalDir: directories.journal,
       submissionId,
@@ -971,10 +1046,17 @@ export async function listPendingManualProposalFiles(manualInboxPath) {
 export async function recoverClaimedManualSubmissions({
   manualInboxPath,
   candidateInboxPath,
-  pretradeCandidates = [],
+  pretradeCandidates,
+  pretradeUrl = DEFAULT_PRETRADE_URL,
+  requestOptions = {},
   clock = nowIso,
 } = {}) {
   const directories = manualIngestionDirectories(manualInboxPath);
+  const authoritativePretradeCandidates = await resolvePretradeCandidates({
+    candidates: pretradeCandidates,
+    pretradeUrl,
+    requestOptions,
+  });
   const entries = await fs.readdir(directories.journal, { withFileTypes: true }).catch((error) => {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -1004,7 +1086,7 @@ export async function recoverClaimedManualSubmissions({
         submissionId: claim.submissionId,
         contentHash: claim.contentHash,
         candidateInboxPath,
-        pretradeCandidates,
+        pretradeCandidates: authoritativePretradeCandidates,
         clock,
       });
       results.push({
@@ -1025,13 +1107,25 @@ export async function recoverClaimedManualSubmissions({
 export async function drainManualProposalInbox({
   manualInboxPath,
   candidateInboxPath,
-  priorCandidates = [],
+  priorCandidates,
   pretradeCandidates = priorCandidates,
+  pretradeUrl = DEFAULT_PRETRADE_URL,
+  requestOptions = {},
   clock = nowIso,
   idFactory = () => crypto.randomUUID(),
   stableFileOptions = {},
   recover = true,
 } = {}) {
+  const authoritativePretradeCandidates = await resolvePretradeCandidates({
+    candidates: priorCandidates,
+    pretradeUrl,
+    requestOptions,
+  });
+  const recoveryPretradeCandidates = await resolvePretradeCandidates({
+    candidates: pretradeCandidates,
+    pretradeUrl,
+    requestOptions,
+  });
   const files = await listPendingManualProposalFiles(manualInboxPath);
   const results = [];
   for (const filePath of files) {
@@ -1041,7 +1135,9 @@ export async function drainManualProposalInbox({
         ...(await processManualProposalFile(filePath, {
           manualInboxPath,
           candidateInboxPath,
-          priorCandidates,
+          priorCandidates: authoritativePretradeCandidates,
+          pretradeUrl,
+          requestOptions,
           clock,
           idFactory,
           stableFileOptions,
@@ -1056,7 +1152,14 @@ export async function drainManualProposalInbox({
     }
   }
   const recovery = recover
-    ? await recoverClaimedManualSubmissions({ manualInboxPath, candidateInboxPath, pretradeCandidates, clock })
+    ? await recoverClaimedManualSubmissions({
+        manualInboxPath,
+        candidateInboxPath,
+        pretradeCandidates: recoveryPretradeCandidates,
+        pretradeUrl,
+        requestOptions,
+        clock,
+      })
     : null;
   return { filesDiscovered: files.length, results, recovery };
 }

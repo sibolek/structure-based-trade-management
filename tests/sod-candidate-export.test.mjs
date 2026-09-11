@@ -7,9 +7,13 @@ import {
   buildCanonicalSodCandidateBundle,
   buildManualSodIngestionEnvelope,
 } from "../schwab-bridge/sod-candidate-export.mjs";
-import { validateManualIngestionEnvelope } from "../schwab-bridge/manual-sod-ingestion.mjs";
+import {
+  preflightManualSubmission,
+  validateManualIngestionEnvelope,
+} from "../schwab-bridge/manual-sod-ingestion.mjs";
 import { PreTradeStore } from "../schwab-bridge/pretrade-state.mjs";
 import { MANUAL_AUTHORIZED, PreTradeCandidateIngress } from "../schwab-bridge/pretrade-candidate-ingress.mjs";
+import { candidateContractHash } from "../schwab-bridge/pretrade-candidate-contract.mjs";
 
 function draft(overrides = {}) {
   return {
@@ -272,6 +276,66 @@ test("SOD exporter preserves independent managementContract and managementPlan",
   assert.deepEqual(bundle.candidates[0].managementPlan, {
     mode: "FLEXIBLE_WITHIN_CEILING",
   });
+});
+
+test("SOD exporter preserves arbitrary inert optional content through manual PRETRADE admission", () => {
+  const input = draft();
+  Object.assign(input.candidates[0], {
+    orderFlowContext: {
+      openingDrive: "balanced",
+      deltas: [{ timeframe: "2m", reading: "buyers absorbing" }],
+    },
+    scenarioTree: [
+      { name: "base", branches: [{ if: "holds VWAP", then: "wait for trigger" }] },
+      { name: "invalid", branches: [{ if: "loses structure", then: "pass" }] },
+    ],
+    tradeNotes: {
+      operator: "Structured note survives as substantive inert JSON.",
+      tags: ["manual", "a-plus"],
+    },
+    presentationMetadata: {
+      cardAccent: "blue",
+      collapsedByDefault: false,
+    },
+  });
+
+  const bundle = buildCanonicalSodCandidateBundle(input);
+  const candidate = bundle.candidates[0];
+  assert.deepEqual(candidate.orderFlowContext.deltas[0], { timeframe: "2m", reading: "buyers absorbing" });
+  assert.equal(candidate.scenarioTree[1].name, "invalid");
+  assert.equal(candidate.tradeNotes.tags[1], "a-plus");
+  assert.equal(candidate.presentationMetadata.cardAccent, "blue");
+
+  const changed = buildCanonicalSodCandidateBundle(draft({
+    candidates: [{
+      ...input.candidates[0],
+      orderFlowContext: { ...input.candidates[0].orderFlowContext, openingDrive: "trend" },
+    }],
+  }));
+  assert.notEqual(candidateContractHash(candidate), candidateContractHash(changed.candidates[0]));
+
+  const envelope = buildManualSodIngestionEnvelope(input, { idFactory: () => "open-content-manual" });
+  assert.deepEqual(validateManualIngestionEnvelope(envelope), []);
+  assert.equal(envelope.candidates[0].orderFlowContext.openingDrive, "balanced");
+  const preflight = preflightManualSubmission(envelope, []);
+  assert.equal(preflight.status, "PREFLIGHTED");
+  assert.equal(preflight.canonicalBundle.candidates[0].scenarioTree[0].branches[0].then, "wait for trigger");
+
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "executionos-open-content-")), "state.json");
+  const store = new PreTradeStore({ filePath: statePath });
+  store.load();
+  const ingress = new PreTradeCandidateIngress({
+    store,
+    clock: () => "2026-09-08T13:30:00.000Z",
+    idFactory: () => "open-content-ingress-event",
+  });
+  const result = ingress.importBundle(preflight.canonicalBundle, { ingressPolicy: MANUAL_AUTHORIZED });
+  assert.equal(result.outcomes[0].status, "ACCEPTED");
+  const persisted = store.snapshot().candidates[0];
+  assert.equal(persisted.orderFlowContext.openingDrive, "balanced");
+  assert.equal(persisted.scenarioTree[0].branches[0].then, "wait for trigger");
+  assert.equal(persisted.tradeNotes.operator, "Structured note survives as substantive inert JSON.");
+  assert.equal(persisted.presentationMetadata.collapsedByDefault, false);
 });
 
 test("SOD exporter rejects duplicate generated candidate identities", () => {
