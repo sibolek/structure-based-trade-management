@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   PreTradeStore,
   manualSupersessionAuthorizationIntegrityHash,
+  manualSupersessionDeclineIntegrityHash,
   manualSupersessionReviewIntegrityHash,
 } from "../schwab-bridge/pretrade-state.mjs";
 import {
@@ -340,6 +341,14 @@ test("manual supersession rejects caller authority and requires a persisted PRET
   );
   assert.deepEqual(store.snapshot(), beforeForgery);
   assert.throws(
+    () => manualImport(ingress, bundle([proposed], {
+      bundleId: "manual-v2",
+      manualSupersessionDeclines: [{ reviewId: "fabricated-review", decision: "DECLINED" }],
+    })),
+    (error) => error.code === FORBIDDEN_SUPERSESSION_AUTHORITY_MATERIAL,
+  );
+  assert.deepEqual(store.snapshot(), beforeForgery);
+  assert.throws(
     () => ingress.authorizeManualSupersession({ operatorConfirmed: true }),
     (error) => error.code === MANUAL_SUPERSESSION_REVIEW_REQUIRED,
   );
@@ -473,11 +482,13 @@ test("legacy PRETRADE state without manual authority collections initializes the
   const legacy = JSON.parse(fs.readFileSync(filePath, "utf8"));
   delete legacy.manualSupersessionReviews;
   delete legacy.manualSupersessionAuthorizations;
+  delete legacy.manualSupersessionDeclines;
   fs.writeFileSync(filePath, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
 
   const reloaded = new PreTradeStore({ filePath }).load();
   assert.deepEqual(reloaded.manualSupersessionReviews, []);
   assert.deepEqual(reloaded.manualSupersessionAuthorizations, []);
+  assert.deepEqual(reloaded.manualSupersessionDeclines, []);
 });
 
 test("manual supersession review is invalidated by authoritative prior state changes", () => {
@@ -604,6 +615,76 @@ test("manual supersession persistence failure rolls back prior, admission, and a
   assert.deepEqual(store.snapshot(), before);
   assert.equal(store.snapshot().candidates[0].lifecycleState, "WAITING");
   assert.equal(store.snapshot().manualSupersessionAuthorizations[0].consumedAt, null);
+});
+
+test("manual supersession decline is durable, exclusive, observable, and leaves candidate authority untouched", () => {
+  const { store, ingress, filePath } = createIngress({
+    times: [
+      "2026-09-05T13:01:00.000Z",
+      "2026-09-05T13:02:00.000Z",
+      "2026-09-05T13:03:00.000Z",
+    ],
+  });
+  manualImport(ingress, bundle([candidate()], { bundleId: "decline-v1" }));
+  const proposed = candidate({ contractVersion: 2, thesis: "Declined exact supersession proposal." });
+  const proposalBundle = bundle([proposed], { bundleId: "decline-v2", ingressPolicy: MANUAL_AUTHORIZED });
+  const review = ingress.createManualSupersessionReview(proposalBundle).reviews[0];
+  const reviewedProposal = store.snapshot().manualSupersessionReviews[0].proposedCandidate;
+  const beforeDecision = store.snapshot().candidates;
+
+  const decline = ingress.declineManualSupersession({ reviewId: review.reviewId, operatorDeclined: true });
+  assert.equal(decline.decision, "DECLINED");
+  assert.equal(decline.reviewId, review.reviewId);
+  assert.equal(decline.declineIntegrityHash, manualSupersessionDeclineIntegrityHash(decline));
+  assert.deepEqual(store.snapshot().candidates, beforeDecision);
+  assert.equal(store.snapshot().manualSupersessionAuthorizations.length, 0);
+  assert.equal(store.snapshot().manualSupersessionDeclines.length, 1);
+  assert.throws(
+    () => ingress.authorizeManualSupersession({ reviewId: review.reviewId, operatorConfirmed: true }),
+    (error) => error.code === MANUAL_SUPERSESSION_AUTHORIZATION_INVALID,
+  );
+  assert.equal(ingress.importBundle(proposalBundle).outcomes[0].status, "ACTION_REQUIRED");
+
+  const restartedStore = new PreTradeStore({ filePath });
+  restartedStore.load();
+  const restartedIngress = new PreTradeCandidateIngress({ store: restartedStore });
+  const observed = restartedIngress.observeManualSupersessionDecision({ candidate: reviewedProposal });
+  assert.equal(observed.status, "DECLINED");
+  assert.equal(observed.reviewId, review.reviewId);
+  assert.equal(observed.declineId, decline.declineId);
+  assert.deepEqual(restartedStore.snapshot().candidates, beforeDecision);
+});
+
+test("manual supersession decision observation attests exact authorization and fails closed on corrupt decline evidence", () => {
+  const { store, ingress, filePath } = createIngress();
+  manualImport(ingress, bundle([candidate()], { bundleId: "observe-v1" }));
+  const proposed = candidate({ contractVersion: 2, thesis: "Observe exact PRETRADE authorization." });
+  const proposalBundle = bundle([proposed], { bundleId: "observe-v2", ingressPolicy: MANUAL_AUTHORIZED });
+  const review = ingress.createManualSupersessionReview(proposalBundle).reviews[0];
+  const reviewedProposal = store.snapshot().manualSupersessionReviews[0].proposedCandidate;
+  assert.equal(ingress.observeManualSupersessionDecision({ candidate: reviewedProposal }).status, "UNRESOLVED");
+  const authorization = ingress.authorizeManualSupersession({ reviewId: review.reviewId, operatorConfirmed: true });
+  const observed = ingress.observeManualSupersessionDecision({ candidate: reviewedProposal });
+  assert.equal(observed.status, "AUTHORIZED");
+  assert.equal(observed.authorizationId, authorization.authorizationId);
+  assert.equal(observed.binding.proposedContentHash, candidateContractHash(reviewedProposal));
+
+  const declineCase = createIngress();
+  manualImport(declineCase.ingress, bundle([candidate()], { bundleId: "corrupt-decline-v1" }));
+  const declineReview = declineCase.ingress.createManualSupersessionReview(proposalBundle).reviews[0];
+  declineCase.ingress.declineManualSupersession({ reviewId: declineReview.reviewId, operatorDeclined: true });
+  const corrupt = structuredClone(declineCase.store.state.manualSupersessionDeclines[0]);
+  corrupt.proposedContentHash = "0".repeat(64);
+  corrupt.declineIntegrityHash = manualSupersessionDeclineIntegrityHash(corrupt);
+  declineCase.store.state.manualSupersessionDeclines[0] = corrupt;
+  declineCase.store.save();
+  const reloaded = new PreTradeStore({ filePath: declineCase.filePath });
+  assert.throws(
+    () => reloaded.load(),
+    (error) => error.code === "CORRUPT_MANUAL_SUPERSESSION_DECLINE_STATE",
+  );
+
+  assert.ok(fs.existsSync(filePath));
 });
 
 test("canonical contract tampering fails closed before duplicate or supersession processing", () => {

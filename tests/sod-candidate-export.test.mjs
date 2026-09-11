@@ -212,6 +212,7 @@ test("SOD exporter rejects runtime authority instead of silently sanitizing it",
     { armAuthorized: true },
     { armPolicy: { requestedMode: "MANUAL", armAuthorized: true } },
     { lifecycleState: "READY" },
+    { manualSupersessionDeclines: [{ decision: "DECLINED" }] },
   ]) {
     const input = draft();
     Object.assign(input.candidates[0], forbidden);

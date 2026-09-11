@@ -250,7 +250,7 @@ export function validateCandidateBundle(bundle, bytes, {
     errors.push("bundle must be a JSON object");
     return errors;
   }
-  for (const field of ["manualSupersessionReviews", "manualSupersessionReview", "manualSupersessionAuthorizations", "manualSupersessionAuthorization", "manualSupersessionApproval", "authorizationId", "reviewId", "manualApproved", "forceImport", "supersessionApproved"]) {
+  for (const field of ["manualSupersessionReviews", "manualSupersessionReview", "manualSupersessionAuthorizations", "manualSupersessionAuthorization", "manualSupersessionDeclines", "manualSupersessionDecline", "manualSupersessionApproval", "authorizationId", "declineId", "reviewId", "manualApproved", "forceImport", "supersessionApproved"]) {
     if (Object.prototype.hasOwnProperty.call(bundle, field)) {
       errors.push(`${field} cannot establish candidate ingress or supersession authority`);
     }
@@ -284,7 +284,7 @@ export function validateCandidateBundle(bundle, bytes, {
     if (candidate.source !== CANDIDATE_FEEDER_SOURCE) {
       errors.push(`candidates[${index}].source must equal bundle source ${CANDIDATE_FEEDER_SOURCE}`);
     }
-    for (const field of ["manualSupersessionReviews", "manualSupersessionReview", "manualSupersessionAuthorizations", "manualSupersessionAuthorization", "manualSupersessionApproval", "authorizationId", "reviewId", "manualApproved", "forceImport", "supersessionApproved"]) {
+    for (const field of ["manualSupersessionReviews", "manualSupersessionReview", "manualSupersessionAuthorizations", "manualSupersessionAuthorization", "manualSupersessionDeclines", "manualSupersessionDecline", "manualSupersessionApproval", "authorizationId", "declineId", "reviewId", "manualApproved", "forceImport", "supersessionApproved"]) {
       if (Object.prototype.hasOwnProperty.call(candidate, field)) {
         errors.push(`candidates[${index}].${field} cannot establish candidate ingress or supersession authority`);
       }
@@ -389,6 +389,47 @@ export async function fetchCandidateSnapshot(pretradeUrl = DEFAULT_PRETRADE_URL,
     );
   }
   return response.json;
+}
+
+export async function fetchManualSupersessionDecision(candidate, pretradeUrl = DEFAULT_PRETRADE_URL, options = {}) {
+  const base = assertLoopbackPretradeUrl(pretradeUrl);
+  const observationUrl = new URL("/api/candidates/manual-supersession-observe", base);
+  const body = Buffer.from(JSON.stringify({ candidate }), "utf8");
+  if (body.length > MAX_CANDIDATE_BUNDLE_BYTES) {
+    throw feederError(
+      "Manual supersession observation exceeds PRETRADE request limit",
+      "PRETRADE_SUPERSESSION_OBSERVATION_TOO_LARGE",
+    );
+  }
+  const response = await requestBytes(observationUrl, {
+    method: "POST",
+    body,
+    timeoutMs: options.timeoutMs || 3000,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
+  const json = parseResponseJson(response, "PRETRADE_INVALID_SUPERSESSION_OBSERVATION_RESPONSE");
+  if (response.statusCode >= 500) {
+    throw feederError(
+      `PRETRADE supersession observation returned HTTP ${response.statusCode}`,
+      "PRETRADE_SUPERSESSION_OBSERVATION_SERVER_ERROR",
+      { retryable: true, details: json },
+    );
+  }
+  if (response.statusCode !== 200) {
+    throw feederError(
+      `PRETRADE supersession observation rejected request with HTTP ${response.statusCode}`,
+      "PRETRADE_SUPERSESSION_OBSERVATION_REJECTED",
+      { details: json },
+    );
+  }
+  if (!["REVIEW_REQUIRED", "UNRESOLVED", "AUTHORIZED", "DECLINED", "INVALIDATED", "ADMITTED"].includes(json.status)) {
+    throw feederError(
+      "PRETRADE supersession observation has an unsupported status",
+      "INVALID_PRETRADE_SUPERSESSION_OBSERVATION_RESPONSE",
+      { retryable: true, details: json },
+    );
+  }
+  return json;
 }
 
 function findFinalCandidate(snapshot, outcome) {

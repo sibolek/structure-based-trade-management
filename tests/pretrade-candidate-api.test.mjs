@@ -241,3 +241,57 @@ test("candidate API fails closed for malformed, non-local, and unsupported revie
     await api.close();
   }
 });
+
+test("candidate API exposes exact decision observation and durable explicit decline", async () => {
+  const api = await startCandidateApi();
+  try {
+    const prior = structuredClone(api.store.snapshot().candidates[0]);
+    const proposed = candidate({
+      contractVersion: 2,
+      generatedAt: "2026-09-10T13:05:00.000Z",
+      thesis: "Operator explicitly declines this reviewed revision.",
+    });
+    const { normalized, errors } = normalizeCanonicalCandidateProposal(proposed, { bundleSource: SOURCE });
+    assert.deepEqual(errors, []);
+    const review = await postJson(api.url, "/api/candidates/manual-supersession-review", bundle([proposed], {
+      bundleId: "api-decline-v2",
+    }));
+    assert.equal(review.statusCode, 200);
+    const reviewId = review.json.reviews[0].reviewId;
+
+    const unresolved = await postJson(api.url, "/api/candidates/manual-supersession-observe", { candidate: normalized });
+    assert.equal(unresolved.statusCode, 200);
+    assert.equal(unresolved.json.status, "UNRESOLVED");
+    assert.equal(unresolved.json.reviewId, reviewId);
+
+    const declined = await postJson(api.url, "/api/candidates/manual-supersession-decline", {
+      reviewId,
+      operatorDeclined: true,
+    });
+    assert.equal(declined.statusCode, 200);
+    assert.equal(declined.json.decision, "DECLINED");
+    assert.ok(declined.json.declineId.startsWith("manual-supersession-decline-"));
+
+    const observed = await postJson(api.url, "/api/candidates/manual-supersession-observe", { candidate: normalized });
+    assert.equal(observed.statusCode, 200);
+    assert.equal(observed.json.status, "DECLINED");
+    assert.equal(observed.json.reviewId, reviewId);
+    assert.equal(observed.json.declineId, declined.json.declineId);
+
+    const authorizeAfterDecline = await postJson(api.url, "/api/candidates/manual-supersession-authorize", {
+      reviewId,
+      operatorConfirmed: true,
+    });
+    assert.equal(authorizeAfterDecline.statusCode, 400);
+    const importAfterDecline = await postJson(api.url, "/api/candidates/import", bundle([proposed], {
+      bundleId: "api-decline-v2",
+    }));
+    assert.equal(importAfterDecline.statusCode, 200);
+    assert.equal(importAfterDecline.json.outcomes[0].status, "ACTION_REQUIRED");
+    assert.deepEqual(api.store.snapshot().candidates, [prior]);
+    assert.equal(api.store.snapshot().manualSupersessionAuthorizations.length, 0);
+    assert.equal(api.store.snapshot().manualSupersessionDeclines.length, 1);
+  } finally {
+    await api.close();
+  }
+});

@@ -350,6 +350,7 @@ const server = http.createServer(async (req, res) => {
       candidateAutomatedIngressPolicy: AUTOMATED_UNTOUCHED_ONLY,
       candidateManualIngressPolicy: MANUAL_AUTHORIZED,
       candidateManualSupersessionReviewAuthority: true,
+      candidateManualSupersessionDecisionApi: true,
       triggerContractAuthority: true,
       triggerEngineAuthority: true,
       triggerEvidenceApi: true,

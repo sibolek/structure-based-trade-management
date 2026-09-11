@@ -78,8 +78,10 @@ export function createPreTradeCandidateApiHandler({
     || typeof candidateIngress.importBundle !== "function"
     || typeof candidateIngress.createManualSupersessionReview !== "function"
     || typeof candidateIngress.authorizeManualSupersession !== "function"
+    || typeof candidateIngress.declineManualSupersession !== "function"
+    || typeof candidateIngress.observeManualSupersessionDecision !== "function"
   ) {
-    throw new Error("candidateIngress with import and manual supersession authority methods is required");
+    throw new Error("candidateIngress with import and manual supersession decision methods is required");
   }
   if (!lifecycleCoordinator || typeof lifecycleCoordinator.reconcileAllValidity !== "function") {
     throw new Error("lifecycleCoordinator with reconcileAllValidity() is required");
@@ -137,6 +139,26 @@ export function createPreTradeCandidateApiHandler({
         json(res, 200, candidateIngress.authorizeManualSupersession(payload), origin);
       } catch (error) {
         failPreTradeRequest(res, error, origin, "MANUAL_SUPERSESSION_AUTHORIZATION_ERROR");
+      }
+      return true;
+    }
+
+    if (req.method === "POST" && pathname === "/api/candidates/manual-supersession-decline") {
+      try {
+        const payload = await readJson(req);
+        json(res, 200, candidateIngress.declineManualSupersession(payload), origin);
+      } catch (error) {
+        failPreTradeRequest(res, error, origin, "MANUAL_SUPERSESSION_DECLINE_ERROR");
+      }
+      return true;
+    }
+
+    if (req.method === "POST" && pathname === "/api/candidates/manual-supersession-observe") {
+      try {
+        const payload = await readJson(req);
+        json(res, 200, candidateIngress.observeManualSupersessionDecision(payload), origin);
+      } catch (error) {
+        failPreTradeRequest(res, error, origin, "MANUAL_SUPERSESSION_OBSERVATION_ERROR");
       }
       return true;
     }

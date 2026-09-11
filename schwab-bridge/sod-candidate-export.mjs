@@ -14,11 +14,14 @@ export const MANUAL_STANDALONE_TRADE_CARD_SUBMISSION = "MANUAL_STANDALONE_TRADE_
 
 const FORBIDDEN_RUNTIME_AUTHORITY_FIELDS = [
   "authorizationId",
+  "declineId",
   "reviewId",
   "manualSupersessionReviews",
   "manualSupersessionReview",
   "manualSupersessionAuthorizations",
   "manualSupersessionAuthorization",
+  "manualSupersessionDeclines",
+  "manualSupersessionDecline",
   "manualSupersessionApproval",
   "manualApproved",
   "forceImport",

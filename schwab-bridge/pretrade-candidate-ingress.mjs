@@ -2,14 +2,19 @@ import crypto from "node:crypto";
 import {
   MANUAL_SUPERSESSION_AUTHORIZATION_AUTHORITY,
   MANUAL_SUPERSESSION_AUTHORIZATION_SCHEMA_VERSION,
+  MANUAL_SUPERSESSION_DECLINE_AUTHORITY,
+  MANUAL_SUPERSESSION_DECLINE_SCHEMA_VERSION,
   MANUAL_SUPERSESSION_REVIEW_AUTHORITY,
   MANUAL_SUPERSESSION_REVIEW_SCHEMA_VERSION,
   PRETRADE_TRIGGER_EVALUATING,
   assertManualSupersessionAuthorizationRecordIntegrity,
+  assertManualSupersessionDeclineRecordIntegrity,
   assertManualSupersessionReviewRecordIntegrity,
   canonicalLifecycleState,
   manualSupersessionAuthorizationId,
   manualSupersessionAuthorizationIntegrityHash,
+  manualSupersessionDeclineId,
+  manualSupersessionDeclineIntegrityHash,
   manualSupersessionReviewId,
   manualSupersessionReviewIntegrityHash,
 } from "./pretrade-state.mjs";
@@ -34,6 +39,10 @@ export const MANUAL_SUPERSESSION_REVIEW_REQUIRED =
   "MANUAL_SUPERSESSION_REVIEW_REQUIRED";
 export const MANUAL_SUPERSESSION_AUTHORIZATION_REQUEST_INVALID =
   "MANUAL_SUPERSESSION_AUTHORIZATION_REQUEST_INVALID";
+export const MANUAL_SUPERSESSION_DECLINE_REQUEST_INVALID =
+  "MANUAL_SUPERSESSION_DECLINE_REQUEST_INVALID";
+export const MANUAL_SUPERSESSION_OBSERVATION_REQUEST_INVALID =
+  "MANUAL_SUPERSESSION_OBSERVATION_REQUEST_INVALID";
 export const FORBIDDEN_SUPERSESSION_AUTHORITY_MATERIAL =
   "FORBIDDEN_SUPERSESSION_AUTHORITY_MATERIAL";
 
@@ -66,14 +75,19 @@ const FORBIDDEN_SUPERSESSION_AUTHORITY_FIELDS = new Set([
   "manualSupersessionReview",
   "manualSupersessionAuthorizations",
   "manualSupersessionAuthorization",
+  "manualSupersessionDeclines",
+  "manualSupersessionDecline",
   "manualSupersessionApproval",
   "authorizationId",
+  "declineId",
   "reviewId",
   "manualApproved",
   "forceImport",
   "supersessionApproved",
 ]);
 const AUTHORIZATION_COMMAND_FIELDS = new Set(["reviewId", "operatorConfirmed"]);
+const DECLINE_COMMAND_FIELDS = new Set(["reviewId", "operatorDeclined"]);
+const OBSERVATION_COMMAND_FIELDS = new Set(["candidate"]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -419,6 +433,12 @@ function assertManualSupersessionAuthorityState(state) {
       "CORRUPT_MANUAL_SUPERSESSION_AUTHORIZATION_STATE",
     );
   }
+  if (!Array.isArray(state?.manualSupersessionDeclines)) {
+    throw ingressError(
+      "PRETRADE manual supersession decline state is unavailable or corrupt",
+      "CORRUPT_MANUAL_SUPERSESSION_DECLINE_STATE",
+    );
+  }
 
   const reviewsById = new Map();
   for (const review of state.manualSupersessionReviews) {
@@ -430,6 +450,7 @@ function assertManualSupersessionAuthorityState(state) {
   }
 
   const authorizationsById = new Map();
+  const authorizedReviewIds = new Set();
   for (const authorization of state.manualSupersessionAuthorizations) {
     assertManualSupersessionAuthorizationRecordIntegrity(authorization);
     if (authorizationsById.has(authorization.authorizationId)) {
@@ -443,8 +464,33 @@ function assertManualSupersessionAuthorityState(state) {
       );
     }
     authorizationsById.set(authorization.authorizationId, authorization);
+    authorizedReviewIds.add(authorization.reviewId);
   }
-  return { reviewsById, authorizationsById };
+
+  const declinesById = new Map();
+  const declinesByReviewId = new Map();
+  for (const decline of state.manualSupersessionDeclines) {
+    assertManualSupersessionDeclineRecordIntegrity(decline);
+    if (declinesById.has(decline.declineId) || declinesByReviewId.has(decline.reviewId)) {
+      throw ingressError("Duplicate PRETRADE manual supersession decline evidence", "CORRUPT_MANUAL_SUPERSESSION_DECLINE_STATE");
+    }
+    const review = reviewsById.get(decline.reviewId);
+    if (!review || !sameBinding(decline, review)) {
+      throw ingressError(
+        "PRETRADE manual supersession decline has invalid review provenance",
+        "CORRUPT_MANUAL_SUPERSESSION_DECLINE_STATE",
+      );
+    }
+    if (authorizedReviewIds.has(decline.reviewId)) {
+      throw ingressError(
+        "PRETRADE manual supersession review has conflicting durable decisions",
+        "CORRUPT_MANUAL_SUPERSESSION_DECISION_STATE",
+      );
+    }
+    declinesById.set(decline.declineId, decline);
+    declinesByReviewId.set(decline.reviewId, decline);
+  }
+  return { reviewsById, authorizationsById, declinesById, declinesByReviewId };
 }
 
 function buildManualSupersessionReviewRecord({ prior, proposed, createdAt }) {
@@ -597,7 +643,7 @@ export class PreTradeCandidateIngress {
     if (!normalizedReviewId) {
       throw ingressError("Manual supersession authorization requires a persisted reviewId", MANUAL_SUPERSESSION_REVIEW_REQUIRED);
     }
-    const { reviewsById } = assertManualSupersessionAuthorityState(this.store.state);
+    const { reviewsById, declinesByReviewId } = assertManualSupersessionAuthorityState(this.store.state);
     const review = reviewsById.get(normalizedReviewId);
     if (!review) {
       throw ingressError("Manual supersession reviewId was not found in PRETRADE", MANUAL_SUPERSESSION_REVIEW_REQUIRED);
@@ -610,6 +656,12 @@ export class PreTradeCandidateIngress {
     assertManualSupersessionReviewSemantics(review, { prior });
     if (!MANUAL_SUPERSESSION_ALLOWED_STATES.has(candidateLifecycleProjection(prior).lifecycleState)) {
       throw ingressError("Manual supersession review is no longer eligible", MANUAL_SUPERSESSION_AUTHORIZATION_INVALID);
+    }
+    if (declinesByReviewId.has(review.reviewId)) {
+      throw ingressError(
+        "Manual supersession review already has a durable decline decision",
+        MANUAL_SUPERSESSION_AUTHORIZATION_INVALID,
+      );
     }
 
     const existing = this.store.state.manualSupersessionAuthorizations.find((authorization) => (
@@ -651,6 +703,191 @@ export class PreTradeCandidateIngress {
       this.store.state = stateBeforeMutation;
       throw error;
     }
+  }
+
+  declineManualSupersession(command = {}) {
+    if (!command || typeof command !== "object" || Array.isArray(command)) {
+      throw ingressError("Manual supersession decline command must be an object", MANUAL_SUPERSESSION_DECLINE_REQUEST_INVALID);
+    }
+    const unexpectedFields = Object.keys(command).filter((field) => !DECLINE_COMMAND_FIELDS.has(field));
+    if (unexpectedFields.length) {
+      throw ingressError(
+        `Manual supersession decline command has unexpected fields: ${unexpectedFields.join(", ")}`,
+        MANUAL_SUPERSESSION_DECLINE_REQUEST_INVALID,
+      );
+    }
+    if (command.operatorDeclined !== true) {
+      throw ingressError("Manual supersession decline requires an explicit operator decision", MANUAL_SUPERSESSION_DECLINE_REQUEST_INVALID);
+    }
+    if (!this.store.state || !Array.isArray(this.store.state.candidates)) {
+      throw ingressError("store state is unavailable; call store.load() first", "INGRESS_STORE_NOT_LOADED");
+    }
+    const reviewId = text(command.reviewId);
+    if (!reviewId) {
+      throw ingressError("Manual supersession decline requires a persisted reviewId", MANUAL_SUPERSESSION_REVIEW_REQUIRED);
+    }
+    const authorityState = assertManualSupersessionAuthorityState(this.store.state);
+    const review = authorityState.reviewsById.get(reviewId);
+    if (!review) {
+      throw ingressError("Manual supersession reviewId was not found in PRETRADE", MANUAL_SUPERSESSION_REVIEW_REQUIRED);
+    }
+    const prior = this.store.state.candidates.find((item) => (
+      item.candidateId === review.candidateId
+      && Number(item.contractVersion) === review.priorContractVersion
+    ));
+    if (!prior) throw ingressError("Prior candidate for manual supersession decline was not found", MANUAL_SUPERSESSION_AUTHORIZATION_INVALID);
+    assertManualSupersessionReviewSemantics(review, { prior });
+    if (!MANUAL_SUPERSESSION_ALLOWED_STATES.has(candidateLifecycleProjection(prior).lifecycleState)) {
+      throw ingressError("Manual supersession review is no longer eligible for decline", MANUAL_SUPERSESSION_AUTHORIZATION_INVALID);
+    }
+    if ([...authorityState.authorizationsById.values()].some((authorization) => authorization.reviewId === reviewId)) {
+      throw ingressError(
+        "Manual supersession review already has a durable authorization decision",
+        MANUAL_SUPERSESSION_AUTHORIZATION_INVALID,
+      );
+    }
+    const existing = authorityState.declinesByReviewId.get(reviewId);
+    if (existing) return clone(existing);
+
+    const record = {
+      schemaVersion: MANUAL_SUPERSESSION_DECLINE_SCHEMA_VERSION,
+      authority: MANUAL_SUPERSESSION_DECLINE_AUTHORITY,
+      declineId: null,
+      reviewId,
+      ...buildReviewBinding(review),
+      decision: "DECLINED",
+      declinedAt: this.clock(),
+      declineIntegrityHash: null,
+    };
+    record.declineId = manualSupersessionDeclineId(record);
+    record.declineIntegrityHash = manualSupersessionDeclineIntegrityHash(record);
+    assertManualSupersessionDeclineRecordIntegrity(record);
+    const stateBeforeMutation = clone(this.store.state);
+    try {
+      this.store.state.manualSupersessionDeclines.push(deepFreeze(clone(record)));
+      this.store.save();
+      return clone(record);
+    } catch (error) {
+      this.store.state = stateBeforeMutation;
+      throw error;
+    }
+  }
+
+  observeManualSupersessionDecision(command = {}) {
+    if (!command || typeof command !== "object" || Array.isArray(command)) {
+      throw ingressError("Manual supersession observation command must be an object", MANUAL_SUPERSESSION_OBSERVATION_REQUEST_INVALID);
+    }
+    const unexpectedFields = Object.keys(command).filter((field) => !OBSERVATION_COMMAND_FIELDS.has(field));
+    if (unexpectedFields.length) {
+      throw ingressError(
+        `Manual supersession observation command has unexpected fields: ${unexpectedFields.join(", ")}`,
+        MANUAL_SUPERSESSION_OBSERVATION_REQUEST_INVALID,
+      );
+    }
+    if (!this.store.state || !Array.isArray(this.store.state.candidates)) {
+      throw ingressError("store state is unavailable; call store.load() first", "INGRESS_STORE_NOT_LOADED");
+    }
+    const input = command.candidate;
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw ingressError("Manual supersession observation requires a canonical candidate", MANUAL_SUPERSESSION_OBSERVATION_REQUEST_INVALID);
+    }
+    const { normalized: proposed, errors } = normalizeCanonicalCandidateProposal(input, {
+      bundleSource: upper(input.source),
+    });
+    if (errors.length || !valuesEqual(proposed, input)) {
+      throw ingressError(
+        `Manual supersession observation candidate is not canonical: ${errors.join("; ") || "canonical content mismatch"}`,
+        MANUAL_SUPERSESSION_OBSERVATION_REQUEST_INVALID,
+      );
+    }
+    const proposedContentHash = candidateContractHash(proposed);
+    const authorityState = assertManualSupersessionAuthorityState(this.store.state);
+    const admitted = this.store.state.candidates.find((candidate) => (
+      candidate.candidateId === proposed.candidateId
+      && Number(candidate.contractVersion) === proposed.contractVersion
+      && candidateContractHash(candidate) === proposedContentHash
+    ));
+    const matchingReviews = [...authorityState.reviewsById.values()].filter((review) => (
+      review.candidateId === proposed.candidateId
+      && review.proposedContractVersion === proposed.contractVersion
+      && review.proposedContentHash === proposedContentHash
+      && valuesEqual(review.proposedCandidate, proposed)
+    ));
+    if (matchingReviews.length > 1) {
+      throw ingressError(
+        "Multiple PRETRADE manual supersession reviews match the proposed candidate",
+        "CORRUPT_MANUAL_SUPERSESSION_DECISION_STATE",
+      );
+    }
+    const review = matchingReviews[0] ?? null;
+    const binding = review ? buildReviewBinding(review) : null;
+    const decline = review ? authorityState.declinesByReviewId.get(review.reviewId) : null;
+    if (decline) {
+      return {
+        status: "DECLINED",
+        reviewId: review.reviewId,
+        declineId: decline.declineId,
+        binding,
+      };
+    }
+    if (admitted) {
+      assertCanonicalCandidateIntegrity(admitted);
+      return {
+        status: "ADMITTED",
+        candidateId: proposed.candidateId,
+        proposedContractVersion: proposed.contractVersion,
+        proposedContentHash,
+        lifecycleState: canonicalLifecycleState(admitted.lifecycleState),
+        stateRevision: normalizeRevision(admitted.stateRevision),
+      };
+    }
+    if (!review) {
+      return {
+        status: "REVIEW_REQUIRED",
+        candidateId: proposed.candidateId,
+        proposedContractVersion: proposed.contractVersion,
+        proposedContentHash,
+      };
+    }
+
+    const authorization = [...authorityState.authorizationsById.values()].find((item) => item.reviewId === review.reviewId) ?? null;
+    const prior = this.store.state.candidates.find((candidate) => (
+      candidate.candidateId === review.candidateId
+      && Number(candidate.contractVersion) === review.priorContractVersion
+    ));
+    try {
+      if (!prior) throw ingressError("Prior candidate no longer exists", MANUAL_SUPERSESSION_AUTHORIZATION_INVALID);
+      assertManualSupersessionReviewSemantics(review, { prior });
+      if (!MANUAL_SUPERSESSION_ALLOWED_STATES.has(candidateLifecycleProjection(prior).lifecycleState)) {
+        throw ingressError("Prior candidate is no longer eligible", MANUAL_SUPERSESSION_AUTHORIZATION_INVALID);
+      }
+    } catch (error) {
+      if (error.code !== MANUAL_SUPERSESSION_AUTHORIZATION_INVALID) throw error;
+      return {
+        status: "INVALIDATED",
+        reviewId: review.reviewId,
+        binding,
+        reasonCode: MANUAL_SUPERSESSION_AUTHORIZATION_INVALID,
+      };
+    }
+    if (!authorization) {
+      return { status: "UNRESOLVED", reviewId: review.reviewId, binding };
+    }
+    if (text(authorization.consumedAt) || text(authorization.consumedByOperationId)) {
+      return {
+        status: "INVALIDATED",
+        reviewId: review.reviewId,
+        authorizationId: authorization.authorizationId,
+        binding,
+        reasonCode: MANUAL_SUPERSESSION_AUTHORIZATION_INVALID,
+      };
+    }
+    return {
+      status: "AUTHORIZED",
+      reviewId: review.reviewId,
+      authorizationId: authorization.authorizationId,
+      binding,
+    };
   }
 
   importBundle(bundle, options = {}) {

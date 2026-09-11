@@ -9,6 +9,8 @@ export const MANUAL_SUPERSESSION_REVIEW_SCHEMA_VERSION = 1;
 export const MANUAL_SUPERSESSION_REVIEW_AUTHORITY = "PRETRADE_MANUAL_SUPERSESSION_REVIEW";
 export const MANUAL_SUPERSESSION_AUTHORIZATION_SCHEMA_VERSION = 1;
 export const MANUAL_SUPERSESSION_AUTHORIZATION_AUTHORITY = "PRETRADE_MANUAL_SUPERSESSION_AUTHORIZATION";
+export const MANUAL_SUPERSESSION_DECLINE_SCHEMA_VERSION = 1;
+export const MANUAL_SUPERSESSION_DECLINE_AUTHORITY = "PRETRADE_MANUAL_SUPERSESSION_DECLINE";
 
 const LEGACY_TRIGGER_EVALUATING = "TRIGGER_EVALUATING";
 const ABSOLUTE_TIMESTAMP_PATTERN = /(?:Z|[+-]\d{2}:\d{2})$/i;
@@ -133,6 +135,23 @@ const MANUAL_SUPERSESSION_AUTHORIZATION_KEYS = new Set([
   "consumedByOperationId",
   "authorizationIntegrityHash",
 ]);
+
+const MANUAL_SUPERSESSION_DECLINE_KEYS = new Set([
+  "schemaVersion",
+  "authority",
+  "declineId",
+  "reviewId",
+  "candidateId",
+  "priorContractVersion",
+  "priorLifecycleState",
+  "priorStateRevision",
+  "priorContentHash",
+  "proposedContractVersion",
+  "proposedContentHash",
+  "decision",
+  "declinedAt",
+  "declineIntegrityHash",
+]);
 const MANUAL_SUPERSESSION_AUTHORITY_LIMITS = Object.freeze({
   maxSerializedBytes: 8 * 1024 * 1024,
   maxDepth: 64,
@@ -252,6 +271,18 @@ export function manualSupersessionAuthorizationIntegrityHash(record) {
   return contentHash(withoutField(record, "authorizationIntegrityHash"));
 }
 
+export function manualSupersessionDeclineId(record) {
+  return `manual-supersession-decline-${contentHash({
+    schemaVersion: record?.schemaVersion,
+    authority: record?.authority,
+    reviewId: record?.reviewId,
+  })}`;
+}
+
+export function manualSupersessionDeclineIntegrityHash(record) {
+  return contentHash(withoutField(record, "declineIntegrityHash"));
+}
+
 export function assertManualSupersessionReviewRecordIntegrity(record) {
   const code = "CORRUPT_MANUAL_SUPERSESSION_REVIEW_STATE";
   assertManualSupersessionAuthorityRecordSafety(record, code);
@@ -342,6 +373,44 @@ export function assertManualSupersessionAuthorizationRecordIntegrity(record) {
   return record;
 }
 
+export function assertManualSupersessionDeclineRecordIntegrity(record) {
+  const code = "CORRUPT_MANUAL_SUPERSESSION_DECLINE_STATE";
+  assertManualSupersessionAuthorityRecordSafety(record, code);
+  assertClosedRecord(record, MANUAL_SUPERSESSION_DECLINE_KEYS, code);
+  if (Number(record.schemaVersion) !== MANUAL_SUPERSESSION_DECLINE_SCHEMA_VERSION) {
+    throw storeError("Unsupported manual supersession decline schemaVersion", code);
+  }
+  if (record.authority !== MANUAL_SUPERSESSION_DECLINE_AUTHORITY) {
+    throw storeError("Invalid manual supersession decline authority", code);
+  }
+  if (!text(record.reviewId) || !text(record.candidateId) || !text(record.priorLifecycleState)) {
+    throw storeError("Manual supersession decline binding is incomplete", code);
+  }
+  if (
+    !Number.isInteger(Number(record.priorContractVersion))
+    || Number(record.priorContractVersion) < 1
+    || !Number.isInteger(Number(record.priorStateRevision))
+    || Number(record.priorStateRevision) < 0
+    || !Number.isInteger(Number(record.proposedContractVersion))
+    || Number(record.proposedContractVersion) !== Number(record.priorContractVersion) + 1
+  ) {
+    throw storeError("Manual supersession decline version/state binding is invalid", code);
+  }
+  assertHash(record.priorContentHash, "priorContentHash", code);
+  assertHash(record.proposedContentHash, "proposedContentHash", code);
+  if (record.decision !== "DECLINED" || !exactTimestamp(record.declinedAt)) {
+    throw storeError("Manual supersession decline decision evidence is invalid", code);
+  }
+  if (text(record.declineId) !== manualSupersessionDeclineId(record)) {
+    throw storeError("Manual supersession declineId does not match review provenance", code);
+  }
+  assertHash(record.declineIntegrityHash, "declineIntegrityHash", code);
+  if (record.declineIntegrityHash !== manualSupersessionDeclineIntegrityHash(record)) {
+    throw storeError("Manual supersession decline integrity hash mismatch", code);
+  }
+  return record;
+}
+
 export function normalizeCandidate(input) {
   const candidate = input && typeof input === "object" ? input : {};
   const structural = candidate.structuralInvalidation && typeof candidate.structuralInvalidation === "object"
@@ -407,6 +476,7 @@ function emptyState() {
     dssEvaluations: [],
     manualSupersessionReviews: [],
     manualSupersessionAuthorizations: [],
+    manualSupersessionDeclines: [],
     importLog: [],
   };
 }
@@ -466,6 +536,13 @@ function normalizeState(raw) {
     validator: assertManualSupersessionAuthorizationRecordIntegrity,
     corruptCode: "CORRUPT_MANUAL_SUPERSESSION_AUTHORIZATION_STATE",
   });
+  const manualSupersessionDeclines = normalizeManualSupersessionRecords(state, {
+    field: "manualSupersessionDeclines",
+    idField: "declineId",
+    validator: assertManualSupersessionDeclineRecordIntegrity,
+    freeze: true,
+    corruptCode: "CORRUPT_MANUAL_SUPERSESSION_DECLINE_STATE",
+  });
   const reviewsById = new Map(manualSupersessionReviews.map((review) => [review.reviewId, review]));
   for (const authorization of manualSupersessionAuthorizations) {
     const review = reviewsById.get(authorization.reviewId);
@@ -492,6 +569,38 @@ function normalizeState(raw) {
       }
     }
   }
+  const authorizedReviewIds = new Set(manualSupersessionAuthorizations.map((authorization) => authorization.reviewId));
+  for (const decline of manualSupersessionDeclines) {
+    const review = reviewsById.get(decline.reviewId);
+    if (!review) {
+      throw storeError(
+        `Manual supersession decline references unknown reviewId ${decline.reviewId}`,
+        "CORRUPT_MANUAL_SUPERSESSION_DECLINE_STATE",
+      );
+    }
+    for (const field of [
+      "candidateId",
+      "priorContractVersion",
+      "priorLifecycleState",
+      "priorStateRevision",
+      "priorContentHash",
+      "proposedContractVersion",
+      "proposedContentHash",
+    ]) {
+      if (!Object.is(decline[field], review[field])) {
+        throw storeError(
+          `Manual supersession decline does not match review field ${field}`,
+          "CORRUPT_MANUAL_SUPERSESSION_DECLINE_STATE",
+        );
+      }
+    }
+    if (authorizedReviewIds.has(decline.reviewId)) {
+      throw storeError(
+        `Manual supersession review ${decline.reviewId} has conflicting durable decisions`,
+        "CORRUPT_MANUAL_SUPERSESSION_DECISION_STATE",
+      );
+    }
+  }
 
   return {
     schemaVersion: PRETRADE_SCHEMA_VERSION,
@@ -500,6 +609,7 @@ function normalizeState(raw) {
     dssEvaluations,
     manualSupersessionReviews,
     manualSupersessionAuthorizations,
+    manualSupersessionDeclines,
     importLog: Array.isArray(state.importLog) ? state.importLog : [],
   };
 }
