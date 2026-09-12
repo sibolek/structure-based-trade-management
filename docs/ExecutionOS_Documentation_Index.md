@@ -10,7 +10,8 @@
 **Final merged main implementation checkpoint:** `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`  
 **Accepted SOD rendering checkpoint:** `4144c5c59494ae318bb736d64fba751a22046512`<br>
 **Accepted manual-ingestion checkpoint:** `b2a1a20f60b12f011fe2f5ff87d325752131ac06`<br>
-**Production-provider design base:** `e2357933147600e702c5e252020b257debbe3392`
+**Production-provider design base:** `e2357933147600e702c5e252020b257debbe3392`<br>
+**Production-provider design checkpoint:** `b45a67051c39d7f985cc190e7648dbac180bda1d`
 
 ---
 
@@ -27,8 +28,9 @@
 9. `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md` is the accepted implementation and validation record for that feature-branch slice.
 10. `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Design_Baseline_v1.0_APPROVED.md` is the approved/frozen authority for production SOD/OpenAI provider hardening, response trust, resource limits, durable run integrity, PRETRADE freshness, and acceptance gates.
 11. `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Implementation_Handoff_v1.0.md` is the approved Codex handoff constrained by that production-provider baseline; it is not implementation evidence.
-12. Closeout/status records define implemented/accepted state.
-13. Earlier approved baselines/addenda remain historical approval-time evidence and do not override later frozen authority or accepted runtime behavior.
+12. `docs/ExecutionOS_V2.4_Production_V1_Roadmap_Checkpoint_2026-09-12.md` is the current Production V1 product-scope and sequencing checkpoint; it is not technical design or implementation authority.
+13. Closeout/status records define implemented/accepted state.
+14. Earlier approved baselines/addenda remain historical approval-time evidence and do not override later frozen authority or accepted runtime behavior.
 
 Frozen approved design records should not be rewritten merely because implementation status later advanced.
 
@@ -50,8 +52,9 @@ Frozen approved design records should not be rewritten merely because implementa
 | `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Design_Baseline_v1.0_APPROVED.md` | Manual SOD/trade-card ingestion architecture, wire contract, authority boundaries, recovery, and test matrix | **APPROVED / FROZEN design authority — implementation accepted separately at `b2a1a20f60b12f011fe2f5ff87d325752131ac06`** |
 | `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Implementation_Handoff_v1.0.md` | Codex implementation instructions for the manual-ingestion slice | **Approved handoff — not implementation evidence** |
 | `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md` | Manual SOD/trade-card ingestion implementation acceptance and validation record | **Accepted implementation closeout at `b2a1a20f60b12f011fe2f5ff87d325752131ac06`** |
-| `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Design_Baseline_v1.0_APPROVED.md` | Production SOD/OpenAI provider hardening, response trust, resource limits, durable run identity/recovery, PRETRADE freshness, and acceptance gates | **APPROVED / FROZEN design authority — implementation pending** |
+| `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Design_Baseline_v1.0_APPROVED.md` | Production SOD/OpenAI provider hardening, response trust, resource limits, durable run identity/recovery, PRETRADE freshness, and acceptance gates | **APPROVED / FROZEN design authority — implementation ready to begin** |
 | `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Implementation_Handoff_v1.0.md` | Codex implementation handoff constrained by the frozen production-provider baseline | **Approved handoff — not implementation evidence** |
+| `docs/ExecutionOS_V2.4_Production_V1_Roadmap_Checkpoint_2026-09-12.md` | Current Production V1 product scope and sequencing, including Performance Intelligence as a required pre-release pillar | **CURRENT PRODUCT ROADMAP / NOT TECHNICAL DESIGN AUTHORITY** |
 | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` | Slices 1–7 implementation/acceptance record | **Accepted implementation closeout** |
 | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` | Merge/TODO/regression/repository closeout | **Final handoff merge closeout** |
 | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` | Phase 3 accepted implementation | **Accepted implementation** |
@@ -62,7 +65,7 @@ Earlier approved handoff baselines/addenda and `ExecutionOS_V2.4_Design_Baseline
 
 The PDF user guide is generated from `USER-GUIDE.md`; if the two ever differ, the current Markdown source plus validated application behavior governs.
 
-The automated SOD workflow remains incomplete feature-branch work. Substantial OpenAI production-provider code exists, but it is not yet hardened or accepted under the frozen production baseline. The manual-ingestion implementation is accepted on its feature branch but is not merged or released to `main`. Neither workflow is documented as an operator-ready capability in `USER-GUIDE.md` or `README.md`; those documents should change only when the corresponding operator workflow is actually released.
+The automated SOD workflow remains incomplete feature-branch work. Substantial OpenAI production-provider code exists, but it is not yet hardened or accepted under the frozen production baseline. The manual-ingestion implementation is accepted on its feature branch but is not merged or released to `main`. Performance Intelligence is now required for Production V1, while its inventory, technical design, implementation, and acceptance remain pending. None of these workflows is documented as an operator-ready capability in `USER-GUIDE.md` or `README.md`; those documents should change only when the corresponding operator workflow is actually released.
 
 ---
 
@@ -123,6 +126,12 @@ Exact design and implementation base:
 e2357933147600e702c5e252020b257debbe3392
 ```
 
+Frozen design documentation checkpoint:
+
+```text
+b45a67051c39d7f985cc190e7648dbac180bda1d
+```
+
 This branch preserves the existing OpenAI Responses provider, production HTTP transport, module wiring, browser initiation, SOD rendering, candidate export, lineage, publication, Candidate Feeder, PRETRADE, and downstream authority architecture. It is scoped to the production hardening requirements frozen on 2026-09-12:
 
 - HTTP(S)-only, search-evidence-bound artifact source URLs;
@@ -145,13 +154,15 @@ Status:
 
 ```text
 DESIGN: APPROVED / FROZEN
-IMPLEMENTATION: PENDING
+DESIGN CHECKPOINT: b45a67051c39d7f985cc190e7648dbac180bda1d
+IMPLEMENTATION: READY TO BEGIN
 LIVE OPENAI ACCEPTANCE: PENDING
+USER IMPLEMENTATION ACCEPTANCE: PENDING
 MERGE / MAIN RELEASE: PENDING
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
-The substantial existing implementation is starting code, not accepted implementation evidence under this baseline.
+The substantial existing implementation is starting code, not accepted implementation evidence under this baseline. The Performance Intelligence roadmap requirement does not interrupt or broaden the frozen provider slice.
 
 ### Active manual SOD / trade-card ingestion feature branch
 
@@ -202,6 +213,28 @@ ACCEPTED SHA: b2a1a20f60b12f011fe2f5ff87d325752131ac06
 MERGE / MAIN RELEASE: PENDING
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
+
+### Production V1 roadmap and Performance Intelligence status
+
+Current product-scope and sequencing checkpoint:
+
+```text
+docs/ExecutionOS_V2.4_Production_V1_Roadmap_Checkpoint_2026-09-12.md
+```
+
+The Production V1 product model has four pillars: PLAN / ANALYZE, AUTHORIZE / EXECUTE, OBSERVE / MANAGE, and LEARN / IMPROVE. Performance Intelligence / Analytics & Reporting is required for the fourth pillar and must be accepted before final V2.4 release integration.
+
+```text
+PERFORMANCE INTELLIGENCE / ANALYTICS & REPORTING
+PRODUCT REQUIREMENT: APPROVED FOR PRODUCTION V1
+INVENTORY: PENDING
+DESIGN: PENDING
+IMPLEMENTATION: PENDING
+```
+
+The existing EOD reporter is **PERFORMANCE INTELLIGENCE FOUNDATION / PHASE 0** and partial analytics only. It is not the complete subsystem and does not yet replace TradeZella-style journaling, reporting, and analysis.
+
+Performance Intelligence inventory begins after Production SOD Provider implementation, validation, independent review, and user acceptance. Its later design and implementation precede final release integration. No analytics technical architecture is approved by this checkpoint, and the current provider implementation proceeds unchanged.
 
 ### Retired feature branch
 
@@ -418,9 +451,19 @@ Actual equity order entry remains manual in thinkorswim/Schwab. Schwab observati
 ### Production SOD provider hardening branch
 
 - Decisions 1–27 and Acceptance Matrix A–V are approved/frozen;
-- hardening/run-integrity implementation remains pending;
+- hardening/run-integrity implementation is ready to begin;
 - credentialed live OpenAI acceptance remains pending;
+- independent implementation review and user acceptance remain pending;
 - merge/release to `main` remains pending.
+
+### Performance Intelligence / Analytics & Reporting
+
+- product requirement approved for Production V1;
+- existing EOD reporter classified as foundation / Phase 0 and partial analytics only;
+- repository, persistence/history, EOD-reporter, and data-availability inventory pending;
+- technical design and skeptical review pending;
+- implementation, regression, independent review, and user acceptance pending;
+- final release integration waits for acceptance of both this subsystem and the Production SOD Provider slice.
 
 ### Manual SOD / trade-card ingestion feature branch
 
@@ -475,6 +518,8 @@ Reconciliation remains ownership/trade state rather than router health.
 ---
 
 ## 12. EOD semantics
+
+The existing EOD reporter is **PERFORMANCE INTELLIGENCE FOUNDATION / PHASE 0**. Its broker reconstruction, History enrichment, outcome, P/L, risk, R, setup, and lifecycle reporting are valuable existing capabilities, but they are not the complete Performance Intelligence subsystem or a current TradeZella replacement.
 
 Current origin-aware planned-risk stop rule:
 
@@ -565,7 +610,8 @@ npm run build
 - September 8 final merge closeout — `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md`.
 - SOD artifact rendering — accepted/frozen on `v24-sod-orchestration-lineage` at `4144c5c59494ae318bb736d64fba751a22046512`; baseline: `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md`.
 - Manual SOD & Trade-Card Ingestion — implementation user-accepted on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06` on 2026-09-11; merge/main release pending; closeout: `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md`.
-- Production SOD Analysis Provider Hardening & Run Integrity — design approved/frozen on `v24-sod-production-analysis-provider` from base `e2357933147600e702c5e252020b257debbe3392`; implementation, live OpenAI acceptance, and merge/main release pending.
+- Production SOD Analysis Provider Hardening & Run Integrity — design approved/frozen on `v24-sod-production-analysis-provider` at documentation checkpoint `b45a67051c39d7f985cc190e7648dbac180bda1d`; implementation ready to begin, with live OpenAI acceptance, user acceptance, and merge/main release pending.
+- Production V1 roadmap — `docs/ExecutionOS_V2.4_Production_V1_Roadmap_Checkpoint_2026-09-12.md`; Performance Intelligence product requirement approved for Production V1, with inventory, design, implementation, and acceptance pending.
 
 ---
 
@@ -587,8 +633,8 @@ A repository GitHub Actions workflow regenerates the PDF when the guide or rende
 
 The Markdown guide remains the editable source of truth for operator documentation.
 
-Automated SOD orchestration remains absent from the operator guide because its substantial production-provider implementation is not yet hardened, live-validated, accepted, merged, or released. Manual SOD/trade-card ingestion remains absent because its accepted feature-branch implementation has not yet been merged/released to `main`, and later operator-facing Submit workflow/UI work is not claimed by its closeout.
+Automated SOD orchestration remains absent from the operator guide because its substantial production-provider implementation is not yet hardened, live-validated, accepted, merged, or released. Manual SOD/trade-card ingestion remains absent because its accepted feature-branch implementation has not yet been merged/released to `main`, and later operator-facing Submit workflow/UI work is not claimed by its closeout. Performance Intelligence remains absent because product scope is approved but technical design, implementation, acceptance, and release remain pending.
 
 ---
 
-**Maintenance principle:** current code/runtime and accepted closeout evidence govern current truth. Preserve frozen approved documents. Keep stable `main` operator documentation distinct from accepted feature-branch implementation records until a feature is merged and released.
+**Maintenance principle:** current code/runtime and accepted closeout evidence govern current truth. Preserve frozen approved documents. Current roadmap checkpoints govern product scope and sequencing, not technical architecture or implementation. Keep stable `main` operator documentation distinct from accepted feature-branch implementation records until a feature is merged and released.

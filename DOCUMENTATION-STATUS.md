@@ -41,6 +41,12 @@ Release distinction:
 
 The v0.5 baseline supersedes conflicting earlier top-level design assumptions. Earlier approved baselines/addenda remain frozen historical approval-time evidence and should not be rewritten to simulate later state. The quantity-safety addendum supplements the frozen baseline for its narrowly defined PRETRADE policy. The SOD rendering baseline governs only its isolated feature-branch scope and does not rewrite the frozen PRETRADE→ARM→Execution architecture. The manual-ingestion baseline remains the frozen design authority for its explicit manual-submission scope; implementation acceptance is recorded separately in the September 11 closeout. The production-provider baseline governs only the September 12 hardening/run-integrity slice and is not implementation or live-provider acceptance evidence.
 
+### Current product roadmap / planning authority
+
+- `docs/ExecutionOS_V2.4_Production_V1_Roadmap_Checkpoint_2026-09-12.md` — current Production V1 product scope and sequencing, including Performance Intelligence / Analytics & Reporting as a required pre-release pillar.
+
+The roadmap checkpoint is current product-planning authority. It is not a frozen technical design baseline, analytics implementation authority, implementation evidence, release evidence, or user acceptance.
+
 ### Accepted implementation / closeout records
 
 - `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md`.
@@ -139,10 +145,16 @@ Manual ChatGPT Start-of-Day generation remains the current manual-generation wor
 v24-sod-production-analysis-provider
 ```
 
-Exact design and implementation base:
+Frozen design and implementation base:
 
 ```text
 e2357933147600e702c5e252020b257debbe3392
+```
+
+Design documentation checkpoint:
+
+```text
+b45a67051c39d7f985cc190e7648dbac180bda1d
 ```
 
 Governing baseline:
@@ -161,13 +173,15 @@ Current status:
 
 ```text
 DESIGN: APPROVED / FROZEN
-IMPLEMENTATION: PENDING
-LIVE PROVIDER ACCEPTANCE: PENDING
+DESIGN CHECKPOINT: b45a67051c39d7f985cc190e7648dbac180bda1d
+IMPLEMENTATION: READY TO BEGIN
+LIVE OPENAI ACCEPTANCE: PENDING
+USER IMPLEMENTATION ACCEPTANCE: PENDING
 MERGE / MAIN RELEASE: PENDING
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
-The approved scope hardens artifact-link trust, chart/request/response resources, strict local structured-output validation, durable per-date run identity and recovery, post-provider PRETRADE freshness, pre-publication authority fencing, deterministic publication recovery, readiness reporting, and explicit live acceptance. It preserves candidate identity and all existing PRETRADE, Candidate Feeder, ARM, execution, and broker boundaries.
+The approved scope hardens artifact-link trust, chart/request/response resources, strict local structured-output validation, durable per-date run identity and recovery, post-provider PRETRADE freshness, pre-publication authority fencing, deterministic publication recovery, readiness reporting, and explicit live acceptance. It preserves candidate identity and all existing PRETRADE, Candidate Feeder, ARM, execution, and broker boundaries. The Performance Intelligence roadmap requirement does not interrupt or broaden this slice.
 
 ### Active manual SOD / trade-card ingestion feature branch
 
@@ -233,6 +247,48 @@ Accepted implementation includes:
 - deterministic receipt ordering, explicit durable decline, ACTION_REQUIRED resumption, and fail-closed recovery ambiguity handling.
 
 The design baseline and implementation handoff remain frozen historical authority records. Runtime implementation acceptance is claimed only by the separate September 11 closeout at the accepted SHA above.
+
+### Production V1 product roadmap
+
+Current roadmap checkpoint:
+
+```text
+docs/ExecutionOS_V2.4_Production_V1_Roadmap_Checkpoint_2026-09-12.md
+```
+
+Production V1 is organized around four product pillars:
+
+1. PLAN / ANALYZE;
+2. AUTHORIZE / EXECUTE;
+3. OBSERVE / MANAGE;
+4. LEARN / IMPROVE.
+
+Performance Intelligence / Analytics & Reporting is the required major subsystem for the fourth pillar. The existing EOD reporter is its valuable **FOUNDATION / PHASE 0**, not the complete subsystem and not yet a TradeZella replacement.
+
+Current roadmap status:
+
+```text
+PRODUCTION SOD PROVIDER
+DESIGN: APPROVED / FROZEN
+DESIGN CHECKPOINT: b45a67051c39d7f985cc190e7648dbac180bda1d
+IMPLEMENTATION: READY TO BEGIN
+LIVE OPENAI ACCEPTANCE: PENDING
+USER IMPLEMENTATION ACCEPTANCE: PENDING
+
+PERFORMANCE INTELLIGENCE / ANALYTICS & REPORTING
+PRODUCT REQUIREMENT: APPROVED FOR PRODUCTION V1
+EXISTING FOUNDATION: EOD REPORTER / PARTIAL ANALYTICS ONLY
+REPOSITORY INVENTORY: PENDING
+DESIGN: PENDING
+IMPLEMENTATION: PENDING
+USER ACCEPTANCE: PENDING
+
+FINAL RELEASE INTEGRATION: PENDING / BLOCKED ON ACCEPTANCE OF BOTH MAJOR REMAINING SLICES
+MERGE / MAIN RELEASE: PENDING
+BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
+```
+
+Detailed Performance Intelligence architecture remains intentionally pending repository, persistence/history, EOD-reporter, and data-availability inventory followed by explicit design, skeptical review, and user approval. It follows Production SOD Provider acceptance and precedes final release integration. The current provider implementation proceeds unchanged.
 
 ### Retired integration branch
 
@@ -369,20 +425,22 @@ Implemented/accepted:
 
 ## Current intentionally incomplete / deferred areas
 
-### SOD orchestration
+### Required before Production V1
 
-- production analysis-provider hardening/run-integrity implementation;
-- credentialed live provider acceptance;
-- final end-to-end operator-ready automated SOD workflow;
-- automated REVISED-candidate PRETRADE supersession preflight;
-- merge/release to `main`.
+- Production SOD Provider hardening and run-integrity implementation;
+- offline provider tests, full V2.4 regression, and production build;
+- credentialed live OpenAI acceptance;
+- independent provider implementation review and user acceptance;
+- Performance Intelligence repository, persistence/history, EOD-reporter, and data-availability inventory;
+- explicit Performance Intelligence design, skeptical review, and user approval/freeze;
+- Performance Intelligence implementation, analytics tests, regression, review, and user acceptance;
+- final release integration of all accepted V2.4 feature work;
+- full integrated regression;
+- production configuration and operator documentation;
+- merge/main release;
+- installed-system smoke testing.
 
-### Manual SOD / trade-card ingestion
-
-- merge/release of the accepted feature-branch checkpoint to `main`;
-- any later operator-facing Submit action/workflow/UI not contained in the accepted implementation.
-
-### Broader ExecutionOS
+### Post-V1 / deferred
 
 - broker order placement/replacement/cancellation/modification/flattening;
 - a general broker-write Governor;
@@ -390,7 +448,10 @@ Implemented/accepted:
 - live NinjaTrader execution binding;
 - cloud/multi-device authority;
 - a general reconciliation-resolution workflow for every possible broker coverage/provenance failure beyond the implemented Authorization Exception reconciliation path;
-- V3 Management Governor.
+- V3 Management Governor;
+- any later operator-facing manual-ingestion Submit action/workflow/UI not contained in the accepted implementation.
+
+Automated REVISED-candidate PRETRADE supersession preflight remains a later explicit design/implementation decision. The Performance Intelligence product decision does not promote it into the Production V1 critical path.
 
 V3 has not started.
 
@@ -506,6 +567,10 @@ The complete targeted and full-regression counts are recorded in `docs/Execution
 
 ## EOD reporting status
 
+The current EOD reporter is **PERFORMANCE INTELLIGENCE FOUNDATION / PHASE 0**. It is valuable existing reporting infrastructure, not the complete Performance Intelligence subsystem and not yet a replacement for TradeZella-style journaling and analytics.
+
+Its current useful capabilities include broker execution reconstruction, ExecutionOS History enrichment, outcome and win-rate reporting, realized P/L where context is complete, average winner/loser, gross profit factor, average win/loss factor, planned risk, realized R, setup/thesis/trigger/invalidation enrichment, and lifecycle/structural-state statistics.
+
 EOD enrichment remains origin-aware:
 
 ```text
@@ -528,6 +593,7 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md` — accepted manual-ingestion implementation and validation record.
 - `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Design_Baseline_v1.0_APPROVED.md` — approved/frozen production SOD provider hardening and run-integrity design authority.
 - `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Implementation_Handoff_v1.0.md` — approved implementation handoff constrained by that baseline.
+- `docs/ExecutionOS_V2.4_Production_V1_Roadmap_Checkpoint_2026-09-12.md` — current Production V1 product scope and sequencing; not technical design authority.
 - `docs/ExecutionOS_EOD_Report.md` — EOD technical/operational reference.
 - `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` — approved quantity-safety policy authority.
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` — final merge and repository closeout record.
@@ -550,12 +616,13 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - GitHub issue #19 — PRETRADE near-stop quantity-safety policy; **COMPLETED / CLOSED**.
 - SOD artifact rendering — **ACCEPTED / FROZEN** on `v24-sod-orchestration-lineage` at `4144c5c59494ae318bb736d64fba751a22046512`.
 - Manual SOD & Trade-Card Ingestion — **DESIGN APPROVED / FROZEN; IMPLEMENTATION USER ACCEPTED** on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06` on 2026-09-11; merge/main release pending.
-- Production SOD Analysis Provider Hardening & Run Integrity — **DESIGN APPROVED / FROZEN; IMPLEMENTATION PENDING; LIVE PROVIDER ACCEPTANCE PENDING** on `v24-sod-production-analysis-provider` from base `e2357933147600e702c5e252020b257debbe3392`; merge/main release pending.
+- Production SOD Analysis Provider Hardening & Run Integrity — **DESIGN APPROVED / FROZEN at `b45a67051c39d7f985cc190e7648dbac180bda1d`; IMPLEMENTATION READY TO BEGIN; LIVE PROVIDER ACCEPTANCE PENDING** on `v24-sod-production-analysis-provider`; merge/main release pending.
+- Production V1 roadmap — Performance Intelligence / Analytics & Reporting is **PRODUCT REQUIREMENT APPROVED FOR PRODUCTION V1**; inventory, technical design, implementation, and user acceptance remain pending.
 
 ---
 
 ## Documentation rule
 
-Current validated code/runtime defines what the system actually does. `USER-GUIDE.md` translates released `main` behavior into operator procedure. The v0.5 baseline and traceability audit preserve frozen architecture. The approved quantity-safety addendum preserves the September 8 PRETRADE safety policy. The SOD artifact-rendering baseline preserves the accepted September 9 feature-branch rendering boundary. The manual SOD/trade-card ingestion baseline preserves the approved September 10 manual-ingestion architecture and implementation contract. The production SOD provider baseline preserves the approved September 12 hardening, run-integrity, PRETRADE-freshness, readiness, and acceptance requirements.
+Current validated code/runtime defines what the system actually does. `USER-GUIDE.md` translates released `main` behavior into operator procedure. The v0.5 baseline and traceability audit preserve frozen architecture. The approved quantity-safety addendum preserves the September 8 PRETRADE safety policy. The SOD artifact-rendering baseline preserves the accepted September 9 feature-branch rendering boundary. The manual SOD/trade-card ingestion baseline preserves the approved September 10 manual-ingestion architecture and implementation contract. The production SOD provider baseline preserves the approved September 12 hardening, run-integrity, PRETRADE-freshness, readiness, and acceptance requirements. The Production V1 roadmap checkpoint records current product scope and sequencing without acting as technical design or implementation authority.
 
 Do not rewrite frozen approved design records merely because implementation advanced. Keep released operator documentation distinct from accepted feature-branch implementation records until the feature is merged and released.
