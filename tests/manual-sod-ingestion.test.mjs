@@ -363,41 +363,89 @@ test("F G T trusted fields and semantic schema are materialized by ExecutionOS l
 
 test("H O P Q durable claim, replay, journal, recovery evidence, and receipts are immutable records", async () => {
   const { manualInbox, candidateInbox, root } = await tempDirs();
+  const store = new PreTradeStore({ filePath: path.join(root, "pretrade-state.json") });
+  store.load();
+  const ingress = new PreTradeCandidateIngress({ store, clock: () => "2026-09-10T13:05:30.000Z" });
+  const pretrade = await startPretradeAuthority(store, ingress);
   const filePath = path.join(manualInbox, "manual.json");
   await fs.writeFile(filePath, `${JSON.stringify(envelope(), null, 2)}\n`);
+  try {
+    const result = await processManualProposalFile(filePath, {
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:05:00.000Z",
+      idFactory: () => "publication-1",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(result.status, "RECOVERY_REQUIRED");
+    assert.equal(result.recoveryReason, "PUBLICATION_AWAITING_CANDIDATE_FEEDER");
+    assert.ok(result.publication.finalPath.startsWith(candidateInbox));
+    assert.ok(fsSync.existsSync(result.movedTo));
+    assert.deepEqual(await fs.readdir(path.join(root, "manual-ingestion-receipts")).catch(() => []), []);
 
-  const result = await processManualProposalFile(filePath, {
-    manualInboxPath: manualInbox,
-    candidateInboxPath: candidateInbox,
-    priorCandidates: [],
-    clock: () => "2026-09-10T13:05:00.000Z",
-    idFactory: () => "publication-1",
-    stableFileOptions: { initialDelayMs: 0, intervalMs: 0, stableChecks: 1, maxChecks: 2, parseAttempts: 1 },
-  });
-  assert.equal(result.status, "SUCCESS");
-  assert.ok(result.publication.finalPath.startsWith(candidateInbox));
-  assert.ok(fsSync.existsSync(result.receiptPath));
+    const claim = JSON.parse(await fs.readFile(path.join(root, "manual-ingestion-journal", "manual-submission-001", "claim.json"), "utf8"));
+    assert.equal(claim.submissionId, "manual-submission-001");
+    const journalEntries = await fs.readdir(path.join(root, "manual-ingestion-journal", "manual-submission-001", "events"));
+    assert.ok(journalEntries.some((name) => name.includes("RECEIVED")));
+    assert.ok(journalEntries.some((name) => name.includes("PUBLISHED")));
 
-  const claim = JSON.parse(await fs.readFile(path.join(root, "manual-ingestion-journal", "manual-submission-001", "claim.json"), "utf8"));
-  assert.equal(claim.submissionId, "manual-submission-001");
-  const journalEntries = await fs.readdir(path.join(root, "manual-ingestion-journal", "manual-submission-001", "events"));
-  assert.ok(journalEntries.some((name) => name.includes("RECEIVED")));
-  assert.ok(journalEntries.some((name) => name.includes("PUBLISHED")));
+    const pending = await recoverClaimedManualSubmissions({
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:05:45.000Z",
+    });
+    assert.equal(pending.results[0].status, "RECOVERY_REQUIRED");
+    assert.equal(pending.results[0].reason, "CANDIDATE_FEEDER_ADMISSION_PENDING");
 
-  const replayPath = path.join(manualInbox, "manual-replay.json");
-  await fs.writeFile(replayPath, `${JSON.stringify(envelope(), null, 2)}\n`);
-  const replay = await processManualProposalFile(replayPath, {
-    manualInboxPath: manualInbox,
-    candidateInboxPath: candidateInbox,
-    priorCandidates: [],
-    clock: () => "2026-09-10T13:06:00.000Z",
-    idFactory: () => "publication-2",
-    stableFileOptions: { initialDelayMs: 0, intervalMs: 0, stableChecks: 1, maxChecks: 2, parseAttempts: 1 },
-  });
-  assert.equal(replay.replay, true);
-  assert.equal(replay.status, "SUCCESS");
-  assert.equal(replay.receiptPath, result.receiptPath);
-  assert.ok(fsSync.existsSync(replay.movedTo));
+    const replayPath = path.join(manualInbox, "manual-replay.json");
+    await fs.writeFile(replayPath, `${JSON.stringify(envelope(), null, 2)}\n`);
+    const replayPending = await processManualProposalFile(replayPath, {
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:06:00.000Z",
+      idFactory: () => "must-not-publish",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(replayPending.replay, true);
+    assert.equal(replayPending.status, "RECOVERY_REQUIRED");
+    assert.equal((await fs.readdir(candidateInbox)).filter((name) => name.endsWith(".json")).length, 1);
+
+    const fed = await drainCandidateInbox({
+      inboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:07:00.000Z",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(fed.results[0].status, "ARCHIVED");
+    assert.equal(fed.results[0].receipt.candidates[0].ingressStatus, "ACCEPTED");
+
+    const recovered = await recoverClaimedManualSubmissions({
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:08:00.000Z",
+    });
+    const final = recovered.results[0].result;
+    assert.equal(final.status, "SUCCESS");
+    assert.equal(final.receipt.candidateOutcomes[0].status, "ACCEPTED");
+    assert.ok(fsSync.existsSync(final.receiptPath));
+    assert.equal(store.snapshot().candidates.length, 1);
+    assert.equal(store.snapshot().candidates[0].contentHash, final.receipt.candidateOutcomes[0].contentHash);
+
+    const finalReplay = await recoverClaimedManualSubmissions({
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:09:00.000Z",
+    });
+    assert.equal(finalReplay.results[0].result.receiptPath, final.receiptPath);
+    assert.equal((await fs.readdir(candidateInbox)).filter((name) => name.endsWith(".json")).length, 0);
+  } finally {
+    await pretrade.close();
+  }
 });
 
 test("O single submission journal writer lock prevents concurrent processors", async () => {
@@ -522,7 +570,7 @@ test("R Manual Proposal Inbox drain ignores unrelated directories and archives o
     stableFileOptions: { initialDelayMs: 0, intervalMs: 0, stableChecks: 1, maxChecks: 2, parseAttempts: 1 },
   });
   assert.equal(drained.filesDiscovered, 2);
-  assert.equal(drained.results.filter((item) => item.status === "SUCCESS").length, 1);
+  assert.equal(drained.results.filter((item) => item.status === "RECOVERY_REQUIRED").length, 1);
   assert.equal(drained.results.filter((item) => item.status === "FAILED").length, 1);
   assert.ok(fsSync.existsSync(path.join(unrelated, "ignored.json")));
   assert.ok((await fs.readdir(path.join(root, "manual-ingestion-archive"))).some((name) => name === "valid.json"));
@@ -555,7 +603,7 @@ test("R production drain reads authoritative PRETRADE snapshot before lineage pr
   }
 });
 
-test("R ACTION_REQUIRED and PARTIAL_SUCCESS are valid submissions archived rather than quarantined", async () => {
+test("R ACTION_REQUIRED and admission-pending partial submissions leave the hot inbox", async () => {
   const { root, manualInbox, candidateInbox } = await tempDirs();
   const prior = canonicalPrior();
   await fs.writeFile(path.join(manualInbox, "action.json"), JSON.stringify(envelope({
@@ -586,25 +634,49 @@ test("R ACTION_REQUIRED and PARTIAL_SUCCESS are valid submissions archived rathe
     stableFileOptions: { initialDelayMs: 0, intervalMs: 0, stableChecks: 1, maxChecks: 2, parseAttempts: 1 },
   });
   assert.equal(action.status, "ACTION_REQUIRED");
-  assert.equal(partial.status, "PARTIAL_SUCCESS");
+  assert.equal(partial.status, "RECOVERY_REQUIRED");
+  assert.equal(partial.recoveryReason, "PUBLICATION_AWAITING_CANDIDATE_FEEDER");
   const archived = await fs.readdir(path.join(root, "manual-ingestion-archive"));
   assert.ok(archived.includes("action.json"));
   assert.ok(archived.includes("partial.json"));
 
-  await fs.rm(partial.receiptPath);
-  const recoveredPartial = await recoverClaimedManualSubmissions({
-    manualInboxPath: manualInbox,
-    candidateInboxPath: candidateInbox,
-    pretradeCandidates: [],
-    clock: () => "2026-09-10T13:12:30.000Z",
-  });
-  const partialRecovery = recoveredPartial.results.find((item) => item.submissionId === "partial-success");
-  assert.equal(partialRecovery.status, "RECOVERED");
-  assert.equal(partialRecovery.result.status, "PARTIAL_SUCCESS");
-  assert.equal(partialRecovery.result.receipt.overallOutcome, "PARTIAL_SUCCESS");
+  const receiptFilesBeforeAdmission = await fs.readdir(path.join(root, "manual-ingestion-receipts"));
+  const receiptsBeforeAdmission = await Promise.all(receiptFilesBeforeAdmission.map(async (name) => (
+    JSON.parse(await fs.readFile(path.join(root, "manual-ingestion-receipts", name), "utf8"))
+  )));
+  assert.equal(receiptsBeforeAdmission.some((receipt) => receipt.submissionId === "partial-success"), false);
+
+  const store = new PreTradeStore({ filePath: path.join(root, "pretrade-state.json") });
+  store.load();
+  store.state.candidates.push(structuredClone(prior));
+  store.save();
+  const ingress = new PreTradeCandidateIngress({ store, clock: () => "2026-09-10T13:12:15.000Z" });
+  const pretrade = await startPretradeAuthority(store, ingress);
+  try {
+    const fed = await drainCandidateInbox({
+      inboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:12:20.000Z",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(fed.results[0].status, "ARCHIVED");
+    const recoveredPartial = await recoverClaimedManualSubmissions({
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:12:30.000Z",
+    });
+    const partialRecovery = recoveredPartial.results.find((item) => item.submissionId === "partial-success");
+    assert.equal(partialRecovery.status, "RECOVERED");
+    assert.equal(partialRecovery.result.status, "PARTIAL_SUCCESS");
+    assert.equal(partialRecovery.result.receipt.candidateOutcomes[0].status, "ACCEPTED");
+    assert.equal(partialRecovery.result.receipt.candidateOutcomes[1].status, "REJECTED");
+  } finally {
+    await pretrade.close();
+  }
 });
 
-test("P recovery reconciles publication or PRETRADE evidence after source leaves hot inbox", async () => {
+test("P published candidate remains admission-pending after source leaves hot inbox", async () => {
   const { manualInbox, candidateInbox } = await tempDirs();
   const filePath = path.join(manualInbox, "recover.json");
   await fs.writeFile(filePath, JSON.stringify(envelope()));
@@ -616,14 +688,16 @@ test("P recovery reconciles publication or PRETRADE evidence after source leaves
     idFactory: () => "recover-publication",
     stableFileOptions: { initialDelayMs: 0, intervalMs: 0, stableChecks: 1, maxChecks: 2, parseAttempts: 1 },
   });
-  assert.equal(first.status, "SUCCESS");
+  assert.equal(first.status, "RECOVERY_REQUIRED");
   const recovered = await recoverClaimedManualSubmissions({
     manualInboxPath: manualInbox,
     candidateInboxPath: candidateInbox,
-    pretradeCandidates: first.receipt.publication ? [] : [],
+    pretradeCandidates: [],
     clock: () => "2026-09-10T13:14:00.000Z",
   });
-  assert.equal(recovered.results[0].status, "RECOVERED");
+  assert.equal(recovered.results[0].status, "RECOVERY_REQUIRED");
+  assert.equal(recovered.results[0].reason, "CANDIDATE_FEEDER_ADMISSION_PENDING");
+  assert.equal((await fs.readdir(candidateInbox)).filter((name) => name.endsWith(".json")).length, 1);
 });
 
 test("P recovery observes authoritative PRETRADE admission after candidate feeder consumed publication", async () => {
@@ -640,18 +714,13 @@ test("P recovery observes authoritative PRETRADE admission after candidate feede
     idFactory: () => "pretrade-recovery-publication",
     stableFileOptions: { initialDelayMs: 0, intervalMs: 0, stableChecks: 1, maxChecks: 2, parseAttempts: 1 },
   });
-  assert.equal(first.status, "SUCCESS");
+  assert.equal(first.status, "RECOVERY_REQUIRED");
   const publishedBundle = JSON.parse(await fs.readFile(first.publication.finalPath, "utf8"));
   const admittedCandidate = {
     ...publishedBundle.candidates[0],
     contentHash: candidateContractHash(publishedBundle.candidates[0]),
   };
-  await fs.rm(first.receiptPath);
   await fs.rm(first.publication.finalPath);
-  const eventDirectory = path.join(manualIngestionDirectories(manualInbox).journal, "pretrade-recovery", "events");
-  for (const name of await fs.readdir(eventDirectory)) {
-    if (name.includes("RECONCILIATION_RECORDED")) await fs.rm(path.join(eventDirectory, name));
-  }
 
   const staleLock = path.join(manualIngestionDirectories(manualInbox).journal, "pretrade-recovery", ".lock");
   await fs.mkdir(staleLock, { recursive: true });
@@ -672,6 +741,165 @@ test("P recovery observes authoritative PRETRADE admission after candidate feede
     assert.equal(recovered.results[0].status, "RECOVERED");
     assert.equal(recovered.results[0].result.status, "SUCCESS");
     assert.equal(recovered.results[0].result.receipt.recovery.pretradeAdmissionObserved, true);
+  } finally {
+    await pretrade.close();
+  }
+});
+
+test("ordinary NEW publication resolves FAILED when PRETRADE wins the race with conflicting content", async () => {
+  const { root, manualInbox, candidateInbox } = await tempDirs();
+  const submissionId = "new-conflict-race";
+  const store = new PreTradeStore({ filePath: path.join(root, "pretrade-state.json") });
+  store.load();
+  const ingress = new PreTradeCandidateIngress({ store, clock: () => "2026-09-10T13:17:00.000Z" });
+  const pretrade = await startPretradeAuthority(store, ingress);
+  const filePath = path.join(manualInbox, "new-conflict-race.json");
+  await fs.writeFile(filePath, JSON.stringify(envelope({
+    submission: { ...envelope().submission, submissionId },
+    bundleId: "manual-new-conflict-race",
+  })));
+  try {
+    const pending = await processManualProposalFile(filePath, {
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:16:00.000Z",
+      idFactory: () => "new-conflict-publication",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(pending.status, "RECOVERY_REQUIRED");
+    assert.deepEqual(await fs.readdir(path.join(root, "manual-ingestion-receipts")).catch(() => []), []);
+
+    const conflicting = canonicalPrior(candidate({ thesis: "A different v1 won the PRETRADE race." }));
+    store.state.candidates.push(conflicting);
+    store.save();
+    const fed = await drainCandidateInbox({
+      inboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:18:00.000Z",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(fed.results[0].status, "QUARANTINED");
+    assert.equal(fed.results[0].receipt.candidates[0].ingressStatus, "CONFLICT");
+    assert.ok(fsSync.existsSync(path.join(root, "quarantine", pending.publication.finalName)));
+
+    const recovered = await recoverClaimedManualSubmissions({
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:19:00.000Z",
+    });
+    const final = recovered.results[0].result;
+    assert.equal(final.status, "FAILED");
+    assert.equal(final.receipt.candidateOutcomes[0].status, "CONFLICT");
+    assert.equal(final.receipt.candidateOutcomes[0].candidateFeederEvidence.ingressStatus, "CONFLICT");
+    assert.equal(store.snapshot().candidates.length, 1);
+    assert.equal(store.snapshot().candidates[0].contentHash, conflicting.contentHash);
+  } finally {
+    await pretrade.close();
+  }
+});
+
+test("exact PRETRADE race is reconciled as DUPLICATE only after feeder verification", async () => {
+  const { root, manualInbox, candidateInbox } = await tempDirs();
+  const submissionId = "new-exact-duplicate";
+  const store = new PreTradeStore({ filePath: path.join(root, "pretrade-state.json") });
+  store.load();
+  const ingress = new PreTradeCandidateIngress({ store, clock: () => "2026-09-10T13:20:00.000Z" });
+  const pretrade = await startPretradeAuthority(store, ingress);
+  const filePath = path.join(manualInbox, "new-exact-duplicate.json");
+  await fs.writeFile(filePath, JSON.stringify(envelope({
+    submission: { ...envelope().submission, submissionId },
+    bundleId: "manual-new-exact-duplicate",
+  })));
+  try {
+    const pending = await processManualProposalFile(filePath, {
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:20:00.000Z",
+      idFactory: () => "new-duplicate-publication",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(pending.status, "RECOVERY_REQUIRED");
+    const publishedBundle = JSON.parse(await fs.readFile(pending.publication.finalPath, "utf8"));
+    assert.equal(ingress.importBundle(publishedBundle, { ingressPolicy: MANUAL_AUTHORIZED }).outcomes[0].status, "ACCEPTED");
+
+    const fed = await drainCandidateInbox({
+      inboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:21:00.000Z",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(fed.results[0].status, "ARCHIVED");
+    assert.equal(fed.results[0].receipt.candidates[0].ingressStatus, "DUPLICATE");
+
+    const recovered = await recoverClaimedManualSubmissions({
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:22:00.000Z",
+    });
+    assert.equal(recovered.results[0].result.status, "SUCCESS");
+    assert.equal(recovered.results[0].result.receipt.candidateOutcomes[0].status, "DUPLICATE");
+    assert.equal(store.snapshot().candidates.length, 1);
+  } finally {
+    await pretrade.close();
+  }
+});
+
+test("mixed NEW PRETRADE conflict and acceptance reconcile as PARTIAL_SUCCESS", async () => {
+  const { root, manualInbox, candidateInbox } = await tempDirs();
+  const submissionId = "mixed-new-conflict-accepted";
+  const candidateA = candidate();
+  const candidateB = candidate({
+    candidateId: "manual-2026-09-10-amd-vwap-reclaim-long",
+    symbol: "AMD",
+  });
+  const store = new PreTradeStore({ filePath: path.join(root, "pretrade-state.json") });
+  store.load();
+  const ingress = new PreTradeCandidateIngress({ store, clock: () => "2026-09-10T13:23:00.000Z" });
+  const pretrade = await startPretradeAuthority(store, ingress);
+  const filePath = path.join(manualInbox, "mixed-new-conflict-accepted.json");
+  await fs.writeFile(filePath, JSON.stringify(envelope({
+    submission: { ...envelope().submission, submissionId },
+    bundleId: "manual-mixed-new-conflict-accepted",
+    candidates: [candidateA, candidateB],
+  })));
+  try {
+    const pending = await processManualProposalFile(filePath, {
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:23:00.000Z",
+      idFactory: () => "mixed-new-publication",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(pending.status, "RECOVERY_REQUIRED");
+    const conflictingA = canonicalPrior(candidate({ thesis: "Conflicting NVDA v1 won first." }));
+    store.state.candidates.push(conflictingA);
+    store.save();
+
+    const fed = await drainCandidateInbox({
+      inboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:24:00.000Z",
+      stableFileOptions: fastStable,
+    });
+    assert.equal(fed.results[0].status, "QUARANTINED");
+    assert.deepEqual(fed.results[0].receipt.candidates.map((item) => item.ingressStatus), ["CONFLICT", "ACCEPTED"]);
+
+    const recovered = await recoverClaimedManualSubmissions({
+      manualInboxPath: manualInbox,
+      candidateInboxPath: candidateInbox,
+      pretradeUrl: pretrade.url,
+      clock: () => "2026-09-10T13:25:00.000Z",
+    });
+    const final = recovered.results[0].result;
+    assert.equal(final.status, "PARTIAL_SUCCESS");
+    assert.equal(final.receipt.candidateOutcomes.find((item) => item.candidateId === candidateA.candidateId).status, "CONFLICT");
+    assert.equal(final.receipt.candidateOutcomes.find((item) => item.candidateId === candidateB.candidateId).status, "ACCEPTED");
+    assert.equal(store.snapshot().candidates.filter((item) => item.candidateId === candidateB.candidateId).length, 1);
   } finally {
     await pretrade.close();
   }

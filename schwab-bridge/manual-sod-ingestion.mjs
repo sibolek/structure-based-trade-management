@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import { publishCandidateBundleAtomically } from "./sod-candidate-publisher.mjs";
 import {
+  candidateDirectoriesFromInbox,
   DEFAULT_PRETRADE_URL,
   fetchCandidateSnapshot,
   fetchManualSupersessionDecision,
@@ -32,6 +33,13 @@ export const DEFAULT_MANUAL_PROPOSAL_INBOX = "Manual Proposal Inbox";
 export const MANUAL_RECEIPT_SCHEMA_VERSION = 2;
 
 const FINAL_OVERALL_OUTCOMES = new Set(["SUCCESS", "PARTIAL_SUCCESS", "FAILED"]);
+const CANDIDATE_FEEDER_SUCCESS_STATUSES = new Set(["ACCEPTED", "DUPLICATE"]);
+const CANDIDATE_FEEDER_FAILURE_STATUSES = new Set(["REJECTED", "CONFLICT", "STALE"]);
+const CANDIDATE_FEEDER_RESOLUTION_STATUSES = new Set([
+  ...CANDIDATE_FEEDER_SUCCESS_STATUSES,
+  ...CANDIDATE_FEEDER_FAILURE_STATUSES,
+  "ACTION_REQUIRED",
+]);
 const SUPERSESSION_OBSERVATION_STATUSES = new Set([
   "REVIEW_REQUIRED",
   "UNRESOLVED",
@@ -895,6 +903,15 @@ function assertLinkedReceipt(receipt, event, directories, submissionId, contentH
   return receiptPath;
 }
 
+function isAuthoritativeFinalReceipt(receipt) {
+  if (!FINAL_OVERALL_OUTCOMES.has(receipt?.overallOutcome)) return false;
+  // V2 receipts written immediately after publication by the prior checkpoint
+  // lacked candidate outcomes. Keep them as immutable history, but do not let
+  // them prevent authoritative admission reconciliation.
+  if (receipt.publication && (!Array.isArray(receipt.candidateOutcomes) || !receipt.candidateOutcomes.length)) return false;
+  return true;
+}
+
 async function findCurrentReceipt(directories, journal) {
   const { submissionId, contentHash } = journal.claim;
   const files = await listJsonFiles(directories.receipts);
@@ -959,7 +976,7 @@ async function findCurrentReceipt(directories, journal) {
   }
 
   linked.sort((left, right) => left.sequence - right.sequence);
-  const finalReconciliation = linked.find((item) => FINAL_OVERALL_OUTCOMES.has(item.receipt.overallOutcome));
+  const finalReconciliation = linked.find((item) => isAuthoritativeFinalReceipt(item.receipt));
   if (finalReconciliation && journal.events.some((event) => event.sequence > finalReconciliation.sequence)) {
     throw manualError("manual journal contains evidence after final reconciliation", "MANUAL_RECEIPT_ORDERING_CORRUPT", { submissionId });
   }
@@ -979,9 +996,23 @@ async function findCurrentReceipt(directories, journal) {
   return linked.at(-1) ?? null;
 }
 
-async function findExactCandidatePublications(candidateInboxPath, canonicalBundle, candidates) {
+function bundleEnvelope(bundle) {
+  const envelope = structuredClone(bundle);
+  delete envelope.candidates;
+  return envelope;
+}
+
+async function findExactCandidatePublications(
+  candidateInboxPath,
+  canonicalBundle,
+  candidates,
+  publishedKeys = new Set(),
+) {
   if (!candidates.length) return [];
   const targets = new Map(candidates.map((candidate) => [candidateIdentityKey(candidateIdentity(candidate)), candidate]));
+  const canonicalByKey = new Map(canonicalBundle.candidates.map((candidate) => (
+    [candidateIdentityKey(candidateIdentity(candidate)), candidate]
+  )));
   const located = new Map();
   const groups = new Map();
   const files = await listJsonFiles(candidateInboxPath);
@@ -998,41 +1029,52 @@ async function findExactCandidatePublications(candidateInboxPath, canonicalBundl
       !bundle
       || typeof bundle !== "object"
       || !Array.isArray(bundle.candidates)
-      || bundle.source !== canonicalBundle.source
-      || bundle.bundleId !== canonicalBundle.bundleId
-      || bundle.ingressPolicy !== canonicalBundle.ingressPolicy
+      || !valuesEqual(bundleEnvelope(bundle), bundleEnvelope(canonicalBundle))
     ) continue;
-    for (const target of targets.values()) {
-      const matches = bundle.candidates.filter((candidate) => (
-        candidate?.candidateId === target.candidateId
-        && Number(candidate?.contractVersion) === Number(target.contractVersion)
-        && candidateContractHash(candidate) === candidateContractHash(target)
-        && valuesEqual(candidate, target)
-      ));
-      if (matches.length > 1) {
-        throw manualError("candidate inbox contains ambiguous duplicate candidate publication", "MANUAL_PUBLICATION_AMBIGUOUS");
+
+    const recoveredCandidates = [];
+    const recoveredKeys = new Set();
+    let exactPublication = bundle.candidates.length > 0;
+    try {
+      for (const observedCandidate of bundle.candidates) {
+        const key = candidateIdentityKey(candidateIdentity(observedCandidate));
+        const canonicalCandidate = canonicalByKey.get(key);
+        if (!canonicalCandidate || recoveredKeys.has(key) || !valuesEqual(observedCandidate, canonicalCandidate)) {
+          exactPublication = false;
+          break;
+        }
+        recoveredKeys.add(key);
+        recoveredCandidates.push(canonicalCandidate);
       }
-      if (!matches.length) continue;
-      const key = candidateIdentityKey(candidateIdentity(target));
+    } catch {
+      exactPublication = false;
+    }
+    if (!exactPublication) continue;
+    const recoveredBundle = bundleWithCandidates(canonicalBundle, recoveredCandidates);
+    if (!bytes.equals(publicationBytesFor(recoveredBundle))) continue;
+
+    const matchingTargetKeys = [...recoveredKeys].filter((key) => targets.has(key));
+    if (!matchingTargetKeys.length) continue;
+    if ([...recoveredKeys].some((key) => publishedKeys.has(key))) {
+      throw manualError("candidate inbox duplicates existing journal publication evidence", "MANUAL_PUBLICATION_AMBIGUOUS");
+    }
+    for (const key of matchingTargetKeys) {
       if (located.has(key)) {
         throw manualError("candidate inbox contains more than one exact candidate publication", "MANUAL_PUBLICATION_AMBIGUOUS");
       }
       located.set(key, file);
-      if (!groups.has(file)) {
-        groups.set(file, {
-          publication: {
-            publicationId: null,
-            finalPath: file,
-            finalName: path.basename(file),
-            sha256: sha256(bytes),
-            byteLength: bytes.length,
-            recoveredFromCandidateInbox: true,
-          },
-          candidates: [],
-        });
-      }
-      groups.get(file).candidates.push(target);
     }
+    groups.set(file, {
+      publication: {
+        publicationId: null,
+        finalPath: file,
+        finalName: path.basename(file),
+        sha256: sha256(bytes),
+        byteLength: bytes.length,
+        recoveredFromCandidateInbox: true,
+      },
+      candidates: recoveredCandidates,
+    });
   }
   return [...groups.values()];
 }
@@ -1062,14 +1104,14 @@ function bundleWithCandidates(canonicalBundle, candidates) {
   return { ...structuredClone(canonicalBundle), candidates: candidates.map((candidate) => structuredClone(candidate)) };
 }
 
-function publishedCandidateKeys(journal, preflightEvent) {
+function publishedCandidateEvidence(journal, preflightEvent) {
   const canonicalCandidates = preflightEvent.canonicalBundle?.candidates ?? [];
   const canonicalByKey = new Map(canonicalCandidates.map((candidate) => [candidateIdentityKey(candidateIdentity(candidate)), candidate]));
   const legacyPublishable = eligibleCanonicalBundle({
     canonicalBundle: preflightEvent.canonicalBundle,
     plan: preflightEvent.plan ?? [],
   });
-  const published = new Set();
+  const published = new Map();
   for (const event of journal.events.filter((item) => item.eventType === "PUBLISHED")) {
     if (!event.publication || typeof event.publication !== "object") {
       throw manualError("manual journal PUBLISHED event lacks publication evidence", "MANUAL_JOURNAL_CORRUPT", { submissionId: journal.claim.submissionId });
@@ -1080,15 +1122,180 @@ function publishedCandidateKeys(journal, preflightEvent) {
     if (!identities.length) {
       throw manualError("manual journal PUBLISHED event has no candidate identity", "MANUAL_JOURNAL_CORRUPT", { submissionId: journal.claim.submissionId });
     }
+    const eventCandidates = [];
     for (const identity of identities) {
       const key = candidateIdentityKey(identity);
-      if (!canonicalByKey.has(key) || published.has(key)) {
+      const canonicalCandidate = canonicalByKey.get(key);
+      if (!canonicalCandidate || published.has(key) || !valuesEqual(identity, candidateIdentity(canonicalCandidate))) {
         throw manualError("manual journal has ambiguous candidate publication evidence", "MANUAL_JOURNAL_CORRUPT", { submissionId: journal.claim.submissionId });
       }
-      published.add(key);
+      eventCandidates.push(canonicalCandidate);
+    }
+    const finalName = text(event.publication.finalName);
+    const finalPath = text(event.publication.finalPath);
+    const expectedBytes = publicationBytesFor(bundleWithCandidates(preflightEvent.canonicalBundle, eventCandidates));
+    if (
+      !finalName
+      || path.basename(finalName) !== finalName
+      || !finalPath
+      || path.basename(finalPath) !== finalName
+      || !/^[0-9a-f]{64}$/.test(text(event.publication.sha256))
+      || event.publication.sha256 !== sha256(expectedBytes)
+      || !Number.isInteger(event.publication.byteLength)
+      || event.publication.byteLength !== expectedBytes.length
+    ) {
+      throw manualError("manual journal PUBLISHED event conflicts with canonical publication", "MANUAL_JOURNAL_CORRUPT", { submissionId: journal.claim.submissionId });
+    }
+    for (const candidate of eventCandidates) {
+      const key = candidateIdentityKey(candidateIdentity(candidate));
+      published.set(key, {
+        candidate,
+        publication: structuredClone(event.publication),
+        journalSequence: event.sequence,
+      });
     }
   }
   return published;
+}
+
+function candidateFeederPublicationKey(publication) {
+  return `${text(publication?.finalName)}:${text(publication?.sha256)}`;
+}
+
+function addCandidateFeederEvidence(evidenceByCandidate, candidateKey, evidence) {
+  if (!evidenceByCandidate.has(candidateKey)) evidenceByCandidate.set(candidateKey, []);
+  evidenceByCandidate.get(candidateKey).push(evidence);
+}
+
+async function loadCandidateFeederEvidence({ candidateInboxPath, publishedByCandidate, canonicalBundle }) {
+  const publications = new Map();
+  for (const [candidateKey, evidence] of publishedByCandidate) {
+    const publicationKey = candidateFeederPublicationKey(evidence.publication);
+    if (!publications.has(publicationKey)) {
+      publications.set(publicationKey, {
+        publication: evidence.publication,
+        candidatesByVersion: new Map(),
+      });
+    }
+    const versionKey = `${evidence.candidate.candidateId}:v${evidence.candidate.contractVersion}`;
+    const group = publications.get(publicationKey);
+    if (group.candidatesByVersion.has(versionKey)) {
+      throw manualError("manual journal publication has duplicate candidate version evidence", "MANUAL_JOURNAL_CORRUPT");
+    }
+    group.candidatesByVersion.set(versionKey, { candidateKey, candidate: evidence.candidate });
+  }
+
+  const evidenceByCandidate = new Map();
+  const receiptDirectory = candidateDirectoriesFromInbox(candidateInboxPath).receipts;
+  for (const receiptPath of await listJsonFiles(receiptDirectory)) {
+    const receipt = await readJsonFile(receiptPath, "MANUAL_CANDIDATE_FEEDER_RECEIPT_CORRUPT");
+    try {
+      assertJsonStructuralSafety(receipt, { rootName: "candidate feeder receipt" });
+    } catch (error) {
+      throw manualError(error.message, "MANUAL_CANDIDATE_FEEDER_RECEIPT_CORRUPT", { receiptPath });
+    }
+    const publicationKey = `${text(receipt.bundleFile)}:${text(receipt.bundleSha256)}`;
+    const publication = publications.get(publicationKey);
+    if (!publication) continue;
+    if (
+      receipt.transportSchemaVersion !== 1
+      || receipt.bundleId !== canonicalBundle.bundleId
+      || receipt.bundleFile !== publication.publication.finalName
+      || receipt.bundleSha256 !== publication.publication.sha256
+      || receipt.brokerWriteAuthority !== false
+    ) {
+      throw manualError("candidate feeder receipt conflicts with journal publication evidence", "MANUAL_CANDIDATE_FEEDER_RECEIPT_CORRUPT", { receiptPath });
+    }
+
+    const receiptEvidence = {
+      receiptPath,
+      receiptSha256: await hashFile(receiptPath),
+    };
+    if (receipt.error) {
+      if (
+        receipt.disposition !== "QUARANTINE"
+        || !text(receipt.error.code)
+        || (Array.isArray(receipt.candidates) && receipt.candidates.length)
+      ) {
+        throw manualError("candidate feeder failure receipt is ambiguous", "MANUAL_CANDIDATE_FEEDER_RECEIPT_CORRUPT", { receiptPath });
+      }
+      for (const { candidateKey } of publication.candidatesByVersion.values()) {
+        addCandidateFeederEvidence(evidenceByCandidate, candidateKey, {
+          ...receiptEvidence,
+          status: "REJECTED",
+          reasons: [text(receipt.error.code)],
+          transportError: true,
+        });
+      }
+      continue;
+    }
+
+    if (receipt.pretradeServiceVerified !== true || !Array.isArray(receipt.candidates)) {
+      throw manualError("candidate feeder receipt lacks PRETRADE outcome evidence", "MANUAL_CANDIDATE_FEEDER_RECEIPT_CORRUPT", { receiptPath });
+    }
+    const seenCandidates = new Set();
+    const observedStatuses = [];
+    for (const candidate of receipt.candidates) {
+      const versionKey = `${text(candidate?.candidateId)}:v${Number(candidate?.contractVersion)}`;
+      const expected = publication.candidatesByVersion.get(versionKey);
+      const status = text(candidate?.ingressStatus);
+      if (
+        !expected
+        || seenCandidates.has(versionKey)
+        || !CANDIDATE_FEEDER_RESOLUTION_STATUSES.has(status)
+        || candidate.verified !== true
+      ) {
+        throw manualError("candidate feeder receipt has invalid candidate outcome evidence", "MANUAL_CANDIDATE_FEEDER_RECEIPT_CORRUPT", { receiptPath });
+      }
+      seenCandidates.add(versionKey);
+      observedStatuses.push(status);
+      addCandidateFeederEvidence(evidenceByCandidate, expected.candidateKey, {
+        ...receiptEvidence,
+        status,
+        reasons: Array.isArray(candidate.reasons) ? candidate.reasons.map(text).filter(Boolean) : [],
+        transportError: false,
+      });
+    }
+    const expectedDisposition = observedStatuses.every((status) => CANDIDATE_FEEDER_SUCCESS_STATUSES.has(status))
+      ? "ARCHIVE"
+      : "QUARANTINE";
+    if (seenCandidates.size !== publication.candidatesByVersion.size || receipt.disposition !== expectedDisposition) {
+      throw manualError("candidate feeder receipt does not cover its exact publication", "MANUAL_CANDIDATE_FEEDER_RECEIPT_CORRUPT", { receiptPath });
+    }
+  }
+  return evidenceByCandidate;
+}
+
+function resolveCandidateFeederEvidence(records, admitted) {
+  if (!Array.isArray(records) || !records.length) return null;
+  const statuses = new Set(records.map((record) => record.status));
+  const successStatuses = [...statuses].filter((status) => CANDIDATE_FEEDER_SUCCESS_STATUSES.has(status));
+  const nonSuccessStatuses = [...statuses].filter((status) => !CANDIDATE_FEEDER_SUCCESS_STATUSES.has(status));
+  if (successStatuses.length && nonSuccessStatuses.length) {
+    throw manualError("candidate feeder receipts contain conflicting success and failure evidence", "MANUAL_CANDIDATE_FEEDER_EVIDENCE_AMBIGUOUS");
+  }
+  if (nonSuccessStatuses.length > 1) {
+    throw manualError("candidate feeder receipts contain conflicting terminal outcomes", "MANUAL_CANDIDATE_FEEDER_EVIDENCE_AMBIGUOUS");
+  }
+  if (successStatuses.length && !admitted) {
+    throw manualError("candidate feeder success is not present in authoritative PRETRADE state", "MANUAL_CANDIDATE_FEEDER_EVIDENCE_AMBIGUOUS");
+  }
+  if (nonSuccessStatuses.length && admitted) {
+    throw manualError("candidate feeder failure conflicts with authoritative PRETRADE state", "MANUAL_CANDIDATE_FEEDER_EVIDENCE_AMBIGUOUS");
+  }
+  const status = successStatuses.includes("ACCEPTED")
+    ? "ACCEPTED"
+    : successStatuses.includes("DUPLICATE")
+      ? "DUPLICATE"
+      : nonSuccessStatuses[0];
+  const receipts = records
+    .map(({ receiptPath, receiptSha256 }) => ({ receiptPath, receiptSha256 }))
+    .sort((left, right) => left.receiptPath.localeCompare(right.receiptPath));
+  return {
+    status,
+    reasons: [...new Set(records.flatMap((record) => record.reasons))].sort(),
+    receipts,
+  };
 }
 
 async function appendPublishedEvent({ directories, submissionId, publication, bundle, clock }) {
@@ -1181,7 +1388,7 @@ export async function reconcileManualSubmission({
 } = {}) {
   const journal = await loadSubmissionJournal({ directories, submissionId, contentHash });
   const currentReceipt = await findCurrentReceipt(directories, journal);
-  if (currentReceipt && FINAL_OVERALL_OUTCOMES.has(currentReceipt.receipt.overallOutcome)) {
+  if (currentReceipt && isAuthoritativeFinalReceipt(currentReceipt.receipt)) {
     if (journal.events.some((event) => event.sequence > currentReceipt.sequence)) {
       throw manualError("manual journal contains progress after final reconciliation", "MANUAL_RECEIPT_ORDERING_CORRUPT", { submissionId });
     }
@@ -1210,12 +1417,18 @@ export async function reconcileManualSubmission({
     throw manualError("manual submission PREFLIGHTED event lacks a canonical bundle", "MANUAL_JOURNAL_CORRUPT", { submissionId });
   }
 
-  let authoritativePretradeCandidates = await resolvePretradeCandidates({
+  const authoritativePretradeCandidates = await resolvePretradeCandidates({
     candidates: pretradeCandidates,
     pretradeUrl,
     requestOptions,
   });
-  const publishedKeys = publishedCandidateKeys(journal, preflightEvent);
+  const publishedByCandidate = publishedCandidateEvidence(journal, preflightEvent);
+  const publishedKeys = new Set(publishedByCandidate.keys());
+  const candidateFeederEvidence = await loadCandidateFeederEvidence({
+    candidateInboxPath,
+    publishedByCandidate,
+    canonicalBundle: preflightEvent.canonicalBundle,
+  });
   const canonicalByCandidateVersion = new Map(preflightEvent.canonicalBundle.candidates.map((candidate) => (
     [`${candidate.candidateId}:v${candidate.contractVersion}`, candidate]
   )));
@@ -1244,13 +1457,39 @@ export async function reconcileManualSubmission({
     const identity = candidateIdentity(candidate);
     const identityKey = candidateIdentityKey(identity);
     const admitted = exactAdmittedCandidate(authoritativePretradeCandidates, candidate);
+    const feederResolution = resolveCandidateFeederEvidence(candidateFeederEvidence.get(identityKey), admitted);
+    const feederOutcome = feederResolution
+      ? {
+          candidateFeederEvidence: {
+            ingressStatus: feederResolution.status,
+            receipts: feederResolution.receipts,
+          },
+        }
+      : {};
     let outcome;
-    if (admitted) {
+    if (feederResolution && CANDIDATE_FEEDER_FAILURE_STATUSES.has(feederResolution.status)) {
       outcome = {
         ...identity,
-        status: planItem.classification === "UNCHANGED" ? "UNCHANGED" : "ACCEPTED",
+        status: feederResolution.status,
+        reasons: feederResolution.reasons,
+        ...feederOutcome,
+      };
+    } else if (admitted) {
+      outcome = {
+        ...identity,
+        status: feederResolution?.status
+          ?? (planItem.classification === "UNCHANGED" ? "UNCHANGED" : "ACCEPTED"),
         observedLifecycleState: admitted.lifecycleState ?? null,
         observedStateRevision: Number.isInteger(admitted.stateRevision) ? admitted.stateRevision : null,
+        ...feederOutcome,
+      };
+    } else if (feederResolution?.status === "ACTION_REQUIRED") {
+      unresolvedAction = true;
+      outcome = {
+        ...identity,
+        status: "ACTION_REQUIRED",
+        reasons: feederResolution.reasons.length ? feederResolution.reasons : ["ACTION_REQUIRED"],
+        ...feederOutcome,
       };
     } else if (planItem.classification === SOD_LINEAGE_REVISED) {
       const observation = (!supersessionDecisionObserver && Array.isArray(pretradeCandidates))
@@ -1294,14 +1533,15 @@ export async function reconcileManualSubmission({
         };
       }
     } else if (planItem.classification === "UNCHANGED") {
-      outcome = { ...identity, status: "STALE", reasons: ["UNCHANGED_PRETRADE_CANDIDATE_NOT_FOUND"] };
-    } else if (publishedKeys.has(identityKey)) {
-      if (preflightEvent.status === "ACTION_REQUIRED") {
+      if (publishedKeys.has(identityKey)) {
         pendingAdmission = true;
         outcome = { ...identity, status: "PENDING_ADMISSION" };
       } else {
-        outcome = { ...identity, status: "PUBLISHED" };
+        outcome = { ...identity, status: "STALE", reasons: ["UNCHANGED_PRETRADE_CANDIDATE_NOT_FOUND"] };
       }
+    } else if (publishedKeys.has(identityKey)) {
+      pendingAdmission = true;
+      outcome = { ...identity, status: "PENDING_ADMISSION" };
     } else {
       outcome = { ...identity, status: "ELIGIBLE_FOR_PUBLICATION" };
       publishCandidates.push(candidate);
@@ -1353,6 +1593,7 @@ export async function reconcileManualSubmission({
       candidateInboxPath,
       preflightEvent.canonicalBundle,
       eligibleAfterFreshAuthorityCheck,
+      publishedKeys,
     );
     const recoveredKeys = new Set();
     for (const recovered of recoveredPublications) {
@@ -1404,7 +1645,7 @@ export async function reconcileManualSubmission({
       item.candidateId === outcome.candidateId && Number(item.contractVersion) === Number(outcome.contractVersion)
     ));
     return planItem?.classification === SOD_LINEAGE_REVISED
-      && ["ACCEPTED", "SUPERSESSION_DECLINED", "SUPERSESSION_INVALIDATED"].includes(outcome.status);
+      && ["ACCEPTED", "DUPLICATE", "SUPERSESSION_DECLINED", "SUPERSESSION_INVALIDATED"].includes(outcome.status);
   });
   if (
     currentReceipt?.receipt.overallOutcome === "ACTION_REQUIRED"
@@ -1424,7 +1665,7 @@ export async function reconcileManualSubmission({
   }
 
   const hasFinalFailure = candidateOutcomes.some((outcome) => ["REJECTED", "CONFLICT", "STALE"].includes(outcome.status));
-  const hasResolvedCandidate = candidateOutcomes.some((outcome) => ["ACCEPTED", "PUBLISHED", "UNCHANGED", "SUPERSESSION_DECLINED"].includes(outcome.status));
+  const hasResolvedCandidate = candidateOutcomes.some((outcome) => ["ACCEPTED", "DUPLICATE", "UNCHANGED", "SUPERSESSION_DECLINED"].includes(outcome.status));
   const overallOutcome = unresolvedAction
     ? "ACTION_REQUIRED"
     : hasFinalFailure
@@ -1455,8 +1696,9 @@ export async function reconcileManualSubmission({
     recovery: {
       reconciledAt: clock(),
       publicationObserved: publicationEvents.length > 0,
-      pretradeAdmissionObserved: candidateOutcomes.some((outcome) => outcome.status === "ACCEPTED"),
-      supersessionResolutionObserved: candidateOutcomes.some((outcome) => ["ACCEPTED", "SUPERSESSION_DECLINED", "SUPERSESSION_INVALIDATED"].includes(outcome.status)),
+      pretradeAdmissionObserved: candidateOutcomes.some((outcome) => ["ACCEPTED", "DUPLICATE"].includes(outcome.status)),
+      candidateFeederResolutionObserved: candidateOutcomes.some((outcome) => outcome.candidateFeederEvidence),
+      supersessionResolutionObserved: candidateOutcomes.some((outcome) => ["ACCEPTED", "DUPLICATE", "SUPERSESSION_DECLINED", "SUPERSESSION_INVALIDATED"].includes(outcome.status)),
     },
   };
   if (currentReceipt && reconciliationFingerprint(currentReceipt.receipt) === reconciliationFingerprint(receipt)) {
@@ -1623,6 +1865,16 @@ export async function processManualProposalFile(filePath, {
         bundle: publishable,
         clock,
       });
+    }
+    if (publicationResult && preflight.status !== "ACTION_REQUIRED") {
+      const movedTo = await moveImmutableFile(filePath, directories.archive, contentHash);
+      return {
+        status: "RECOVERY_REQUIRED",
+        recoveryReason: "PUBLICATION_AWAITING_CANDIDATE_FEEDER",
+        publication: publicationResult,
+        replay: false,
+        movedTo,
+      };
     }
     const overallOutcome = receiptOutcomeForPreflight(preflight, publicationResult);
     const receipt = {
