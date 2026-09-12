@@ -1,6 +1,6 @@
 # ExecutionOS Documentation Status
 
-**Updated:** 2026-09-11
+**Updated:** 2026-09-12
 
 This file distinguishes current authoritative project records from historical planning snapshots and dated approval artifacts.
 
@@ -25,7 +25,7 @@ Release distinction:
 - final merged implementation checkpoint: `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`;
 - subsequent documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint;
 - the former feature branch `v24-execution-board-handoff` has been retired and deleted;
-- automated SOD orchestration remains isolated on `v24-sod-orchestration-lineage` and is not yet an operator-ready `main` capability;
+- accepted SOD rendering remains isolated on `v24-sod-orchestration-lineage`; production-provider hardening is active on `v24-sod-production-analysis-provider`, and automated SOD is not yet an operator-ready `main` capability;
 - manual SOD / standalone trade-card ingestion is implementation-accepted on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06`; merge/main release and any later operator-facing Submit workflow remain pending.
 
 ### Current frozen / approved design authority
@@ -36,8 +36,10 @@ Release distinction:
 - `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md` — accepted/frozen deterministic SOD rendering authority for the SOD feature branch at checkpoint `4144c5c59494ae318bb736d64fba751a22046512`.
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Design_Baseline_v1.0_APPROVED.md` — approved/frozen manual SOD and standalone trade-card ingestion architecture, implementation contracts, Contract Reconciliations A–B, and Acceptance Test Matrix A–T.
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Implementation_Handoff_v1.0.md` — approved Codex implementation handoff constrained by the manual-ingestion design baseline.
+- `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Design_Baseline_v1.0_APPROVED.md` — approved/frozen production SOD/OpenAI provider hardening, response trust, resource limits, durable run identity/recovery, PRETRADE freshness, readiness, and Acceptance Matrix A–V.
+- `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Implementation_Handoff_v1.0.md` — approved Codex implementation handoff constrained by the production-provider baseline; not implementation evidence.
 
-The v0.5 baseline supersedes conflicting earlier top-level design assumptions. Earlier approved baselines/addenda remain frozen historical approval-time evidence and should not be rewritten to simulate later state. The quantity-safety addendum supplements the frozen baseline for its narrowly defined PRETRADE policy. The SOD rendering baseline governs only its isolated feature-branch scope and does not rewrite the frozen PRETRADE→ARM→Execution architecture. The manual-ingestion baseline remains the frozen design authority for its explicit manual-submission scope; implementation acceptance is recorded separately in the September 11 closeout.
+The v0.5 baseline supersedes conflicting earlier top-level design assumptions. Earlier approved baselines/addenda remain frozen historical approval-time evidence and should not be rewritten to simulate later state. The quantity-safety addendum supplements the frozen baseline for its narrowly defined PRETRADE policy. The SOD rendering baseline governs only its isolated feature-branch scope and does not rewrite the frozen PRETRADE→ARM→Execution architecture. The manual-ingestion baseline remains the frozen design authority for its explicit manual-submission scope; implementation acceptance is recorded separately in the September 11 closeout. The production-provider baseline governs only the September 12 hardening/run-integrity slice and is not implementation or live-provider acceptance evidence.
 
 ### Accepted implementation / closeout records
 
@@ -121,12 +123,51 @@ Accepted capabilities through this checkpoint:
 
 Not yet complete:
 
-- production analysis-provider adapter;
+- production-provider hardening and run-integrity acceptance under the September 12 baseline;
+- credentialed live OpenAI acceptance evidence;
 - complete operator-ready automated SOD workflow;
 - release/merge of SOD orchestration to `main`;
 - authoritative automated REVISED-candidate supersession preflight remains an explicit later design/implementation decision.
 
+Substantial OpenAI Responses adapter, production HTTP transport, provider-module wiring, browser initiation, structured output, and mocked tests already exist. That code is starting implementation, not an accepted production capability under the hardening baseline.
+
 Manual ChatGPT Start-of-Day generation remains the current manual-generation workflow. The accepted manual-ingestion feature-branch implementation provides the explicit Manual Proposal Inbox-to-PRETRADE path for its structured candidate artifacts, but it has not yet been merged or released to `main`.
+
+### Active production SOD analysis-provider hardening branch
+
+```text
+v24-sod-production-analysis-provider
+```
+
+Exact design and implementation base:
+
+```text
+e2357933147600e702c5e252020b257debbe3392
+```
+
+Governing baseline:
+
+```text
+docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Design_Baseline_v1.0_APPROVED.md
+```
+
+Implementation handoff:
+
+```text
+docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Implementation_Handoff_v1.0.md
+```
+
+Current status:
+
+```text
+DESIGN: APPROVED / FROZEN
+IMPLEMENTATION: PENDING
+LIVE PROVIDER ACCEPTANCE: PENDING
+MERGE / MAIN RELEASE: PENDING
+BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
+```
+
+The approved scope hardens artifact-link trust, chart/request/response resources, strict local structured-output validation, durable per-date run identity and recovery, post-provider PRETRADE freshness, pre-publication authority fencing, deterministic publication recovery, readiness reporting, and explicit live acceptance. It preserves candidate identity and all existing PRETRADE, Candidate Feeder, ARM, execution, and broker boundaries.
 
 ### Active manual SOD / trade-card ingestion feature branch
 
@@ -330,7 +371,8 @@ Implemented/accepted:
 
 ### SOD orchestration
 
-- production analysis-provider adapter;
+- production analysis-provider hardening/run-integrity implementation;
+- credentialed live provider acceptance;
 - final end-to-end operator-ready automated SOD workflow;
 - automated REVISED-candidate PRETRADE supersession preflight;
 - merge/release to `main`.
@@ -484,6 +526,8 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Design_Baseline_v1.0_APPROVED.md` — approved/frozen manual-ingestion architecture and implementation contract.
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Implementation_Handoff_v1.0.md` — Codex implementation handoff for the manual-ingestion slice.
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md` — accepted manual-ingestion implementation and validation record.
+- `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Design_Baseline_v1.0_APPROVED.md` — approved/frozen production SOD provider hardening and run-integrity design authority.
+- `docs/ExecutionOS_V2.4_Production_SOD_Analysis_Provider_Implementation_Handoff_v1.0.md` — approved implementation handoff constrained by that baseline.
 - `docs/ExecutionOS_EOD_Report.md` — EOD technical/operational reference.
 - `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` — approved quantity-safety policy authority.
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` — final merge and repository closeout record.
@@ -506,11 +550,12 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - GitHub issue #19 — PRETRADE near-stop quantity-safety policy; **COMPLETED / CLOSED**.
 - SOD artifact rendering — **ACCEPTED / FROZEN** on `v24-sod-orchestration-lineage` at `4144c5c59494ae318bb736d64fba751a22046512`.
 - Manual SOD & Trade-Card Ingestion — **DESIGN APPROVED / FROZEN; IMPLEMENTATION USER ACCEPTED** on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06` on 2026-09-11; merge/main release pending.
+- Production SOD Analysis Provider Hardening & Run Integrity — **DESIGN APPROVED / FROZEN; IMPLEMENTATION PENDING; LIVE PROVIDER ACCEPTANCE PENDING** on `v24-sod-production-analysis-provider` from base `e2357933147600e702c5e252020b257debbe3392`; merge/main release pending.
 
 ---
 
 ## Documentation rule
 
-Current validated code/runtime defines what the system actually does. `USER-GUIDE.md` translates released `main` behavior into operator procedure. The v0.5 baseline and traceability audit preserve frozen architecture. The approved quantity-safety addendum preserves the September 8 PRETRADE safety policy. The SOD artifact-rendering baseline preserves the accepted September 9 feature-branch rendering boundary. The manual SOD/trade-card ingestion baseline preserves the approved September 10 manual-ingestion architecture and implementation contract.
+Current validated code/runtime defines what the system actually does. `USER-GUIDE.md` translates released `main` behavior into operator procedure. The v0.5 baseline and traceability audit preserve frozen architecture. The approved quantity-safety addendum preserves the September 8 PRETRADE safety policy. The SOD artifact-rendering baseline preserves the accepted September 9 feature-branch rendering boundary. The manual SOD/trade-card ingestion baseline preserves the approved September 10 manual-ingestion architecture and implementation contract. The production SOD provider baseline preserves the approved September 12 hardening, run-integrity, PRETRADE-freshness, readiness, and acceptance requirements.
 
 Do not rewrite frozen approved design records merely because implementation advanced. Keep released operator documentation distinct from accepted feature-branch implementation records until the feature is merged and released.
