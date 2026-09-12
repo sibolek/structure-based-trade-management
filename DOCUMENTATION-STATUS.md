@@ -1,6 +1,6 @@
 # ExecutionOS Documentation Status
 
-**Updated:** 2026-09-10
+**Updated:** 2026-09-11
 
 This file distinguishes current authoritative project records from historical planning snapshots and dated approval artifacts.
 
@@ -26,7 +26,7 @@ Release distinction:
 - subsequent documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint;
 - the former feature branch `v24-execution-board-handoff` has been retired and deleted;
 - automated SOD orchestration remains isolated on `v24-sod-orchestration-lineage` and is not yet an operator-ready `main` capability;
-- manual SOD / standalone trade-card ingestion design is approved/frozen on `v24-manual-sod-trade-card-ingestion`, but implementation and operator release are still pending.
+- manual SOD / standalone trade-card ingestion is implementation-accepted on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06`; merge/main release and any later operator-facing Submit workflow remain pending.
 
 ### Current frozen / approved design authority
 
@@ -37,7 +37,7 @@ Release distinction:
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Design_Baseline_v1.0_APPROVED.md` — approved/frozen manual SOD and standalone trade-card ingestion architecture, implementation contracts, Contract Reconciliations A–B, and Acceptance Test Matrix A–T.
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Implementation_Handoff_v1.0.md` — approved Codex implementation handoff constrained by the manual-ingestion design baseline.
 
-The v0.5 baseline supersedes conflicting earlier top-level design assumptions. Earlier approved baselines/addenda remain frozen historical approval-time evidence and should not be rewritten to simulate later state. The quantity-safety addendum supplements the frozen baseline for its narrowly defined PRETRADE policy. The SOD rendering baseline governs only its isolated feature-branch scope and does not rewrite the frozen PRETRADE→ARM→Execution architecture. The manual-ingestion baseline supplements the accepted SOD/candidate-ingress architecture for its explicit manual-submission scope and is **design authority only until implementation is completed and accepted**.
+The v0.5 baseline supersedes conflicting earlier top-level design assumptions. Earlier approved baselines/addenda remain frozen historical approval-time evidence and should not be rewritten to simulate later state. The quantity-safety addendum supplements the frozen baseline for its narrowly defined PRETRADE policy. The SOD rendering baseline governs only its isolated feature-branch scope and does not rewrite the frozen PRETRADE→ARM→Execution architecture. The manual-ingestion baseline remains the frozen design authority for its explicit manual-submission scope; implementation acceptance is recorded separately in the September 11 closeout.
 
 ### Accepted implementation / closeout records
 
@@ -46,8 +46,7 @@ The v0.5 baseline supersedes conflicting earlier top-level design assumptions. E
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` — Slices 1–7 accepted implementation and September 6 validation evidence.
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` — final merge, TODO #18/#19 completion, regression, branch/worktree retirement, and September 8 repository closeout.
 - `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md` — accepted/frozen SOD artifact-rendering implementation boundary and September 9 acceptance evidence.
-
-There is **no manual-ingestion implementation closeout yet**. The new manual-ingestion documents record approved design/handoff only.
+- `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md` — user-accepted manual-ingestion implementation and validation record at `b2a1a20f60b12f011fe2f5ff87d325752131ac06`.
 
 ---
 
@@ -127,7 +126,7 @@ Not yet complete:
 - release/merge of SOD orchestration to `main`;
 - authoritative automated REVISED-candidate supersession preflight remains an explicit later design/implementation decision.
 
-Manual ChatGPT Start-of-Day generation remains the current manual-generation workflow. The newly approved manual-ingestion design defines how its structured candidate artifacts may later be explicitly submitted into ExecutionOS, but that ingestion path is not yet implemented.
+Manual ChatGPT Start-of-Day generation remains the current manual-generation workflow. The accepted manual-ingestion feature-branch implementation provides the explicit Manual Proposal Inbox-to-PRETRADE path for its structured candidate artifacts, but it has not yet been merged or released to `main`.
 
 ### Active manual SOD / trade-card ingestion feature branch
 
@@ -153,21 +152,29 @@ Implementation handoff:
 docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Implementation_Handoff_v1.0.md
 ```
 
-Frozen design status:
+Implementation closeout:
+
+```text
+docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md
+```
+
+Current feature-branch status:
 
 ```text
 DECISIONS 1–31: APPROVED / FROZEN
 CONTRACT RECONCILIATIONS A–B: APPROVED / FROZEN
 IMPLEMENTATION CONTRACTS 1–4: APPROVED / FROZEN
 ACCEPTANCE TEST MATRIX A–T: APPROVED / FROZEN
-IMPLEMENTATION: PENDING
-OPERATOR RELEASE: NOT AVAILABLE
+DESIGN: APPROVED / FROZEN
+IMPLEMENTATION: ACCEPTED
+ACCEPTED SHA: b2a1a20f60b12f011fe2f5ff87d325752131ac06
+MERGE / MAIN RELEASE: PENDING
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
-Approved scope includes:
+Accepted implementation includes:
 
-- CREATE → REVIEW → SUBMIT operator workflow;
+- explicit submission semantics at the dedicated Dropbox Manual Proposal Inbox boundary;
 - dedicated Dropbox Manual Proposal Inbox;
 - strict closed/versioned manual-ingestion envelope;
 - open/extensible candidate JSON with arbitrary optional content substantive by default;
@@ -180,9 +187,11 @@ Approved scope includes:
 - canonical substantive diff and explicit confirmation before supersession;
 - removal of permissive unspecified/null production ingress semantics;
 - Candidate Feeder remains transport only;
-- mandatory dedicated manual-ingestion tests plus existing SOD/feeder/build/full-V2.4 regression gates.
+- mandatory dedicated manual-ingestion tests plus existing SOD/feeder/build/full-V2.4 regression gates;
+- publication as nonterminal transport progress until authoritative PRETRADE/Candidate Feeder resolution;
+- deterministic receipt ordering, explicit durable decline, ACTION_REQUIRED resumption, and fail-closed recovery ambiguity handling.
 
-No runtime implementation acceptance is claimed by these design documents.
+The design baseline and implementation handoff remain frozen historical authority records. Runtime implementation acceptance is claimed only by the separate September 11 closeout at the accepted SHA above.
 
 ### Retired integration branch
 
@@ -328,17 +337,8 @@ Implemented/accepted:
 
 ### Manual SOD / trade-card ingestion
 
-- manual-ingestion adapter implementation;
-- Dropbox Manual Proposal Inbox processing implementation;
-- v1 envelope parser/validator implementation;
-- open optional-field canonicalization implementation;
-- submission journal/receipt/recovery implementation;
-- PRETRADE state-bound manual supersession authorization implementation;
-- production removal of permissive no-policy candidate ingress;
-- operator-facing Submit action;
-- dedicated `v24:manual-ingestion-test` implementation;
-- implementation closeout and final acceptance;
-- merge/release to `main`.
+- merge/release of the accepted feature-branch checkpoint to `main`;
+- any later operator-facing Submit action/workflow/UI not contained in the accepted implementation.
 
 ### Broader ExecutionOS
 
@@ -402,7 +402,7 @@ ExecutionOS does not place, replace, cancel, modify, reduce, or flatten broker o
 
 Actual equity order entry remains in thinkorswim/Schwab.
 
-SOD orchestration, deterministic rendering, chart ingestion, Candidate Feeder work, and the approved manual-ingestion design introduce **no broker-write authority**.
+SOD orchestration, deterministic rendering, chart ingestion, Candidate Feeder work, and the accepted manual-ingestion implementation introduce **no broker-write authority**.
 
 ---
 
@@ -440,19 +440,25 @@ The SOD acceptance verifies that trusted chart ingestion, structured provider bo
 
 The canonical PRETRADE→Execution E2E verifies real ingress, lifecycle, permission, review, ARM, immutable handoff, read-only transport/router ownership, partial/flat lifecycle, History, and symbol-ownership release in one synthetic path.
 
-### Manual-ingestion design checkpoint
+### Manual-ingestion implementation acceptance
 
-September 10 design evidence:
+September 11 accepted implementation evidence:
 
 ```text
 Architecture Decisions 1–31:       APPROVED / FROZEN
 Contract Reconciliations A–B:      APPROVED / FROZEN
 Implementation Contracts 1–4:      APPROVED / FROZEN
 Acceptance Test Matrix A–T:        APPROVED / FROZEN
-Implementation:                    NOT YET COMPLETE
-Implementation acceptance:         PENDING
+Targeted validation:               ALL PASS
+Full V2.4 regression:              ALL PASS
+Production Vite build:             PASS — 1,624 modules transformed
+Implementation acceptance:         USER ACCEPTED
+Accepted implementation SHA:       b2a1a20f60b12f011fe2f5ff87d325752131ac06
+Merge / main release:              PENDING
 Broker writes introduced:          NONE
 ```
+
+The complete targeted and full-regression counts are recorded in `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md`.
 
 ---
 
@@ -477,13 +483,14 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md` — accepted/frozen SOD rendering authority.
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Design_Baseline_v1.0_APPROVED.md` — approved/frozen manual-ingestion architecture and implementation contract.
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Implementation_Handoff_v1.0.md` — Codex implementation handoff for the manual-ingestion slice.
+- `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md` — accepted manual-ingestion implementation and validation record.
 - `docs/ExecutionOS_EOD_Report.md` — EOD technical/operational reference.
 - `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` — approved quantity-safety policy authority.
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` — final merge and repository closeout record.
 - `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` — dated V2.3-era architecture record.
 - `research/30-day-management-study/methodology.md` — historical analytics provenance.
 
-`README.md` and `USER-GUIDE.md` should not describe automated SOD or manual-ingestion functionality as operator-ready until the respective complete production workflows are implemented and accepted.
+`README.md` and `USER-GUIDE.md` should not describe automated SOD as operator-ready until its production workflow is implemented and accepted. They should not describe manual ingestion as a `main` operator capability until the accepted feature-branch checkpoint is merged/released and any required operator-facing workflow is actually available.
 
 ---
 
@@ -498,7 +505,7 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - GitHub issue #18 — structural evidence required for operator `VALID`; **COMPLETED / CLOSED**.
 - GitHub issue #19 — PRETRADE near-stop quantity-safety policy; **COMPLETED / CLOSED**.
 - SOD artifact rendering — **ACCEPTED / FROZEN** on `v24-sod-orchestration-lineage` at `4144c5c59494ae318bb736d64fba751a22046512`.
-- Manual SOD & Trade-Card Ingestion — **DESIGN APPROVED / FROZEN; IMPLEMENTATION PENDING** on `v24-manual-sod-trade-card-ingestion` as of 2026-09-10.
+- Manual SOD & Trade-Card Ingestion — **DESIGN APPROVED / FROZEN; IMPLEMENTATION USER ACCEPTED** on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06` on 2026-09-11; merge/main release pending.
 
 ---
 
@@ -506,4 +513,4 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 
 Current validated code/runtime defines what the system actually does. `USER-GUIDE.md` translates released `main` behavior into operator procedure. The v0.5 baseline and traceability audit preserve frozen architecture. The approved quantity-safety addendum preserves the September 8 PRETRADE safety policy. The SOD artifact-rendering baseline preserves the accepted September 9 feature-branch rendering boundary. The manual SOD/trade-card ingestion baseline preserves the approved September 10 manual-ingestion architecture and implementation contract.
 
-Do not rewrite frozen approved design records merely because implementation advanced. Keep released operator documentation distinct from feature-branch design/implementation records until the feature is complete and accepted for release.
+Do not rewrite frozen approved design records merely because implementation advanced. Keep released operator documentation distinct from accepted feature-branch implementation records until the feature is merged and released.

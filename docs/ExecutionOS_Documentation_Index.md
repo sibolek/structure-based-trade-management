@@ -1,13 +1,14 @@
 # ExecutionOS Documentation Index
 
 **Status:** Current documentation inventory  
-**Date:** 2026-09-10  
+**Date:** 2026-09-11<br>
 **Repository:** `sibolek/structure-based-trade-management`  
 **Stable operating branch:** `main`  
 **Active SOD feature branch:** `v24-sod-orchestration-lineage`  
 **Active manual-ingestion feature branch:** `v24-manual-sod-trade-card-ingestion`  
 **Final merged main implementation checkpoint:** `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`  
-**Accepted SOD rendering checkpoint:** `4144c5c59494ae318bb736d64fba751a22046512`
+**Accepted SOD rendering checkpoint:** `4144c5c59494ae318bb736d64fba751a22046512`<br>
+**Accepted manual-ingestion checkpoint:** `b2a1a20f60b12f011fe2f5ff87d325752131ac06`
 
 ---
 
@@ -21,8 +22,9 @@
 6. `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md` is the accepted/frozen authority for deterministic SOD artifact rendering on the SOD feature branch.
 7. `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Design_Baseline_v1.0_APPROVED.md` is the approved/frozen design and implementation-contract authority for the manual SOD / standalone trade-card ingestion slice.
 8. `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Implementation_Handoff_v1.0.md` is the approved Codex implementation handoff constrained by that baseline.
-9. Closeout/status records define implemented/accepted state.
-10. Earlier approved baselines/addenda remain historical approval-time evidence and do not override later frozen authority or accepted runtime behavior.
+9. `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md` is the accepted implementation and validation record for that feature-branch slice.
+10. Closeout/status records define implemented/accepted state.
+11. Earlier approved baselines/addenda remain historical approval-time evidence and do not override later frozen authority or accepted runtime behavior.
 
 Frozen approved design records should not be rewritten merely because implementation status later advanced.
 
@@ -41,8 +43,9 @@ Frozen approved design records should not be rewritten merely because implementa
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` | Decision 22–97 traceability | **Approved implementation companion** |
 | `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` | Separate 2-ATR PRETRADE quantity-safety ceiling | **Approved current quantity-safety policy authority** |
 | `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md` | Structured SOD content + deterministic MD/HTML/dashboard rendering | **Accepted / frozen SOD rendering authority at `4144c5c`** |
-| `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Design_Baseline_v1.0_APPROVED.md` | Manual SOD/trade-card ingestion architecture, wire contract, authority boundaries, recovery, and test matrix | **APPROVED / FROZEN — implementation pending** |
+| `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Design_Baseline_v1.0_APPROVED.md` | Manual SOD/trade-card ingestion architecture, wire contract, authority boundaries, recovery, and test matrix | **APPROVED / FROZEN design authority — implementation accepted separately at `b2a1a20f60b12f011fe2f5ff87d325752131ac06`** |
 | `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Implementation_Handoff_v1.0.md` | Codex implementation instructions for the manual-ingestion slice | **Approved handoff — not implementation evidence** |
+| `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md` | Manual SOD/trade-card ingestion implementation acceptance and validation record | **Accepted implementation closeout at `b2a1a20f60b12f011fe2f5ff87d325752131ac06`** |
 | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` | Slices 1–7 implementation/acceptance record | **Accepted implementation closeout** |
 | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` | Merge/TODO/regression/repository closeout | **Final handoff merge closeout** |
 | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` | Phase 3 accepted implementation | **Accepted implementation** |
@@ -53,7 +56,7 @@ Earlier approved handoff baselines/addenda and `ExecutionOS_V2.4_Design_Baseline
 
 The PDF user guide is generated from `USER-GUIDE.md`; if the two ever differ, the current Markdown source plus validated application behavior governs.
 
-The automated SOD workflow and manual-ingestion slice are feature-branch work and are **not yet documented as operator-ready capabilities in `USER-GUIDE.md` or `README.md`**. Those documents should be updated only after the corresponding production workflows are implemented and accepted.
+The automated SOD workflow remains incomplete feature-branch work. The manual-ingestion implementation is accepted on its feature branch but is not merged or released to `main`. Neither is yet documented as an operator-ready capability in `USER-GUIDE.md` or `README.md`; those documents should change only when the corresponding operator workflow is actually released.
 
 ---
 
@@ -114,9 +117,15 @@ This branch was created from accepted predecessor commit:
 ecd007e7ab34e81b5d1500b0c72f3556a62ea626
 ```
 
-Approved/frozen design scope:
+Current accepted implementation checkpoint:
 
-- explicit CREATE → REVIEW → SUBMIT workflow;
+```text
+b2a1a20f60b12f011fe2f5ff87d325752131ac06
+```
+
+Accepted design and implementation scope:
+
+- explicit submission semantics at the dedicated Manual Proposal Inbox boundary;
 - dedicated Manual Proposal Inbox upstream of canonical publication;
 - closed/versioned manual-ingestion control envelope with open/extensible candidate content;
 - explicit stable `submissionId` separate from candidateId and contractVersion;
@@ -134,13 +143,16 @@ Governing documents:
 
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Design_Baseline_v1.0_APPROVED.md`
 - `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Implementation_Handoff_v1.0.md`
+- `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md`
 
 Status:
 
 ```text
 DESIGN: APPROVED / FROZEN
-IMPLEMENTATION: PENDING
-OPERATOR RELEASE: NOT YET AVAILABLE
+IMPLEMENTATION: USER ACCEPTED
+ACCEPTED SHA: b2a1a20f60b12f011fe2f5ff87d325752131ac06
+MERGE / MAIN RELEASE: PENDING
+BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
 ### Retired feature branch
@@ -196,7 +208,7 @@ Authority invariants:
 - imported candidates remain proposals only;
 - broker-write authority remains false.
 
-Manual ChatGPT SOD generation remains the current manual-generation workflow. The new manual-ingestion slice defines how its structured candidate artifacts may be explicitly submitted into ExecutionOS after implementation; that ingestion capability is approved in design but not yet implemented or operator-released.
+Manual ChatGPT SOD generation remains the current manual-generation workflow. The accepted manual-ingestion feature-branch implementation now provides the explicit Manual Proposal Inbox-to-PRETRADE path for structured candidate artifacts. It has not been merged or released to `main`, and no operator-facing Submit UI beyond the accepted slice is claimed here.
 
 ---
 
@@ -343,7 +355,7 @@ ExecutionOS does not place, replace, cancel, modify, reduce, or flatten broker o
 
 Actual equity order entry remains manual in thinkorswim/Schwab. Schwab observation is exact-account and authoritative `executionTime` based.
 
-**Broker write authority introduced by the V2.4 handoff integration, SOD orchestration, or approved manual-ingestion design: NONE.**
+**Broker write authority introduced by the V2.4 handoff integration, SOD orchestration, or accepted manual-ingestion implementation: NONE.**
 
 ---
 
@@ -357,14 +369,8 @@ Actual equity order entry remains manual in thinkorswim/Schwab. Schwab observati
 
 ### Manual SOD / trade-card ingestion feature branch
 
-- design/implementation contracts are approved and frozen;
-- manual-ingestion adapter not yet implemented;
-- Manual Proposal Inbox processing not yet implemented;
-- submission journal/recovery/receipt path not yet implemented;
-- state-bound manual supersession authorization path not yet implemented;
-- permissive no-policy production ingress has been identified for removal by approved Contract Reconciliation B but is not yet changed in runtime code;
-- operator-facing Submit integration not yet implemented;
-- feature not yet accepted or released to `main`.
+- merge/release of the accepted feature-branch checkpoint to `main` remains pending;
+- any later operator-facing Submit workflow/UI not contained in the accepted implementation remains deferred.
 
 ### Broader ExecutionOS
 
@@ -456,17 +462,23 @@ Broker-write authority introduced:        NONE
 
 The accepted SOD checkpoint proves that upstream chart ingestion, structured analysis boundaries, deterministic human artifacts, candidate lineage/publication, Candidate Feeder behavior, canonical PRETRADE ingress, and the downstream execution-authority lifecycle remain compatible.
 
-### Manual-ingestion design status
+### Manual-ingestion implementation acceptance
 
 ```text
 Architecture decisions:                  1–31 APPROVED / FROZEN
 Contract reconciliations:                A–B APPROVED / FROZEN
 Implementation contracts:                1–4 APPROVED / FROZEN
 Acceptance matrix:                       A–T APPROVED / FROZEN
-Implementation tests:                    NOT YET RUN
-Implementation acceptance:               PENDING
+Targeted validation:                     ALL PASS
+Full V2.4 regression:                    ALL PASS
+Production Vite build:                   PASS — 1,624 modules transformed
+Implementation acceptance:              USER ACCEPTED
+Accepted implementation checkpoint:     b2a1a20f60b12f011fe2f5ff87d325752131ac06
+Merge / main release:                    PENDING
 Broker-write authority introduced:        NONE
 ```
+
+Complete command-by-command validation counts and the cumulative fix-forward history are recorded in `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md`.
 
 Dedicated validation for the stable main release includes:
 
@@ -497,7 +509,7 @@ npm run build
 - Issue #19 — completed/closed.
 - September 8 final merge closeout — `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md`.
 - SOD artifact rendering — accepted/frozen on `v24-sod-orchestration-lineage` at `4144c5c59494ae318bb736d64fba751a22046512`; baseline: `docs/sod/ExecutionOS_V2.4_SOD_Artifact_Rendering_Baseline_v1.0.md`.
-- Manual SOD & Trade-Card Ingestion — architecture/implementation contract approved and frozen on `v24-manual-sod-trade-card-ingestion` on 2026-09-10; implementation pending.
+- Manual SOD & Trade-Card Ingestion — implementation user-accepted on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06` on 2026-09-11; merge/main release pending; closeout: `docs/ExecutionOS_V2.4_Manual_SOD_Trade_Card_Ingestion_Closeout_2026-09-11.md`.
 
 ---
 
@@ -519,8 +531,8 @@ A repository GitHub Actions workflow regenerates the PDF when the guide or rende
 
 The Markdown guide remains the editable source of truth for operator documentation.
 
-Automated SOD orchestration and manual SOD/trade-card ingestion are intentionally **not yet added to the operator guide** because their complete production operator workflows are not yet implemented and accepted.
+Automated SOD orchestration remains absent from the operator guide because its complete production workflow is not yet implemented and accepted. Manual SOD/trade-card ingestion remains absent because its accepted feature-branch implementation has not yet been merged/released to `main`, and later operator-facing Submit workflow/UI work is not claimed by this closeout.
 
 ---
 
-**Maintenance principle:** current code/runtime and accepted closeout evidence govern current truth. Preserve frozen approved documents. Keep stable `main` operator documentation distinct from active feature-branch design/implementation records until a feature is accepted for release.
+**Maintenance principle:** current code/runtime and accepted closeout evidence govern current truth. Preserve frozen approved documents. Keep stable `main` operator documentation distinct from accepted feature-branch implementation records until a feature is merged and released.
