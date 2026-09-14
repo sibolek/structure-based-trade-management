@@ -204,6 +204,18 @@ function normalizeSection(section, expected, index) {
   return { id: expected.id, number: expected.number, title, blocks };
 }
 
+export function assertSodSourceUrl(value) {
+  if (value === null || value === undefined) return null;
+  try {
+    if (typeof value !== "string" || !/^https?:\/\//i.test(value) || /[\s\\\u0000-\u001f]/u.test(value)) throw new Error();
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password) throw new Error();
+    return value;
+  } catch {
+    throw artifactError("SOD artifact source URL is invalid", "SOD_ARTIFACT_SOURCE_URL_INVALID");
+  }
+}
+
 function normalizeSource(source, index) {
   if (!source || typeof source !== "object" || Array.isArray(source)) {
     throw artifactError(`SOD source ${index} must be an object`);
@@ -212,7 +224,7 @@ function normalizeSource(source, index) {
   if (!label) throw artifactError(`SOD source ${index} requires label`);
   return {
     label,
-    url: text(source.url) || null,
+    url: assertSodSourceUrl(source.url),
     note: text(source.note) || null,
   };
 }

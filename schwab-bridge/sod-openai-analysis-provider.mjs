@@ -1,3 +1,9 @@
+import { normalizeCanonicalCandidateProposal } from "./pretrade-candidate-contract.mjs";
+import { assertSodSourceUrl } from "./sod-artifact-content.mjs";
+import { sanitizeSodTransportDiagnostics } from "./sod-transport-diagnostics.mjs";
+import { buildSodResearchDiagnostics, SOD_RESEARCH_DIAGNOSTIC_LIMITS } from "./sod-research-diagnostics.mjs";
+import { buildSodCandidateSemanticDiagnostics } from "./sod-candidate-diagnostics.mjs";
+import { parseStrictSodJson, validateSodTransport, serializeSodProviderRequest, SOD_PROVIDER_LIMITS, sodError } from "./sod-provider-validation.mjs";
 export const SOD_OPENAI_SETUP_KEYS = Object.freeze([
   "BREAKOUT_PULLBACK",
   "VWAP_RECLAIM",
@@ -78,6 +84,14 @@ function providerError(message, code = "SOD_OPENAI_PROVIDER_INVALID", details = 
   const error = new Error(message);
   error.code = code;
   if (details) error.details = details;
+  return error;
+}
+
+function candidateSemanticError({ validatorStage, candidateIndex, candidateCount, candidate, violations, errors }) {
+  const error = sodError("SOD_OPENAI_CANDIDATE_SEMANTICS_INVALID");
+  error.semanticDiagnostics = buildSodCandidateSemanticDiagnostics({
+    validatorStage, candidateIndex, candidateCount, candidate, violations, errors,
+  });
   return error;
 }
 
@@ -413,7 +427,7 @@ function assertResolvedCharts(request, resolvedCharts) {
         { index },
       );
     }
-    totalBytes += Buffer.byteLength(Buffer.from(resolved.bytes));
+    totalBytes += resolved.bytes.byteLength;
   }
 
   if (totalBytes > SOD_OPENAI_MAX_CHART_BYTES) {
@@ -434,6 +448,11 @@ function providerInstructions() {
     "Distinguish current-session facts, scheduled-future events, prior-session facts, background context, and unknowns explicitly.",
     "VIX context is mandatory. If current-session VIX is unavailable, state the freshest supported classification rather than inventing a value.",
     "Return only the required structured response. Do not return HTML, Markdown, CSS, candidate IDs, contract versions, lifecycle state, ARM authorization, risk sizing, quantity, handoff, execution state, broker actions, or filesystem paths.",
+    `artifactContent.sections must contain exactly ${REPORT_SECTION_IDS.length} sections, with exactly one section for every canonical ID.`,
+    `Canonical section IDs in required array order: ${JSON.stringify(REPORT_SECTION_IDS)}`,
+    "The IDs must appear in exactly the specified order: the section at each array position must use the corresponding canonical ID. No section may be substituted by another allowed section ID.",
+    "Each section's title and blocks must remain semantically associated with that section ID.",
+    "If evidence is insufficient, state that inside the correct section rather than omitting, replacing, duplicating, or moving a section.",
     "Every A+ candidate must request MANUAL ARM review only.",
     "Use the controlled setupKey only as the stable semantic setup class; keep richer wording in setup.",
     "Use exact absolute timestamps with timezone offsets or Z for candidate validity.",
@@ -490,12 +509,12 @@ export function buildOpenAiSodResponseRequest({
     });
     content.push({
       type: "input_image",
-      image_url: `data:${resolved.mediaType};base64,${Buffer.from(resolved.bytes).toString("base64")}`,
+      image_url: `data:${resolved.mediaType};base64,${Buffer.from(resolved.bytes.buffer, resolved.bytes.byteOffset, resolved.bytes.byteLength).toString("base64")}`,
       detail: "high",
     });
   }
 
-  return {
+  const payload = {
     model: normalizedModel,
     instructions: providerInstructions(),
     input: [{ role: "user", content }],
@@ -513,12 +532,15 @@ export function buildOpenAiSodResponseRequest({
       },
     },
   };
+  serializeSodProviderRequest(payload);
+  return payload;
 }
 
 function normalizeUrl(value) {
   const raw = text(value);
   if (!raw) return null;
   try {
+    assertSodSourceUrl(raw);
     const parsed = new URL(raw);
     parsed.hash = "";
     for (const key of [...parsed.searchParams.keys()]) {
@@ -532,21 +554,71 @@ function normalizeUrl(value) {
 }
 
 export function extractOpenAiWebSearchSources(response) {
-  const urls = new Set();
+  const sourceArrayUrls = new Set();
+  const pageActionUrls = new Set();
   let webSearchCallCount = 0;
+  let sourceArrayRawCount = 0;
+  let actionObservationCount = 0;
+  let rejectedActionObservationCount = 0;
+  let qualifyingPageActionCount = 0;
+  const pageActionObservations = [];
   for (const item of Array.isArray(response?.output) ? response.output : []) {
     if (item?.type !== "web_search_call") continue;
     webSearchCallCount += 1;
     for (const source of Array.isArray(item?.action?.sources) ? item.action.sources : []) {
+      sourceArrayRawCount += 1;
       const normalized = normalizeUrl(source?.url);
-      if (normalized) urls.add(normalized);
+      if (normalized) sourceArrayUrls.add(normalized);
     }
+    const action = item.action && typeof item.action === "object" ? item.action : {};
+    const actionType = text(action.type);
+    const status = text(item.status);
+    const rawActionUrl = typeof action.url === "string" ? action.url : null;
+    const normalizedActionUrl = rawActionUrl ? normalizeUrl(rawActionUrl) : null;
+    let eligibilityReason = "ACTION_TYPE_NOT_QUALIFIED";
+    if (actionType === "open_page" || actionType === "find_in_page") {
+      if (status !== "completed") eligibilityReason = "STATUS_NOT_COMPLETED";
+      else if (!normalizedActionUrl) eligibilityReason = "INVALID_URL";
+      else {
+        eligibilityReason = "QUALIFIED_PAGE_ACTION";
+        pageActionUrls.add(normalizedActionUrl);
+      }
+    }
+    actionObservationCount += 1;
+    if (eligibilityReason === "QUALIFIED_PAGE_ACTION") qualifyingPageActionCount += 1;
+    else rejectedActionObservationCount += 1;
+    if (pageActionObservations.length < SOD_RESEARCH_DIAGNOSTIC_LIMITS.actionObservations) pageActionObservations.push({
+      actionType: actionType || null,
+      status: status || null,
+      eligible: eligibilityReason === "QUALIFIED_PAGE_ACTION",
+      reason: eligibilityReason,
+      url: rawActionUrl,
+      normalizedUrl: normalizedActionUrl,
+    });
   }
-  return { webSearchCallCount, sourceUrls: [...urls] };
+  const sourceUrls = new Set([...sourceArrayUrls, ...pageActionUrls]);
+  return {
+    webSearchCallCount,
+    sourceUrls: [...sourceUrls],
+    sourceArrayUrls: [...sourceArrayUrls],
+    pageActionUrls: [...pageActionUrls],
+    sourceArrayRawCount,
+    sourceArrayDistinctCount: sourceArrayUrls.size,
+    qualifyingPageActionCount,
+    qualifyingPageActionDistinctCount: pageActionUrls.size,
+    combinedAuthoritativeDistinctCount: sourceUrls.size,
+    actionObservationCount,
+    rejectedActionObservationCount,
+    pageActionObservations,
+  };
 }
 
 function extractOutputText(response) {
-  if (text(response?.output_text)) return text(response.output_text);
+  if (typeof response?.output_text === "string") {
+    if (Buffer.byteLength(response.output_text) > SOD_PROVIDER_LIMITS.maxSerializedBytes) throw sodError("SOD_OPENAI_OUTPUT_TEXT_LIMIT");
+    return response.output_text;
+  }
+  let byteLength = 0;
   const parts = [];
   for (const item of Array.isArray(response?.output) ? response.output : []) {
     if (item?.type !== "message") continue;
@@ -554,7 +626,11 @@ function extractOutputText(response) {
       if (content?.type === "refusal") {
         throw providerError("OpenAI SOD analysis was refused", "SOD_OPENAI_RESPONSE_REFUSED");
       }
-      if (content?.type === "output_text" && typeof content.text === "string") parts.push(content.text);
+      if (content?.type === "output_text" && typeof content.text === "string") {
+        byteLength += Buffer.byteLength(content.text);
+        if (byteLength > SOD_PROVIDER_LIMITS.maxSerializedBytes) throw sodError("SOD_OPENAI_OUTPUT_TEXT_LIMIT");
+        parts.push(content.text);
+      }
     }
   }
   const combined = parts.join("").trim();
@@ -564,25 +640,31 @@ function extractOutputText(response) {
   return combined;
 }
 
-function assertResearchEvidence(transport, actualSourceUrls) {
+function assertResearchEvidence(transport, sourceInfo, response) {
+  const actualSourceUrls = sourceInfo.sourceUrls;
   if (!Array.isArray(transport.researchEvidence)) {
     throw providerError("OpenAI SOD researchEvidence is required", "SOD_OPENAI_RESEARCH_EVIDENCE_INVALID");
   }
   const actual = new Set(actualSourceUrls.map(normalizeUrl).filter(Boolean));
   const mismatches = [];
+  let mismatchCount = 0;
   for (let index = 0; index < transport.researchEvidence.length; index += 1) {
     const evidence = transport.researchEvidence[index];
-    for (const sourceUrl of Array.isArray(evidence?.sourceUrls) ? evidence.sourceUrls : []) {
+    for (const [sourceUrlIndex, sourceUrl] of (Array.isArray(evidence?.sourceUrls) ? evidence.sourceUrls : []).entries()) {
       const normalized = normalizeUrl(sourceUrl);
-      if (!normalized || !actual.has(normalized)) mismatches.push({ index, sourceUrl });
+      if (!normalized || !actual.has(normalized)) {
+        mismatchCount++;
+        if (mismatches.length < SOD_RESEARCH_DIAGNOSTIC_LIMITS.mismatches) mismatches.push({ index, sourceUrlIndex, sourceUrl, normalized, category: evidence?.category });
+      }
     }
   }
-  if (mismatches.length) {
-    throw providerError(
+  if (mismatchCount) {
+    const error = providerError(
       "OpenAI SOD research evidence cited sources not present in actual web-search sources",
       "SOD_OPENAI_RESEARCH_SOURCE_MISMATCH",
-      { mismatches },
     );
+    error.semanticDiagnostics = buildSodResearchDiagnostics({ mismatches, mismatchCount, actualSourceUrls: [...actual], response, normalizeUrl, sourceInfo });
+    throw error;
   }
 
   const vix = transport.researchEvidence.find((item) => upper(item?.category) === "VIX");
@@ -679,6 +761,11 @@ function leafTrigger(condition, index) {
     return { nodeId, type, prompt: text(condition.prompt) || null };
   }
   const reference = text(condition.referenceLabel) ? { label: text(condition.referenceLabel) } : null;
+  if (["QUOTE_COMPARISON", "BAR_CLOSE_COMPARISON"].includes(type)) {
+    if (!Number.isFinite(condition.value) || !["GT", "GTE", "LT", "LTE"].includes(condition.operator)
+      || (type === "QUOTE_COMPARISON" && !["BID", "ASK", "LAST"].includes(condition.side))
+      || (type === "BAR_CLOSE_COMPARISON" && !text(condition.timeframe))) throw sodError("SOD_OPENAI_TRIGGER_INVALID");
+  }
   if (type === "QUOTE_COMPARISON") {
     return {
       nodeId,
@@ -855,7 +942,8 @@ export function parseOpenAiSodResponse({
 
   let transport;
   try {
-    transport = JSON.parse(extractOutputText(response));
+    transport = parseStrictSodJson(extractOutputText(response));
+    validateSodTransport(transport, SOD_OPENAI_TRANSPORT_SCHEMA);
   } catch (error) {
     if (error?.code?.startsWith?.("SOD_OPENAI_")) throw error;
     throw providerError("OpenAI SOD structured output was not valid JSON", "SOD_OPENAI_RESPONSE_JSON_INVALID");
@@ -868,17 +956,47 @@ export function parseOpenAiSodResponse({
   if (sourceInfo.webSearchCallCount < 1) {
     throw providerError("OpenAI SOD response did not perform required web research", "SOD_OPENAI_RESEARCH_REQUIRED");
   }
-  assertResearchEvidence(transport, sourceInfo.sourceUrls);
+  assertResearchEvidence(transport, sourceInfo, response);
+  for (const source of transport.artifactContent.sources) {
+    assertSodSourceUrl(source.url);
+    if (source.url !== null && !sourceInfo.sourceUrls.includes(normalizeUrl(source.url))) {
+      throw sodError("SOD_OPENAI_ARTIFACT_SOURCE_MISMATCH");
+    }
+  }
 
   const transportCandidates = Array.isArray(transport.candidateProposals) ? transport.candidateProposals : [];
   const mappedCandidates = transportCandidates.map((candidate, index) => {
     assertCandidateProvenance(candidate, request, sourceInfo.sourceUrls, index);
+    const { validFrom, validUntil } = candidate.validity;
+    const validFromAbsolute = /(?:Z|[+-]\d{2}:\d{2})$/.test(validFrom) && Number.isFinite(Date.parse(validFrom));
+    const validUntilAbsolute = /(?:Z|[+-]\d{2}:\d{2})$/.test(validUntil) && Number.isFinite(Date.parse(validUntil));
+    const violations = [];
+    if (!validFromAbsolute) violations.push({ ruleCode: "VALIDITY_TIMESTAMP_FORMAT", field: "validity.validFrom", expected: "ABSOLUTE_TIMESTAMP_WITH_OFFSET_OR_Z", actual: validFrom });
+    if (!validUntilAbsolute) violations.push({ ruleCode: "VALIDITY_TIMESTAMP_FORMAT", field: "validity.validUntil", expected: "ABSOLUTE_TIMESTAMP_WITH_OFFSET_OR_Z", actual: validUntil });
+    if (validFromAbsolute && validUntilAbsolute && Date.parse(validFrom) >= Date.parse(validUntil)) {
+      violations.push({ ruleCode: "VALIDITY_INTERVAL_ORDER", field: "validity.validUntil", expected: "VALID_FROM_BEFORE_VALID_UNTIL", actual: validUntil });
+    }
+    if (!candidate.symbol.trim()) violations.push({ ruleCode: "SYMBOL_REQUIRED", field: "symbol", expected: "NONEMPTY_STRING", actual: candidate.symbol });
+    if (!candidate.thesis.trim()) violations.push({ ruleCode: "THESIS_REQUIRED", field: "thesis", expected: "NONEMPTY_STRING", actual: candidate.thesis });
+    if (violations.length) throw candidateSemanticError({ validatorStage: "TRANSPORT_CANDIDATE_PREMAP", candidateIndex: index,
+      candidateCount: transportCandidates.length, candidate, violations });
     return mapCandidateTransport(candidate, request.sourceDate);
   });
   const candidateProposals = assignDeterministicSodCandidateIds({
     sourceDate: request.sourceDate,
     candidateProposals: mappedCandidates,
   });
+  // Validate compatibility using the existing pure contract validator. These
+  // placeholders are never returned/persisted as version or export authority.
+  for (const [candidateIndex, candidate] of candidateProposals.entries()) {
+    const validation = normalizeCanonicalCandidateProposal({ ...candidate,
+      schemaVersion: 1, contractVersion: 1, source: "SOD_A_PLUS_TRADES", sourceDate: request.sourceDate,
+      generatedAt: `${request.sourceDate}T00:00:00.000Z`, timeframe: candidate.entryTimeframe,
+    }, { bundleSource: "SOD_A_PLUS_TRADES" });
+    if (validation.errors.length) throw candidateSemanticError({ validatorStage: "CANONICAL_CANDIDATE_COMPATIBILITY",
+      candidateIndex, candidateCount: candidateProposals.length, candidate,
+      errors: validation.errors });
+  }
   const chartBytes = assertResolvedCharts(request, resolvedCharts);
 
   return {
@@ -887,6 +1005,9 @@ export function parseOpenAiSodResponse({
     generationMetadata: {
       provider: "openai",
       providerVersion: 1,
+      localValidation: true,
+      responseStatus: "completed",
+      requestId: /^req_[a-zA-Z0-9_-]{1,124}$/.test(response._request_id || "") ? response._request_id : null,
       modelRequested: text(model),
       modelResolved: text(response.model) || null,
       responseId: text(response.id) || null,
@@ -896,16 +1017,19 @@ export function parseOpenAiSodResponse({
       sourceCount: sourceInfo.sourceUrls.length,
       chartCount: resolvedCharts.length,
       chartBytes,
+      charts: resolvedCharts.map(({ chartId, contentRef, sha256 }) => ({ chartId, contentRef, sha256 })),
       usage: safeUsage(response.usage),
     },
   };
 }
 
 function sanitizeClientError(error) {
+  if (["SOD_OPENAI_REQUEST_BYTES_LIMIT", "SOD_OPENAI_RAW_RESPONSE_LIMIT", "SOD_OPENAI_RESPONSE_INVALID", "SOD_OPENAI_TIMEOUT", "SOD_OPENAI_NETWORK_FAILED"].includes(error?.code)) return sodError(error.code);
   const status = Number(error?.status);
   if (status === 401) return providerError("OpenAI SOD authentication failed", "SOD_OPENAI_AUTH_FAILED");
   if (status === 403) return providerError("OpenAI SOD provider access was denied", "SOD_OPENAI_ACCESS_DENIED");
   if (status === 429) return providerError("OpenAI SOD provider was rate limited", "SOD_OPENAI_RATE_LIMITED");
+  if (status >= 400 && status < 500) return providerError("OpenAI SOD request rejected", "SOD_OPENAI_REQUEST_REJECTED");
   if (status >= 500 && status <= 599) return providerError("OpenAI SOD provider is temporarily unavailable", "SOD_OPENAI_UPSTREAM_UNAVAILABLE");
   return providerError("OpenAI SOD provider request failed", "SOD_OPENAI_REQUEST_FAILED");
 }
@@ -928,6 +1052,9 @@ export function createOpenAiSodAnalysisProvider({
   }
 
   return Object.freeze({
+    providerIdentity: "openai", providerVersion: 1, model: normalizedModel,
+    readiness: () => ({ providerLoaded: true, providerConfigured: true, modelConfigured: true }),
+    async close() { await client.close?.(); },
     async generate(request, context) {
       if (!context || typeof context.resolveChart !== "function") {
         throw providerError(
@@ -936,7 +1063,15 @@ export function createOpenAiSodAnalysisProvider({
         );
       }
       const resolvedCharts = [];
-      for (const chart of request.charts) resolvedCharts.push(await context.resolveChart(chart.contentRef));
+      if (request.charts.length > SOD_OPENAI_MAX_CHARTS) throw sodError("SOD_OPENAI_CHART_COUNT_LIMIT");
+      let chartBytes = 0;
+      for (const chart of request.charts) {
+        const resolved = await context.resolveChart(chart.contentRef);
+        if (!(resolved?.bytes instanceof Uint8Array)) throw sodError("SOD_OPENAI_CHART_BYTES_INVALID");
+        chartBytes += resolved.bytes.byteLength;
+        if (chartBytes > SOD_OPENAI_MAX_CHART_BYTES) throw sodError("SOD_OPENAI_CHART_BYTES_LIMIT");
+        resolvedCharts.push(resolved);
+      }
       const payload = buildOpenAiSodResponseRequest({
         request,
         resolvedCharts,
@@ -944,19 +1079,25 @@ export function createOpenAiSodAnalysisProvider({
         maxToolCalls,
       });
 
+      serializeSodProviderRequest(payload);
+      await context.beforeProviderRequest?.();
       let response;
       try {
         response = await client.responses.create(payload);
       } catch (error) {
-        throw sanitizeClientError(error);
+        const failure = sanitizeClientError(error);
+        const diagnostics = sanitizeSodTransportDiagnostics({ ...error?.providerDiagnostics, errorCode: failure.code });
+        if (diagnostics) failure.providerDiagnostics = diagnostics;
+        throw failure;
       }
-      return parseOpenAiSodResponse({
-        response,
-        request,
-        resolvedCharts,
-        model: normalizedModel,
-        clock,
-      });
+      try {
+        return parseOpenAiSodResponse({ response, request, resolvedCharts, model: normalizedModel, clock });
+      } catch (error) {
+        error.providerDiagnostics = sanitizeSodTransportDiagnostics({ errorCode: error.code,
+          headersObserved: true,
+          phase: "RESPONSE_PARSED", requestId: response?._request_id, semantic: error.semanticDiagnostics });
+        throw error;
+      }
     },
   });
 }

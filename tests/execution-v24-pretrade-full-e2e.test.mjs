@@ -220,7 +220,7 @@ function buildPretradeHarness({ tempDir, clock }) {
   const store = new PreTradeStore({ filePath: fileIn(tempDir, "pretrade-state"), clock });
   store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock, idFactory: () => "ingress-e2e" });
-  ingress.importBundle({
+  ingress.importBundle({ ingressPolicy: "AUTOMATED_UNTOUCHED_ONLY",
     source: "SOD_A_PLUS_TRADES",
     bundleId: "pretrade-full-e2e-bundle",
     candidates: [proposal()],

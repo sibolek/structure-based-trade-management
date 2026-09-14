@@ -105,7 +105,7 @@ function harness({
   const store = new PreTradeStore({ filePath: stateFile, clock });
   store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock, idFactory: () => "ingress-event-1" });
-  ingress.importBundle({ source: "SOD_A_PLUS_TRADES", bundleId: "permission-bundle", candidates: [proposal()] });
+  ingress.importBundle({ ingressPolicy: "AUTOMATED_UNTOUCHED_ONLY", source: "SOD_A_PLUS_TRADES", bundleId: "permission-bundle", candidates: [proposal()] });
   const persisted = store.state.candidates[0];
   persisted.lifecycleState = "PERMISSION_EVALUATING";
   persisted.stateRevision = 2;

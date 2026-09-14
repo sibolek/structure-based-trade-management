@@ -57,7 +57,7 @@ function harness(candidate = baseCandidate()) {
   const store = new PreTradeStore({ filePath });
   store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock, idFactory: () => `ingress-${++id}` });
-  const imported = ingress.importBundle({
+  const imported = ingress.importBundle({ ingressPolicy: "MANUAL_AUTHORIZED",
     source: candidate.source,
     bundleId: "trigger-engine-test",
     candidates: [candidate],

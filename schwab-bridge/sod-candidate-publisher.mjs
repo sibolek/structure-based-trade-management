@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import { constants } from "node:fs";
 import path from "node:path";
 
 function text(value) {
@@ -59,9 +60,12 @@ export async function publishCandidateBundleAtomically({
   inboxPath,
   bundle,
   idFactory = () => crypto.randomUUID(),
+  expectedIntent = null,
+  beforePublish = null,
 } = {}) {
   const publicationId = text(idFactory());
   const paths = buildCandidatePublicationPaths({ inboxPath, bundle, publicationId });
+  if (expectedIntent) paths.tempPath = path.join(paths.inbox, `.sod-publish-${crypto.randomUUID()}.tmp`);
   const stat = await fs.stat(paths.inbox).catch((error) => {
     throw publisherError(
       `Candidate inbox is unavailable: ${error.message}`,
@@ -75,6 +79,14 @@ export async function publishCandidateBundleAtomically({
 
   const bytes = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`, "utf8");
   const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+  if (expectedIntent && (expectedIntent.publicationId !== publicationId || expectedIntent.finalName !== paths.finalName
+    || expectedIntent.sha256 !== sha256 || expectedIntent.byteLength !== bytes.length)) {
+    throw publisherError("Publication intent mismatch", "SOD_PUBLICATION_RECOVERY_CONFLICT");
+  }
+  if (expectedIntent) {
+    const existing = await reconcileSodPublication({ inboxPath, intent: expectedIntent });
+    if (existing) return existing;
+  }
   let handle = null;
 
   try {
@@ -97,9 +109,21 @@ export async function publishCandidateBundleAtomically({
       );
     }
 
+    await beforePublish?.();
+
     // Same-directory rename is the publication boundary: the feeder ignores the
     // hidden .tmp name and only sees the complete .json after this atomic step.
-    await fs.rename(paths.tempPath, paths.finalPath);
+    if (expectedIntent) {
+      // Atomic no-clobber publication under the same-directory boundary.
+      try { await fs.link(paths.tempPath, paths.finalPath); }
+      catch (error) {
+        if (error.code === "EEXIST") throw publisherError("Publication collision", "SOD_PUBLICATION_RECOVERY_CONFLICT");
+        throw error;
+      }
+      await fs.unlink(paths.tempPath);
+    } else await fs.rename(paths.tempPath, paths.finalPath);
+    const directory = await fs.open(paths.inbox, "r");
+    try { await directory.sync(); } finally { await directory.close(); }
 
     return {
       publicationId,
@@ -111,11 +135,39 @@ export async function publishCandidateBundleAtomically({
   } catch (error) {
     if (handle) await handle.close().catch(() => {});
     await fs.unlink(paths.tempPath).catch(() => {});
-    if (error?.code?.startsWith?.("SOD_PUBLICATION_")) throw error;
+    if (error?.code?.startsWith?.("SOD_PUBLICATION_") || error?.code === "SOD_PRETRADE_CHANGED_DURING_PREPARATION") throw error;
     throw publisherError(
       `Atomic candidate publication failed: ${error.message}`,
       "SOD_CANDIDATE_PUBLICATION_ERROR",
       { causeCode: error.code || null },
     );
   }
+}
+
+export function buildSodPublicationIntent({ inboxPath, bundle, runId }) {
+  const publicationId = runId;
+  const { finalName } = buildCandidatePublicationPaths({ inboxPath, bundle, publicationId });
+  const bytes = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`);
+  return { runId, publicationId, bundleId: bundle.bundleId, finalName,
+    sha256: crypto.createHash("sha256").update(bytes).digest("hex"), byteLength: bytes.length,
+    targetHash: crypto.createHash("sha256").update(path.resolve(inboxPath)).digest("hex") };
+}
+
+export async function reconcileSodPublication({ inboxPath, intent }) {
+  if (!intent || path.basename(intent.finalName || "") !== intent.finalName
+    || crypto.createHash("sha256").update(path.resolve(inboxPath)).digest("hex") !== intent.targetHash) {
+    throw publisherError("Publication target changed", "SOD_PUBLICATION_RECOVERY_CONFLICT");
+  }
+  let handle;
+  try {
+    handle = await fs.open(path.join(inboxPath, intent.finalName), constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size !== intent.byteLength) throw publisherError("Publication bytes conflict", "SOD_PUBLICATION_RECOVERY_CONFLICT");
+    const bytes = await handle.readFile();
+    if (crypto.createHash("sha256").update(bytes).digest("hex") !== intent.sha256) throw publisherError("Publication hash conflict", "SOD_PUBLICATION_RECOVERY_CONFLICT");
+    return { publicationId: intent.publicationId, finalName: intent.finalName, sha256: intent.sha256, byteLength: intent.byteLength };
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw publisherError("Publication reconciliation failed", "SOD_PUBLICATION_RECOVERY_CONFLICT");
+  } finally { await handle?.close(); }
 }

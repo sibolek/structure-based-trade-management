@@ -289,6 +289,8 @@ Authority invariants:
 - imported candidates remain proposals only;
 - broker-write authority remains false.
 
+Individual candidate JSON files in every manual SOD package must follow [the canonical Manual SOD Deliverable Specification](sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md): one unchanged canonical candidate per bundle with top-level `ingressPolicy: "MANUAL_AUTHORIZED"`. Combined archival bundles and automated Production SOD publication keep their existing behavior.
+
 Manual ChatGPT SOD generation remains the current manual-generation workflow. The accepted manual-ingestion feature-branch implementation now provides the explicit Manual Proposal Inbox-to-PRETRADE path for structured candidate artifacts. It has not been merged or released to `main`, and no operator-facing Submit UI beyond the accepted slice is claimed here.
 
 ---

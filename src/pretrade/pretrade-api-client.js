@@ -99,6 +99,14 @@ export function createPretradeApiClient({
   }
 
   return Object.freeze({
+    importCandidateBundle(bundle) {
+      return request("/api/candidates/import", { method: "POST", body: bundle });
+    },
+
+    importManualEnvelope(envelope) {
+      return request("/api/candidates/manual-import", { method: "POST", body: envelope });
+    },
+
     snapshot() {
       return request("/api/candidates");
     },

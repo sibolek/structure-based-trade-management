@@ -49,7 +49,7 @@ function harness({ start = "2026-09-05T13:59:00.000Z", candidateOverrides = {} }
   const store = new PreTradeStore({ filePath });
   store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock, idFactory: () => `ingress-${++id}` });
-  const imported = ingress.importBundle({
+  const imported = ingress.importBundle({ ingressPolicy: "AUTOMATED_UNTOUCHED_ONLY",
     source: "SOD_A_PLUS_TRADES",
     bundleId: "validity-bundle",
     candidates: [candidate(candidateOverrides)],

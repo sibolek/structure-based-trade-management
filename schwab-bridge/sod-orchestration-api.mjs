@@ -5,16 +5,10 @@ import { pathToFileURL } from "node:url";
 
 import {
   assertSodAnalysisProvider,
-  buildSodAnalysisRequest,
 } from "./sod-analysis-provider.mjs";
 import { createSodChartStore } from "./sod-chart-store.mjs";
-import {
-  prepareSodOrchestration,
-  publishPreparedSodOrchestration,
-  SOD_ORCHESTRATION_NO_CANDIDATES,
-  SOD_ORCHESTRATION_PRETRADE_PREFLIGHT_REQUIRED,
-  SOD_ORCHESTRATION_READY_TO_PUBLISH,
-} from "./sod-orchestration-core.mjs";
+import { createSodRunStore, safeSodFailureCode } from "./sod-run-store.mjs";
+import { createSodProductionRunner } from "./sod-production-run.mjs";
 import {
   DEFAULT_SOD_PRETRADE_URL,
   fetchSodPretradeSnapshot,
@@ -129,36 +123,16 @@ function decodeDisplayName(value) {
   }
 }
 
-function safeErrorMessage(error, redactedPaths = []) {
-  let message = text(error?.message) || "SOD orchestration request failed";
-  for (const configuredPath of redactedPaths.map(text).filter(Boolean)) {
-    message = message.split(path.resolve(configuredPath)).join("[local-path]");
-  }
-  return message;
-}
+function safeErrorMessage(error) { return safeSodFailureCode(error); }
 
-function preparedResponse(prepared) {
-  return {
-    status: prepared.status,
-    sourceDate: prepared.sourceDate,
-    generationMode: prepared.generationMode,
-    generatedAt: prepared.generatedAt,
-    analysis: prepared.analysis,
-    bundle: prepared.bundle,
-    lineage: prepared.lineage,
-    publicationIntents: prepared.publicationIntents,
-    requiresPretradePreflight: prepared.requiresPretradePreflight,
-  };
-}
-
-function publicationResponse(publication) {
-  if (!publication) return null;
-  return {
-    publicationId: publication.publicationId,
-    finalName: publication.finalName,
-    sha256: publication.sha256,
-    byteLength: publication.byteLength,
-  };
+function failureHttpStatus(code) {
+  if (/CONFLICT|RECOVERY|AMBIGUOUS/.test(code)) return 409;
+  if (/RATE_LIMIT/.test(code)) return 429;
+  if (/LIMIT|TOO_LARGE/.test(code)) return 413;
+  if (/KEY_REQUIRED|MODEL_REQUIRED|STORE_|UPSTREAM_UNAVAILABLE/.test(code)) return 503;
+  if (/AUTH_FAILED|ACCESS_DENIED/.test(code)) return 502;
+  if (/TIMEOUT/.test(code)) return 504;
+  return 400;
 }
 
 function authorized(origin, exactAllowedOrigin, sessionToken, req) {
@@ -174,7 +148,7 @@ export function createSodOrchestrationApiServer({
   pretradeUrl = DEFAULT_SOD_PRETRADE_URL,
   fetchImpl = globalThis.fetch,
   clock = () => new Date().toISOString(),
-  publicationIdFactory = undefined,
+  runStore,
   sessionToken = crypto.randomBytes(32).toString("hex"),
 } = {}) {
   const trustedProvider = assertSodAnalysisProvider(provider);
@@ -185,6 +159,13 @@ export function createSodOrchestrationApiServer({
   }
   const exactAllowedOrigin = validateLoopbackOrigin(allowedOrigin);
   if (!text(sessionToken)) throw apiError("SOD orchestration session token is required", "SOD_ORCHESTRATION_SESSION_INVALID");
+
+  if (!runStore?.claim || !runStore?.append) throw apiError("Durable SOD run store required", "SOD_RUN_STORE_ROOT_REQUIRED");
+  const runner = createSodProductionRunner({ store: runStore, provider: trustedProvider, chartStore,
+    inboxPath: configuredInbox, clock,
+    readPretrade: async () => (await fetchSodPretradeSnapshot(pretradeUrl, { fetchImpl })).snapshot });
+  const readiness = () => ({ providerLoaded: true, providerConfigured: false, modelConfigured: false,
+    ...trustedProvider.readiness?.(), liveAcceptanceValidated: runStore.liveAcceptanceValidated?.(trustedProvider) === true });
 
   const server = http.createServer(async (req, res) => {
     const origin = text(req.headers.origin) || null;
@@ -211,7 +192,7 @@ export function createSodOrchestrationApiServer({
       json(res, 200, {
         ok: true,
         service: SOD_ORCHESTRATION_SERVICE,
-        providerConfigured: true,
+        ...readiness(),
         pretradeAccess: "READ_ONLY_HTTP",
         candidatePublication: "ATOMIC_INBOX_ONLY",
         chartIngestion: SOD_CHART_INGESTION_CAPABILITY,
@@ -267,60 +248,25 @@ export function createSodOrchestrationApiServer({
       return;
     }
 
-    if (req.method === "POST" && pathname === "/api/sod/generate") {
-      if (origin !== exactAllowedOrigin) {
-        json(res, 403, { error: "SOD_ORCHESTRATION_ORIGIN_FORBIDDEN" });
-        return;
-      }
+    const runStatus = /^\/api\/sod\/runs\/([^/]+)$/.exec(pathname);
+    const abandon = /^\/api\/sod\/runs\/([^/]+)\/abandon$/.exec(pathname);
+    if ((req.method === "POST" && pathname === "/api/sod/generate")
+      || (req.method === "GET" && runStatus) || (req.method === "POST" && abandon)) {
+      if (origin !== exactAllowedOrigin) { json(res, 403, { error: "SOD_ORCHESTRATION_ORIGIN_FORBIDDEN" }); return; }
       if (!authorized(origin, exactAllowedOrigin, sessionToken, req)) {
-        json(res, 403, { error: "SOD_ORCHESTRATION_SESSION_FORBIDDEN" }, {
-          origin,
-          allowedOrigin: exactAllowedOrigin,
-        });
-        return;
+        json(res, 403, { error: "SOD_ORCHESTRATION_SESSION_FORBIDDEN" }, { origin, allowedOrigin: exactAllowedOrigin }); return;
       }
-
       try {
-        const request = buildSodAnalysisRequest(await readJson(req));
-        for (const chart of request.charts) {
-          await chartStore.assertChartReference(chart);
-        }
-        const { snapshot } = await fetchSodPretradeSnapshot(pretradeUrl, { fetchImpl });
-        const prepared = await prepareSodOrchestration({
-          provider: trustedProvider,
-          request,
-          pretradeSnapshot: snapshot,
-          resolveChart: chartStore.resolve,
-          clock,
-        });
-
-        let publication = null;
-        if (prepared.status === SOD_ORCHESTRATION_READY_TO_PUBLISH) {
-          publication = await publishPreparedSodOrchestration({
-            prepared,
-            inboxPath: configuredInbox,
-            ...(publicationIdFactory ? { idFactory: publicationIdFactory } : {}),
-          });
-        } else if (
-          prepared.status !== SOD_ORCHESTRATION_PRETRADE_PREFLIGHT_REQUIRED
-          && prepared.status !== SOD_ORCHESTRATION_NO_CANDIDATES
-        ) {
-          throw apiError(
-            `Unsupported SOD orchestration status ${prepared.status}`,
-            "SOD_ORCHESTRATION_STATUS_INVALID",
-          );
-        }
-
-        json(res, 200, {
-          ...preparedResponse(prepared),
-          publication: publicationResponse(publication),
-          brokerWriteAuthority: false,
+        const result = runStatus ? runner.status(runStatus[1]) : abandon ? runner.abandon(abandon[1])
+          : await runner.generate(await readJson(req));
+        const code = result.failureCode || (result.stage === "RECOVERY_REQUIRED" ? "SOD_RUN_PROVIDER_OUTCOME_AMBIGUOUS" : null);
+        json(res, code ? failureHttpStatus(code) : 200, {
+          ...result, ...(code ? { error: code, message: code } : {}), readiness: readiness(),
         }, { origin, allowedOrigin: exactAllowedOrigin });
       } catch (error) {
-        json(res, error?.code === "SOD_ORCHESTRATION_BODY_TOO_LARGE" ? 413 : 400, {
-          error: error?.code || "SOD_ORCHESTRATION_API_ERROR",
-          message: safeErrorMessage(error, [configuredInbox, chartStore.rootPath]),
-          brokerWriteAuthority: false,
+        const code = safeSodFailureCode(error);
+        json(res, failureHttpStatus(code), { error: code, message: code,
+          ...(error.activeRun ? { activeRun: error.activeRun } : {}), brokerWriteAuthority: false,
         }, { origin, allowedOrigin: exactAllowedOrigin });
       }
       return;
@@ -333,6 +279,7 @@ export function createSodOrchestrationApiServer({
     server,
     allowedOrigin: exactAllowedOrigin,
     sessionToken,
+    runner,
   });
 }
 
@@ -355,7 +302,9 @@ async function main() {
 
   const provider = await loadSodAnalysisProviderModule(process.env.EXECUTIONOS_SOD_PROVIDER_MODULE);
   const chartStore = createSodChartStore({ rootPath: process.env.EXECUTIONOS_SOD_CHART_STORE });
+  const runStore = createSodRunStore({ rootPath: process.env.EXECUTIONOS_SOD_RUN_STORE });
   const api = createSodOrchestrationApiServer({
+    runStore,
     provider,
     inboxPath: process.env.EXECUTIONOS_CANDIDATE_INBOX,
     chartStore,
@@ -371,7 +320,7 @@ async function main() {
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;
 if (invokedPath && import.meta.url === invokedPath) {
   main().catch((error) => {
-    console.error(`[ExecutionOS SOD] ${error.code || "ERROR"}: ${error.message}`);
+    console.error(`[ExecutionOS SOD] ${safeSodFailureCode(error)}`);
     process.exitCode = 1;
   });
 }

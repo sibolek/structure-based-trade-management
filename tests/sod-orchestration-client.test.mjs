@@ -158,3 +158,21 @@ test("SOD browser client refreshes an expired service session once", async () =>
   assert.equal(session, 2);
   assert.equal(generateAttempts, 2);
 });
+
+test("browser run identity is UUID-quality and preserved across handshake refresh and resume", async () => {
+  const bodies = []; let session = 0;
+  const client = createSodOrchestrationApiClient({ fetchImpl: async (url, options) => {
+    if (url.endsWith("/health")) return response(200, healthy());
+    if (url.endsWith("/session")) return response(200, { service: SOD_ORCHESTRATION_SERVICE, sessionToken: `s${++session}` });
+    if (url.endsWith("/generate")) {
+      bodies.push(JSON.parse(options.body));
+      return bodies.length === 1 ? response(403, { error: "SOD_ORCHESTRATION_SESSION_FORBIDDEN" }) : response(200, { runId: bodies.at(-1).runId });
+    }
+    return response(200, { stage: url.endsWith("/abandon") ? "ABANDONED" : "RECOVERY_REQUIRED" });
+  } });
+  const result = await client.generate({ sourceDate: "2026-09-10" });
+  assert.match(result.runId, /^[0-9a-f-]{36}$/i); assert.equal(bodies[0].runId, bodies[1].runId);
+  await client.generate({ ...bodies[0] }); assert.equal(bodies[2].runId, result.runId);
+  assert.equal((await client.status(result.runId)).stage, "RECOVERY_REQUIRED");
+  assert.equal((await client.abandon(result.runId)).stage, "ABANDONED");
+});

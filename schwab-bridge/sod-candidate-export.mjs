@@ -1,3 +1,4 @@
+import { SYSTEM_CANDIDATE_ROOTS } from "./candidate-integrity-roots.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,29 +13,11 @@ export const MANUAL_INGESTION_SCHEMA_VERSION = 1;
 export const MANUAL_SOD_SUBMISSION = "MANUAL_SOD";
 export const MANUAL_STANDALONE_TRADE_CARD_SUBMISSION = "MANUAL_STANDALONE_TRADE_CARD";
 
-const FORBIDDEN_RUNTIME_AUTHORITY_FIELDS = [
-  "authorizationId",
-  "declineId",
-  "reviewId",
-  "manualSupersessionReviews",
-  "manualSupersessionReview",
-  "manualSupersessionAuthorizations",
-  "manualSupersessionAuthorization",
-  "manualSupersessionDeclines",
-  "manualSupersessionDecline",
-  "manualSupersessionApproval",
-  "manualApproved",
-  "forceImport",
-  "supersessionApproved",
-  "arm",
-  "handoff",
-  "permissionOutcome",
-  "riskEvaluation",
-  "authorizedDssEvaluationId",
-  "authorizedRiskEvaluationId",
-  "selectedQuantity",
-  "executionState",
-];
+// Frozen export adapter accepts only WAITING/false proposal-intent placeholders.
+// Canonical proposals themselves prohibit these roots by presence.
+const FORBIDDEN_RUNTIME_AUTHORITY_FIELDS = SYSTEM_CANDIDATE_ROOTS.filter(
+  field => !["lifecycleState", "status", "armAuthorized"].includes(field),
+);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -164,21 +147,19 @@ function candidateIdFor(candidate, sourceDate, index, { requireExplicitCandidate
   return `sod-${sourceDate}-${symbol}-${direction}-${setupSlug}${qualifier}`;
 }
 
-function meaningfulAuthorityValue(value) {
-  return value !== undefined && value !== null && value !== false && value !== "";
-}
-
 function assertNoRuntimeAuthority(candidate, index) {
   const violations = [];
-  const lifecycle = upper(candidate.lifecycleState || candidate.status);
-  if (lifecycle && lifecycle !== "WAITING") {
-    violations.push(`lifecycle/status ${lifecycle} is runtime authority; only WAITING proposal intent is permitted`);
+  for (const field of ["lifecycleState", "status"]) {
+    if (hasOwn(candidate, field) && candidate[field] !== "WAITING") {
+      violations.push(`${field} may only express the frozen WAITING proposal-intent placeholder`);
+    }
   }
-  if (candidate.armAuthorized === true || candidate.armPolicy?.armAuthorized === true) {
+  if ((hasOwn(candidate, "armAuthorized") && candidate.armAuthorized !== false)
+    || (hasOwn(candidate.armPolicy || {}, "armAuthorized") && candidate.armPolicy.armAuthorized !== false)) {
     violations.push("ARM authorization may not be supplied by SOD export input");
   }
   for (const field of FORBIDDEN_RUNTIME_AUTHORITY_FIELDS) {
-    if (hasOwn(candidate, field) && meaningfulAuthorityValue(candidate[field])) {
+    if (hasOwn(candidate, field)) {
       violations.push(`${field} is runtime authority/review state and may not be supplied by SOD export input`);
     }
   }

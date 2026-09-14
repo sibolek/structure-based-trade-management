@@ -165,7 +165,7 @@ function sourceFooterHtml(sources) {
   if (!sources.length) return "";
   return `<div class="footer"><b>Sources / freshness:</b> ${sources.map((source) => {
     const label = html(source.label);
-    const linked = source.url ? `<a class="source" href="${html(source.url)}" rel="noreferrer">${label}</a>` : label;
+    const linked = source.url ? `<a class="source" href="${html(source.url)}" rel="noopener noreferrer">${label}</a>` : label;
     return `${linked}${source.note ? ` — ${html(source.note)}` : ""}`;
   }).join(" · ")}</div>`;
 }

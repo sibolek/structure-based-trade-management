@@ -146,7 +146,7 @@ function harness({ expectedEntryChange = false, quantityChange = false, freshQua
   const store = new PreTradeStore({ filePath: tmp("arm-state"), clock });
   store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock, idFactory: () => "ingress-1" });
-  ingress.importBundle({ source: "SOD_A_PLUS_TRADES", bundleId: "arm-bundle", candidates: [proposal()] });
+  ingress.importBundle({ ingressPolicy: "AUTOMATED_UNTOUCHED_ONLY", source: "SOD_A_PLUS_TRADES", bundleId: "arm-bundle", candidates: [proposal()] });
   const persisted = store.state.candidates[0];
   persisted.lifecycleState = "READY";
   persisted.stateRevision = 3;

@@ -1,3 +1,4 @@
+import ManualCandidateImport from "./ManualCandidateImport.jsx";
 import { useState } from "react";
 import {
   AlertTriangle,
@@ -20,14 +21,6 @@ function text(value) {
 
 function upper(value) {
   return text(value).toUpperCase();
-}
-
-function localDateValue() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function StatusChip({ good, children }) {
@@ -55,7 +48,10 @@ function ResultSummary({ result }) {
   if (!result) return null;
   const lineage = Array.isArray(result.lineage) ? result.lineage : [];
   const publication = result.publication || null;
-  const status = upper(result.status);
+  const status = upper(result.stage || result.status);
+  const candidatesAvailable = ["SUCCESS", "NO_CANDIDATES", "PRETRADE_PREFLIGHT_REQUIRED"].includes(status)
+    && Array.isArray(result.lineage);
+  const ambiguous = status === "RECOVERY_REQUIRED" && result.reason === "PROVIDER_OUTCOME_AMBIGUOUS";
 
   return (
     <section className="rounded border border-white/10 bg-ink-850/95 shadow-terminal">
@@ -64,7 +60,7 @@ function ResultSummary({ result }) {
           <p className="section-label">Latest SOD Result</p>
           <h3 className="text-lg font-semibold text-zinc-100">{result.sourceDate || "SOD"} · {status || "COMPLETE"}</h3>
         </div>
-        <StatusChip good={status === "READY_TO_PUBLISH" || status === "NO_CANDIDATES"}>
+        <StatusChip good={status === "SUCCESS" || status === "NO_CANDIDATES"}>
           {status === "PRETRADE_PREFLIGHT_REQUIRED" ? "PRETRADE PREFLIGHT REQUIRED" : status || "COMPLETE"}
         </StatusChip>
       </header>
@@ -72,7 +68,8 @@ function ResultSummary({ result }) {
       <div className="grid gap-3 p-4 lg:grid-cols-3">
         <div className="rounded border border-white/10 bg-black/10 p-3">
           <p className="section-label">Candidates</p>
-          <p className="mt-1 text-2xl font-bold text-zinc-100">{lineage.length}</p>
+          <p className="mt-1 text-2xl font-bold text-zinc-100">{candidatesAvailable ? lineage.length : "Unavailable"}</p>
+          {ambiguous && <p className="mt-1 text-sm text-amber-200">Candidates unavailable — provider outcome ambiguous</p>}
           <p className="mt-1 text-xs text-zinc-500">Lineage is metadata only; PRETRADE remains lifecycle authority.</p>
         </div>
         <div className="rounded border border-white/10 bg-black/10 p-3">
@@ -198,8 +195,8 @@ function TrustedChartSet({ sod }) {
   );
 }
 
-export default function SodWorkspace({ sod }) {
-  const [sourceDate, setSourceDate] = useState(localDateValue);
+export default function SodWorkspace({ sod, pretrade, onOpenPretrade }) {
+  const [sourceDate, setSourceDate] = useState("");
   const charts = Array.isArray(sod?.charts) ? sod.charts : [];
   const inputsReady = Boolean(sourceDate && charts.length > 0);
   const serviceReady = Boolean(
@@ -207,7 +204,10 @@ export default function SodWorkspace({ sod }) {
     && sod?.health?.providerConfigured === true
     && sod?.health?.chartIngestion === "IMMUTABLE_OPAQUE_REF",
   );
-  const canGenerate = serviceReady && inputsReady && !sod?.busy && !sod?.uploading;
+  const unresolvedRun = sod?.lastResult?.runId
+    && !["SUCCESS", "NO_CANDIDATES", "PRETRADE_PREFLIGHT_REQUIRED", "FAILED", "ABANDONED"].includes(sod.lastResult.stage);
+  const dateClaimed = unresolvedRun && sod.lastResult.sourceDate === sourceDate;
+  const canGenerate = serviceReady && inputsReady && !dateClaimed && !sod?.busy && !sod?.uploading;
 
   async function generate(mode) {
     if (!canGenerate) return;
@@ -224,6 +224,7 @@ export default function SodWorkspace({ sod }) {
 
   return (
     <div className="space-y-3">
+      <ManualCandidateImport pretrade={pretrade} onOpenPretrade={onOpenPretrade} />
       <section className="rounded border border-white/10 bg-ink-850/95 shadow-terminal">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
           <div>
@@ -271,6 +272,7 @@ export default function SodWorkspace({ sod }) {
             SOD source date
             <input
               type="date"
+              required
               value={sourceDate}
               onChange={(event) => setSourceDate(event.target.value)}
               className="mt-1 block rounded border border-white/10 bg-ink-900 px-2.5 py-2 font-mono text-xs text-zinc-200"
@@ -278,7 +280,10 @@ export default function SodWorkspace({ sod }) {
           </label>
           <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
             <div className="text-xs text-zinc-500">
-              {sod?.error ? <span className="text-amber-200">{sod.error}</span> : inputsReady ? `${charts.length} trusted chart(s) · ${sourceDate}` : "Add at least one trusted chart before generation."}
+              {dateClaimed ? <span className="text-amber-200">Resolve the existing run for {sourceDate} before starting another.</span>
+                : sod?.error ? <span className="text-amber-200">{sod.error}</span>
+                : !sourceDate ? "Select the chart session date before generation."
+                : inputsReady ? `${charts.length} trusted chart(s) · ${sourceDate}` : "Add at least one trusted chart before generation."}
             </div>
             <div className="flex gap-2">
               <button
@@ -305,6 +310,20 @@ export default function SodWorkspace({ sod }) {
       </section>
 
       <TrustedChartSet sod={sod} />
+      <section className="rounded border border-white/10 p-4 text-sm text-zinc-300">
+        <p>Provider {sod?.health?.providerLoaded ? "loaded" : "unavailable"} · Configuration {sod?.health?.providerConfigured ? "ready" : "missing"} · Model {sod?.health?.modelConfigured ? "configured" : "missing"} · Live acceptance {sod?.health?.liveAcceptanceValidated ? "validated" : "pending"}</p>
+        {(sod?.lastResult?.runId || sod?.pendingRun?.runId) && <p className="mt-2 break-all font-mono text-xs">Run {sod.lastResult?.runId || sod.pendingRun.runId} · {sod.lastResult?.stage || "Status unknown"} {sod.lastResult?.reason || ""}</p>}
+        {sod?.lastResult?.sourceDate && <p className="mt-2 text-xs">Recorded run source date: {sod.lastResult.sourceDate}</p>}
+        {sod?.lastResult?.providerDiagnostics && <p className="mt-2 text-xs">Provider diagnostic: {sod.lastResult.providerDiagnostics.errorCode || "Unavailable"}
+          {sod.lastResult.providerDiagnostics.elapsedMs != null && ` · ${sod.lastResult.providerDiagnostics.elapsedMs} ms elapsed`}
+          {sod.lastResult.providerDiagnostics.phase && ` · Last observed phase: ${sod.lastResult.providerDiagnostics.phase}`}</p>}
+        <div className="mt-3 flex gap-3">
+          {sod?.pendingRun && <button disabled={sod.busy} onClick={() => sod.resumeRun()?.catch(() => {})}>Resume saved run</button>}
+          {(sod?.lastResult?.runId || sod?.pendingRun?.runId) && <button onClick={() => sod.inspectRun(sod.lastResult?.runId || sod.pendingRun?.runId)}>Check run status</button>}
+          {sod?.lastResult?.stage === "RECOVERY_REQUIRED" && sod?.lastResult?.reason === "PROVIDER_OUTCOME_AMBIGUOUS" && <button disabled={sod.busy} onClick={sod.abandonRun}>Abandon ambiguous run</button>}
+        </div>
+      </section>
+
       <ResultSummary result={sod?.lastResult} />
     </div>
   );

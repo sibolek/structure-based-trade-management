@@ -45,9 +45,7 @@ function candidate(overrides = {}) {
       timezone: "America/New_York",
       session: "RTH",
     },
-    armPolicy: { requestedMode: "MANUAL", armAuthorized: false },
-    armAuthorized: false,
-    status: "WAITING",
+    armPolicy: { requestedMode: "MANUAL" },
     ...overrides,
   };
 }

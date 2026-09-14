@@ -1,3 +1,5 @@
+import { SYSTEM_CANDIDATE_ROOTS } from "./candidate-integrity-roots.mjs";
+import { canonicalJson as stableJson } from "./canonical-json.mjs";
 import crypto from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
@@ -60,6 +62,7 @@ const ENVELOPE_KEYS = new Set([
 ]);
 const SUBMISSION_KEYS = new Set(["submissionId", "submissionType", "preparedAt"]);
 const PROHIBITED_MANUAL_CANDIDATE_FIELDS = new Set([
+  ...SYSTEM_CANDIDATE_ROOTS,
   "contractVersion",
   "schemaVersion",
   "generatedAt",
@@ -102,16 +105,6 @@ function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
-function stableJson(value) {
-  if (Array.isArray(value)) return value.map(stableJson);
-  if (value && typeof value === "object") {
-    return Object.keys(value).sort().reduce((result, key) => {
-      result[key] = stableJson(value[key]);
-      return result;
-    }, {});
-  }
-  return value;
-}
 
 function deterministicHash(value) {
   return sha256(Buffer.from(JSON.stringify(stableJson(value)), "utf8"));

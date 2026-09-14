@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+import { createSodRunStore } from "../schwab-bridge/sod-run-store.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -63,6 +65,7 @@ function proposal() {
 
 function analysisRequest(chart) {
   return {
+    runId: crypto.randomUUID(),
     sourceDate: "2026-09-09",
     generationMode: "INITIAL",
     charts: [{
@@ -109,7 +112,10 @@ function pretradeFetch(snapshot = { candidates: [] }) {
 async function startApi({ provider, inboxPath, fetchImpl }) {
   const chartRoot = await fs.mkdtemp(path.join(os.tmpdir(), "executionos-sod-chart-store-"));
   const chartStore = createSodChartStore({ rootPath: chartRoot });
+  const runRoot = await fs.mkdtemp(path.join(os.tmpdir(), "sod-run-api-"));
+  const runStore = createSodRunStore({ rootPath: runRoot });
   const api = createSodOrchestrationApiServer({
+    runStore,
     provider,
     inboxPath,
     chartStore,
@@ -126,6 +132,8 @@ async function startApi({ provider, inboxPath, fetchImpl }) {
     ...api,
     baseUrl: `http://127.0.0.1:${address.port}`,
     async close() {
+      runStore.close();
+      await fs.rm(runRoot, { recursive: true, force: true });
       await new Promise((resolve, reject) => api.server.close((error) => error ? reject(error) : resolve()));
       await fs.rm(chartRoot, { recursive: true, force: true });
     },
@@ -173,6 +181,7 @@ test("SOD API requires exact browser origin and session before generation", asyn
         "content-type": "application/json",
       },
       body: JSON.stringify({
+        runId: crypto.randomUUID(),
         sourceDate: "2026-09-09",
         charts: [{ chartId: "fabricated", contentRef: "sod-chart:fabricated00" }],
       }),
@@ -228,7 +237,7 @@ test("SOD API ingests chart bytes, resolves opaque refs, renders deterministical
     assert.match(generated.payload.analysis.report.html, /NVDA/);
     assert.match(generated.payload.analysis.report.markdown, /Confirm VWAP reclaim and hold/);
     assert.match(generated.payload.analysis.dashboard.html, /Long Candidates/);
-    assert.deepEqual(pretrade.calls.map((item) => item.method), ["GET", "GET"]);
+    assert.deepEqual(pretrade.calls.map((item) => item.method), ["GET", "GET", "GET", "GET", "GET", "GET"]);
     assert.equal(Buffer.compare(providerResolvedChart.bytes, PNG_BYTES), 0);
     assert.equal("path" in providerResolvedChart, false);
 
@@ -265,6 +274,7 @@ test("SOD API rejects fabricated chart refs before any PRETRADE read", async () 
         "x-executionos-sod-session": "test-session-token",
       },
       body: JSON.stringify({
+        runId: crypto.randomUUID(),
         sourceDate: "2026-09-09",
         charts: [{ chartId: "chart-fabricated00", contentRef: "sod-chart:fabricated00" }],
       }),
@@ -311,4 +321,51 @@ test("SOD API returns valid rendered no-candidate analysis without creating a fe
     await api.close();
     await fs.rm(inbox, { recursive: true, force: true });
   }
+});
+
+test("SOD run status and abandonment preserve session auth; lost HTTP response replay is terminal", async () => {
+  const inbox = await fs.mkdtemp(path.join(os.tmpdir(), "sod-api-replay-"));
+  let calls = 0;
+  const api = await startApi({ provider: { async generate() { calls++; return { candidateProposals: [], artifactContent: sodArtifactContentFixture() }; } }, inboxPath: inbox, fetchImpl: pretradeFetch().fetchImpl });
+  try {
+    const chart = await uploadChart(api); const request = analysisRequest(chart);
+    const headers = { Origin: ALLOWED_ORIGIN, "content-type": "application/json", "x-executionos-sod-session": "test-session-token" };
+    const first = await getJson(`${api.baseUrl}/api/sod/generate`, { method: "POST", headers, body: JSON.stringify(request) });
+    const replay = await getJson(`${api.baseUrl}/api/sod/generate`, { method: "POST", headers, body: JSON.stringify(request) });
+    assert.deepEqual(replay.payload, first.payload); assert.equal(calls, 1);
+    const statusUrl = `${api.baseUrl}/api/sod/runs/${request.runId}`;
+    assert.equal((await getJson(statusUrl)).response.status, 403);
+    assert.equal((await getJson(statusUrl, { headers })).payload.stage, "NO_CANDIDATES");
+    assert.equal((await getJson(`${statusUrl}/abandon`, { method: "POST", headers })).payload.error, "SOD_RUN_ABANDON_NOT_ELIGIBLE");
+    const conflict = await getJson(`${api.baseUrl}/api/sod/generate`, { method: "POST", headers, body: JSON.stringify({ ...request, priorSodRef: "changed" }) });
+    assert.equal(conflict.response.status, 409); assert.equal(calls, 1);
+  } finally { await api.close(); await fs.rm(inbox, { recursive: true, force: true }); }
+});
+test("SOD API exposes ambiguous recovery and eligible explicit abandonment without leaking errors", async () => {
+  const inbox = await fs.mkdtemp(path.join(os.tmpdir(), "sod-api-abandon-"));
+  let calls = 0;
+  const api = await startApi({ provider: { async generate() { calls++; throw new Error("Authorization: Bearer private-secret /private/local/path"); } }, inboxPath: inbox, fetchImpl: pretradeFetch().fetchImpl });
+  try {
+    const chart = await uploadChart(api); const request = analysisRequest(chart);
+    const headers = { Origin: ALLOWED_ORIGIN, "content-type": "application/json", "x-executionos-sod-session": "test-session-token" };
+    const failed = await getJson(`${api.baseUrl}/api/sod/generate`, { method: "POST", headers, body: JSON.stringify(request) });
+    assert.equal(failed.response.status, 409); assert.equal(failed.payload.stage, "RECOVERY_REQUIRED");
+    assert.doesNotMatch(JSON.stringify(failed.payload), /private-secret|Bearer|\/private\/local/);
+    const statusUrl = `${api.baseUrl}/api/sod/runs/${request.runId}`;
+    assert.equal((await getJson(`${statusUrl}/abandon`, { method: "POST" })).response.status, 403);
+    assert.equal((await getJson(`${statusUrl}/abandon`, { method: "POST", headers })).payload.stage, "ABANDONED");
+    assert.equal((await getJson(`${api.baseUrl}/api/sod/generate`, { method: "POST", headers, body: JSON.stringify(request) })).payload.stage, "ABANDONED");
+    assert.equal(calls, 1);
+  } finally { await api.close(); await fs.rm(inbox, { recursive: true, force: true }); }
+});
+test("SOD health truthfully reports loaded but unconfigured provider without network", async () => {
+  const { createOpenAiSodProductionProvider } = await import("../schwab-bridge/sod-openai-production-provider.mjs");
+  const inbox = await fs.mkdtemp(path.join(os.tmpdir(), "sod-api-readiness-"));
+  const api = await startApi({ provider: createOpenAiSodProductionProvider({ env: {}, fetchImpl: async () => { throw new Error("network forbidden"); } }), inboxPath: inbox,
+    fetchImpl: async () => { throw new Error("PRETRADE health must not be called"); } });
+  try {
+    const { payload } = await getJson(`${api.baseUrl}/health`);
+    assert.equal(payload.providerLoaded, true); assert.equal(payload.providerConfigured, false);
+    assert.equal(payload.modelConfigured, false); assert.equal(payload.liveAcceptanceValidated, false);
+  } finally { await api.close(); await fs.rm(inbox, { recursive: true, force: true }); }
 });

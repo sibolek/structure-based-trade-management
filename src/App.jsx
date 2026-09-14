@@ -30,7 +30,7 @@ export default function App() {
 
       <div className={workspace === "SOD" ? "block" : "hidden"}>
         <div className="mx-auto max-w-7xl px-3 py-4 md:px-5">
-          <SodWorkspace sod={sod} />
+          <SodWorkspace sod={sod} pretrade={pretrade} onOpenPretrade={() => setWorkspace("PRETRADE")} />
         </div>
       </div>
 

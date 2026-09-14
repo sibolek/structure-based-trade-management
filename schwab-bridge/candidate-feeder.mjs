@@ -1,3 +1,4 @@
+import { SYSTEM_CANDIDATE_ROOTS } from "./candidate-integrity-roots.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import fsConstants from "node:fs";
@@ -272,6 +273,9 @@ export function validateCandidateBundle(bundle, bytes, {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
       errors.push(`candidates[${index}] must be an object`);
       continue;
+    }
+    for (const field of SYSTEM_CANDIDATE_ROOTS) {
+      if (Object.hasOwn(candidate, field)) errors.push(`candidates[${index}].${field} is system-owned authority`);
     }
     const candidateId = text(candidate.candidateId);
     if (!candidateId) errors.push(`candidates[${index}].candidateId is required`);

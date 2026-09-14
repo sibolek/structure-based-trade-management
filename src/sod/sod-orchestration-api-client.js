@@ -159,7 +159,7 @@ export function createSodOrchestrationApiClient({
   async function generate(generationRequest) {
     return authorizedRequest("/api/sod/generate", {
       method: "POST",
-      body: JSON.stringify(generationRequest || {}),
+      body: JSON.stringify({ ...generationRequest, runId: generationRequest?.runId || globalThis.crypto.randomUUID() }),
     });
   }
 
@@ -168,6 +168,8 @@ export function createSodOrchestrationApiClient({
     health,
     uploadChart,
     generate,
+    status: runId => authorizedRequest(`/api/sod/runs/${encodeURIComponent(runId)}`, { method: "GET" }),
+    abandon: runId => authorizedRequest(`/api/sod/runs/${encodeURIComponent(runId)}/abandon`, { method: "POST" }),
     resetSession() {
       sessionToken = null;
     },

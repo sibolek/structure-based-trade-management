@@ -1,3 +1,5 @@
+import { SYSTEM_CANDIDATE_ROOTS } from "./candidate-integrity-roots.mjs";
+import { SOD_PROVIDER_LIMITS, sodError } from "./sod-provider-validation.mjs";
 import { normalizeSodArtifactContent } from "./sod-artifact-content.mjs";
 
 export const SOD_ANALYSIS_SCHEMA_VERSION = 1;
@@ -6,6 +8,7 @@ export const SOD_GENERATION_REFRESH = "REFRESH";
 
 const GENERATION_MODES = new Set([SOD_GENERATION_INITIAL, SOD_GENERATION_REFRESH]);
 const FORBIDDEN_PROVIDER_CANDIDATE_FIELDS = new Set([
+  ...SYSTEM_CANDIDATE_ROOTS,
   "contractVersion",
   "generatedAt",
   "source",
@@ -110,6 +113,8 @@ export function buildSodAnalysisRequest(input = {}) {
     throw contractError("SOD analysis requires at least one chart reference", "SOD_ANALYSIS_CHARTS_REQUIRED");
   }
 
+  if (input.charts.length > SOD_PROVIDER_LIMITS.maxCharts) throw sodError("SOD_OPENAI_CHART_COUNT_LIMIT");
+
   return {
     schemaVersion: SOD_ANALYSIS_SCHEMA_VERSION,
     sourceDate,
@@ -193,50 +198,34 @@ function assertTrustedChartResolver(resolveChart) {
   return resolveChart;
 }
 
-async function buildProviderContext(request, { resolveChart = null } = {}) {
+async function buildProviderContext(request, contextOptions = {}) {
+  const { resolveChart = null } = contextOptions;
   const trustedResolver = assertTrustedChartResolver(resolveChart);
-  if (!trustedResolver) return Object.freeze({ resolveChart: null });
+  if (!trustedResolver) return Object.freeze({ resolveChart: null, beforeProviderRequest: contextOptions.beforeProviderRequest || null });
 
-  const trustedCharts = new Map();
-  for (const chart of request.charts) {
-    const resolved = await trustedResolver(chart.contentRef);
-    if (!resolved || typeof resolved !== "object") {
-      throw contractError("SOD chart resolver returned invalid result", "SOD_ANALYSIS_CHART_RESOLUTION_INVALID");
-    }
-    if (text(resolved.contentRef) !== chart.contentRef || text(resolved.chartId) !== chart.chartId) {
-      throw contractError(
-        "SOD chart resolver identity does not match analysis request",
-        "SOD_ANALYSIS_CHART_IDENTITY_MISMATCH",
-      );
-    }
-    if (!Buffer.isBuffer(resolved.bytes) && !(resolved.bytes instanceof Uint8Array)) {
-      throw contractError("SOD chart resolver must return chart bytes", "SOD_ANALYSIS_CHART_BYTES_INVALID");
-    }
-    trustedCharts.set(chart.contentRef, Object.freeze({
-      chartId: resolved.chartId,
-      contentRef: resolved.contentRef,
-      mediaType: text(resolved.mediaType),
-      byteLength: Number(resolved.byteLength),
-      sha256: text(resolved.sha256),
-      displayName: text(resolved.displayName) || null,
-      bytes: Buffer.from(resolved.bytes),
-    }));
-  }
-
+  const authorized = new Map(request.charts.map(chart => [chart.contentRef, chart]));
+  let totalBytes = 0;
+  const resolvedRefs = new Set();
   return Object.freeze({
     async resolveChart(contentRef) {
-      const resolved = trustedCharts.get(text(contentRef));
-      if (!resolved) {
-        throw contractError(
-          "Provider requested chart outside the trusted analysis request",
-          "SOD_ANALYSIS_CHART_NOT_AUTHORIZED",
-        );
+      const chart = authorized.get(contentRef);
+      if (!chart) throw contractError("Provider chart is not authorized", "SOD_ANALYSIS_CHART_NOT_AUTHORIZED");
+      if (resolvedRefs.has(contentRef)) throw contractError("Chart already resolved", "SOD_ANALYSIS_CHART_RESOLUTION_INVALID");
+      resolvedRefs.add(contentRef);
+      const resolved = await trustedResolver(contentRef);
+      if (!resolved || resolved.contentRef !== chart.contentRef || resolved.chartId !== chart.chartId) {
+        throw contractError("SOD chart identity mismatch", "SOD_ANALYSIS_CHART_IDENTITY_MISMATCH");
       }
+      if (!(resolved.bytes instanceof Uint8Array)) throw contractError("SOD chart bytes invalid", "SOD_ANALYSIS_CHART_BYTES_INVALID");
+      totalBytes += resolved.bytes.byteLength;
+      if (totalBytes > SOD_PROVIDER_LIMITS.maxChartBytes) throw sodError("SOD_OPENAI_CHART_BYTES_LIMIT");
       return Object.freeze({
-        ...resolved,
-        bytes: Buffer.from(resolved.bytes),
+        chartId: resolved.chartId, contentRef: resolved.contentRef, mediaType: resolved.mediaType,
+        byteLength: resolved.bytes.byteLength, sha256: resolved.sha256,
+        bytes: resolved.bytes,
       });
     },
+    beforeProviderRequest: contextOptions.beforeProviderRequest || null,
   });
 }
 

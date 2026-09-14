@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+import { createSodRunStore } from "../schwab-bridge/sod-run-store.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -62,6 +64,7 @@ function proposal(overrides = {}) {
 
 function request(chart) {
   return {
+    runId: crypto.randomUUID(),
     sourceDate: "2026-09-09",
     generationMode: "REFRESH",
     charts: [{ chartId: chart.chartId, contentRef: chart.contentRef }],
@@ -114,7 +117,10 @@ function pretradeFetch(snapshot) {
 async function start({ inbox, provider, snapshot = { candidates: [] } }) {
   const chartRoot = await fs.mkdtemp(path.join(os.tmpdir(), "executionos-sod-api-safety-charts-"));
   const chartStore = createSodChartStore({ rootPath: chartRoot });
+  const runRoot = await fs.mkdtemp(path.join(os.tmpdir(), "sod-run-api-"));
+  const runStore = createSodRunStore({ rootPath: runRoot });
   const api = createSodOrchestrationApiServer({
+    runStore,
     provider,
     inboxPath: inbox,
     chartStore,
@@ -129,6 +135,8 @@ async function start({ inbox, provider, snapshot = { candidates: [] } }) {
     baseUrl: `http://127.0.0.1:${port}`,
     chartStore,
     async close() {
+      runStore.close();
+      await fs.rm(runRoot, { recursive: true, force: true });
       await new Promise((resolve) => api.server.close(resolve));
       await fs.rm(chartRoot, { recursive: true, force: true });
     },

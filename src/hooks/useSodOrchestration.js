@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createSodOrchestrationApiClient,
   DEFAULT_SOD_ORCHESTRATION_URL,
 } from "../sod/sod-orchestration-api-client.js";
 
 const REFRESH_MS = 2000;
+const PENDING_RUN_KEY = "executionos-sod-pending-run-v1";
+function savedRun() {
+  try { return JSON.parse(localStorage.getItem(PENDING_RUN_KEY) || "null"); } catch { return null; }
+}
 
 function errorText(error) {
   return error?.code || error?.message || String(error);
@@ -20,6 +24,9 @@ export default function useSodOrchestration() {
   const [error, setError] = useState("");
   const [lastResult, setLastResult] = useState(null);
   const [charts, setCharts] = useState([]);
+  const [pendingRun, setPendingRun] = useState(savedRun);
+  const restoredRun = useRef(pendingRun);
+  const runOperation = useRef(0);
 
   const refreshNow = useCallback(async () => {
     const nextHealth = await client.health();
@@ -54,20 +61,56 @@ export default function useSodOrchestration() {
     setCharts((current) => current.filter((chart) => chart.contentRef !== contentRef));
   }, []);
 
-  const generate = useCallback(async (request) => {
+  const executeRun = useCallback(async (request) => {
+    const operation = ++runOperation.current;
     setBusy(true);
     setError("");
     try {
       const result = await client.generate(request);
+      if (operation !== runOperation.current) return result;
       setLastResult(result);
       setConnected(true);
       return result;
     } catch (err) {
+      if (operation !== runOperation.current) throw err;
       setError(errorText(err));
+      if (err.details?.runId || err.details?.activeRun) setLastResult(err.details.activeRun || err.details);
       throw err;
     } finally {
-      setBusy(false);
+      if (operation === runOperation.current) { ++runOperation.current; setBusy(false); }
     }
+  }, [client]);
+
+  const generate = useCallback(async (request) => {
+    const pending = { ...request, runId: globalThis.crypto.randomUUID() };
+    // Save operator intent before delivery. This is recovery convenience, never run authority.
+    localStorage.setItem(PENDING_RUN_KEY, JSON.stringify(pending));
+    setPendingRun(pending);
+    return executeRun(pending);
+  }, [executeRun]);
+  const inspectRun = useCallback(async (runId = pendingRun?.runId) => {
+    if (!runId) return;
+    const operation = runOperation.current;
+    try { const result = await client.status(runId); if (operation === runOperation.current) setLastResult(result); return result; }
+    catch (err) { if (operation !== runOperation.current) return; if (err.details?.runId) setLastResult(err.details); setError(errorText(err)); }
+  }, [client, pendingRun]);
+  const resumeRun = useCallback(() => pendingRun && executeRun(pendingRun), [pendingRun, executeRun]);
+  const abandonRun = useCallback(async () => {
+    ++runOperation.current;
+    try { const result = await client.abandon(lastResult?.runId); setLastResult(result); setError(""); }
+    catch (err) { setError(errorText(err)); }
+  }, [client, lastResult]);
+  useEffect(() => {
+    const runId = restoredRun.current?.runId;
+    if (!runId) return;
+    const operation = runOperation.current;
+    let active = true;
+    client.status(runId).then(result => {
+      if (active && operation === runOperation.current) setLastResult(result);
+    }).catch(err => {
+      if (active && operation === runOperation.current) setError(errorText(err));
+    });
+    return () => { active = false; };
   }, [client]);
 
   useEffect(() => {
@@ -80,7 +123,6 @@ export default function useSodOrchestration() {
         if (!active) return;
         setHealth(nextHealth);
         setConnected(true);
-        setError("");
       } catch (err) {
         if (!active) return;
         setConnected(false);
@@ -112,6 +154,7 @@ export default function useSodOrchestration() {
     removeChart,
     clearCharts: () => setCharts([]),
     generate,
+    pendingRun, inspectRun, resumeRun, abandonRun,
     clearResult: () => setLastResult(null),
   };
 }

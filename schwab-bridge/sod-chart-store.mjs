@@ -199,6 +199,8 @@ export function createSodChartStore({
     let metadata;
     let bytes;
     try {
+      const stat = await fs.stat(target.data);
+      if (stat.size > maxBytes) throw chartError("Chart exceeds per-file limit", "SOD_CHART_TOO_LARGE");
       const [metadataText, data] = await Promise.all([
         fs.readFile(target.metadata, "utf8"),
         fs.readFile(target.data),
@@ -228,8 +230,23 @@ export function createSodChartStore({
 
     return Object.freeze({
       ...publicDescriptor(metadata),
-      bytes: Buffer.from(bytes),
+      bytes,
     });
+  }
+
+  async function describe(chart) {
+    const id = idFromRef(chart?.contentRef);
+    const target = pathsFor(root, id);
+    try {
+      const stat = await fs.stat(target.metadata);
+      if (stat.size > 4096) throw new Error();
+      const metadata = JSON.parse(await fs.readFile(target.metadata, "utf8"));
+      if (metadata.contentRef !== chart.contentRef || metadata.chartId !== chart.chartId
+        || metadata.chartId !== `chart-${id}` || metadata.schemaVersion !== SOD_CHART_STORE_SCHEMA_VERSION
+        || !Number.isInteger(metadata.byteLength) || metadata.byteLength < 1 || metadata.byteLength > maxBytes
+        || !/^[a-f0-9]{64}$/.test(metadata.sha256)) throw new Error();
+      return publicDescriptor(metadata);
+    } catch { throw chartError("SOD chart reference unavailable", "SOD_CHART_REF_UNAVAILABLE"); }
   }
 
   async function assertChartReference(chart) {
@@ -249,5 +266,6 @@ export function createSodChartStore({
     ingest,
     resolve,
     assertChartReference,
+    describe,
   });
 }
