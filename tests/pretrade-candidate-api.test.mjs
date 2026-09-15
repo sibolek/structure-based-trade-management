@@ -81,7 +81,7 @@ async function startCandidateApi() {
     bundleId: "api-manual-supersession-v1",
     ingressPolicy: AUTOMATED_UNTOUCHED_ONLY,
   }));
-  const lifecycleCoordinator = new PreTradeLifecycleCoordinator({ store });
+  const lifecycleCoordinator = new PreTradeLifecycleCoordinator({ store, clock: () => "2026-09-10T13:02:00.000Z" });
   lifecycleCoordinator.reconcileAllValidity({ source: "TEST_SETUP_VALIDITY_RECONCILIATION" });
   const handler = createPreTradeCandidateApiHandler({
     candidateIngress: ingress,

@@ -66,7 +66,7 @@ function buildHarness({ blocked = true } = {}) {
     clock,
     idFactory: () => `ingress-event-${++eventCounter}`,
   });
-  const imported = ingress.importBundle({
+  const imported = ingress.importBundle({ ingressPolicy: "AUTOMATED_UNTOUCHED_ONLY",
     source: "SOD_A_PLUS_TRADES",
     bundleId: "blocked-handoff-retirement-test",
     candidates: [proposal("mes-old"), proposal("mes-new")],

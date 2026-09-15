@@ -33,15 +33,14 @@ function candidate(overrides = {}) {
     plannedEntryReference: 180.1,
     targets: [181, 182],
     managementPlan: { mode: "FLEXIBLE_WITHIN_CEILING" },
+    managementContract: { mode: "FLEXIBLE_WITHIN_CEILING" },
     validity: {
       validFrom: "2026-09-05T14:00:00.000Z",
       validUntil: "2026-09-05T20:00:00.000Z",
       timezone: "America/New_York",
       session: "RTH",
     },
-    armPolicy: { requestedMode: "MANUAL", armAuthorized: false },
-    armAuthorized: false,
-    status: "WAITING",
+    armPolicy: { requestedMode: "MANUAL" },
     ...overrides,
   };
 }
@@ -61,7 +60,7 @@ function fixture({ baseTime = "2026-09-05T14:01:00.000Z", candidateOverrides = {
     clock,
     idFactory: () => `ingress-${++eventId}`,
   });
-  const imported = ingress.importBundle({
+  const imported = ingress.importBundle({ ingressPolicy: "AUTOMATED_UNTOUCHED_ONLY",
     source: "SOD_A_PLUS_TRADES",
     bundleId: "api-fixture",
     candidates: [candidate(candidateOverrides)],

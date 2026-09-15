@@ -49,7 +49,7 @@ function harness(trigger) {
   const store = new PreTradeStore({ filePath });
   store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock, idFactory: () => `ingress-${++id}` });
-  const imported = ingress.importBundle({ source: "AD_HOC_CHATGPT", bundleId: "persistence-test", candidates: [candidate(trigger)] });
+  const imported = ingress.importBundle({ ingressPolicy: "MANUAL_AUTHORIZED", source: "AD_HOC_CHATGPT", bundleId: "persistence-test", candidates: [candidate(trigger)] });
   assert.equal(imported.outcomes[0].status, "ACCEPTED");
   const lifecycle = new PreTradeLifecycleCoordinator({ store, clock, idFactory: () => `lifecycle-${++id}` });
   const engine = new PreTradeTriggerEngine({ store, lifecycleCoordinator: lifecycle, clock, idFactory: () => `trigger-${++id}` });

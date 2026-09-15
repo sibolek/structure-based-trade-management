@@ -44,7 +44,7 @@ function harness({ state = "READY", clock = () => NOW } = {}) {
   const store = new PreTradeStore({ filePath: tempFile(), clock });
   store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock, idFactory: () => "ingress-1" });
-  ingress.importBundle({ source: "SOD_A_PLUS_TRADES", bundleId: "bundle-1", candidates: [proposal()] });
+  ingress.importBundle({ ingressPolicy: "AUTOMATED_UNTOUCHED_ONLY", source: "SOD_A_PLUS_TRADES", bundleId: "bundle-1", candidates: [proposal()] });
   const candidate = store.state.candidates[0];
   candidate.lifecycleState = state;
   candidate.stateRevision = 3;

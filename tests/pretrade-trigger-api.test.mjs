@@ -57,7 +57,7 @@ function fixture(candidateInput = candidate()) {
   const store = new PreTradeStore({ filePath });
   store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock, idFactory: () => `ingress-${++id}` });
-  const imported = ingress.importBundle({ source: candidateInput.source, bundleId: "trigger-api", candidates: [candidateInput] });
+  const imported = ingress.importBundle({ ingressPolicy: "MANUAL_AUTHORIZED", source: candidateInput.source, bundleId: "trigger-api", candidates: [candidateInput] });
   assert.equal(imported.outcomes[0].status, "ACCEPTED");
   const lifecycleCoordinator = new PreTradeLifecycleCoordinator({ store, clock, idFactory: () => `lifecycle-${++id}` });
   const triggerEngine = new PreTradeTriggerEngine({ store, lifecycleCoordinator, clock, idFactory: () => `trigger-${++id}` });

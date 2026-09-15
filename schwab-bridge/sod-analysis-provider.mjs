@@ -1,3 +1,4 @@
+import { SYSTEM_CANDIDATE_ROOTS } from "./candidate-integrity-roots.mjs";
 import { normalizeSodArtifactContent } from "./sod-artifact-content.mjs";
 
 export const SOD_ANALYSIS_SCHEMA_VERSION = 1;
@@ -6,6 +7,7 @@ export const SOD_GENERATION_REFRESH = "REFRESH";
 
 const GENERATION_MODES = new Set([SOD_GENERATION_INITIAL, SOD_GENERATION_REFRESH]);
 const FORBIDDEN_PROVIDER_CANDIDATE_FIELDS = new Set([
+  ...SYSTEM_CANDIDATE_ROOTS,
   "contractVersion",
   "generatedAt",
   "source",

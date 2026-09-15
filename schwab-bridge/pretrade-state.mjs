@@ -1,3 +1,5 @@
+import { assertCanonicalCandidateIntegrity } from "./pretrade-candidate-contract.mjs";
+import { canonicalJson as canonicalize } from "./canonical-json.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -79,18 +81,6 @@ export function canonicalLifecycleState(value) {
   return value === LEGACY_TRIGGER_EVALUATING ? PRETRADE_TRIGGER_EVALUATING : value;
 }
 
-function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value && typeof value === "object") {
-    return Object.keys(value)
-      .sort()
-      .reduce((result, key) => {
-        result[key] = canonicalize(value[key]);
-        return result;
-      }, {});
-  }
-  return value;
-}
 
 export function contentHash(value) {
   return crypto
@@ -630,6 +620,7 @@ export class PreTradeStore {
   load() {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+      for (const candidate of parsed.candidates || []) assertCanonicalCandidateIntegrity(candidate);
       this.state = normalizeState(parsed);
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;

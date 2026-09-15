@@ -1,3 +1,4 @@
+import { canonicalJson as stableJson } from "./canonical-json.mjs";
 import crypto from "node:crypto";
 import {
   MANUAL_SUPERSESSION_AUTHORIZATION_AUTHORITY,
@@ -20,6 +21,7 @@ import {
 } from "./pretrade-state.mjs";
 import {
   assertCanonicalCandidateIntegrity,
+  CANDIDATE_INTEGRITY_FORMAT_VERSION,
   buildCanonicalContractAuthority,
   canonicalCandidateContent,
   candidateContractHash,
@@ -301,18 +303,6 @@ function reviewContent(candidate) {
   return content;
 }
 
-function stableJson(value) {
-  if (Array.isArray(value)) return value.map(stableJson);
-  if (value && typeof value === "object") {
-    return Object.keys(value)
-      .sort()
-      .reduce((result, key) => {
-        result[key] = stableJson(value[key]);
-        return result;
-      }, {});
-  }
-  return value;
-}
 
 function valuesEqual(left, right) {
   return JSON.stringify(stableJson(left)) === JSON.stringify(stableJson(right));
@@ -336,7 +326,7 @@ function diffReviewContent(prior, proposed, prefix = "") {
   }
   const keys = [...new Set([...Object.keys(prior), ...Object.keys(proposed)])].sort();
   return keys.flatMap((key) => (
-    diffReviewContent(prior[key], proposed[key], prefix ? `${prefix}.${key}` : key)
+    diffReviewContent(Object.hasOwn(prior, key) ? prior[key] : undefined, Object.hasOwn(proposed, key) ? proposed[key] : undefined, prefix ? `${prefix}.${key}` : key)
   ));
 }
 
@@ -1093,6 +1083,9 @@ export class PreTradeCandidateIngress {
       }
     }
 
+    const contractAuthority = buildCanonicalContractAuthority({
+      contentHash: hash, bundleSource, bundleId, acceptedAt: importedAt, admittedContent: normalized,
+    });
     const acceptanceOperationId = `INGRESS_ACCEPT:${normalized.candidateId}:v${normalized.contractVersion}:${hash}`;
     const acceptanceEventId = this.idFactory();
     const acceptanceEvent = {
@@ -1114,7 +1107,7 @@ export class PreTradeCandidateIngress {
         candidateContentHash: hash,
         ...(ingressPolicy ? { ingressPolicy } : {}),
       },
-      metadata: null,
+      metadata: { candidateIntegrityVersion: CANDIDATE_INTEGRITY_FORMAT_VERSION, candidateManifestHash: contractAuthority.integrity.manifestHash },
     };
 
     const acceptanceOperation = {
@@ -1139,15 +1132,11 @@ export class PreTradeCandidateIngress {
       },
     };
 
-    this.store.state.candidates.push({
+    const admittedCandidate = {
       ...normalized,
       contentHash: hash,
-      contractAuthority: buildCanonicalContractAuthority({
-        contentHash: hash,
-        bundleSource,
-        bundleId,
-        acceptedAt: importedAt,
-      }),
+      contractAuthority,
+      candidateIntegrityVersion: CANDIDATE_INTEGRITY_FORMAT_VERSION,
       lifecycleState: "WAITING",
       stateRevision: 0,
       lifecycleJournal: {
@@ -1171,7 +1160,9 @@ export class PreTradeCandidateIngress {
       currentDssEvaluationStaleReason: null,
       currentDssEvaluationStaleBarTimestamp: null,
       arm: null,
-    });
+    };
+    assertCanonicalCandidateIntegrity(admittedCandidate);
+    this.store.state.candidates.push(admittedCandidate);
 
     return {
       candidateId: normalized.candidateId,

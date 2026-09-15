@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { LEGACY_CANONICAL_AUTHORITY_ROOTS, SYSTEM_CANDIDATE_ROOTS } from "./candidate-integrity-roots.mjs";
 import { PRETRADE_SCHEMA_VERSION, contentHash } from "./pretrade-state.mjs";
 import { normalizeTriggerContract } from "./pretrade-trigger-contract.mjs";
 
@@ -15,90 +17,8 @@ export const CANDIDATE_STRUCTURAL_LIMITS = Object.freeze({
   maxStringBytes: 64 * 1024,
 });
 
-const CANONICAL_AUTHORITY_FIELDS = new Set([
-  "contentHash",
-  "contractAuthority",
-  "lifecycleState",
-  "status",
-  "stateRevision",
-  "lifecycleJournal",
-  "lifecycleEvents",
-  "lifecycleOperations",
-  "importedAt",
-  "supersededAt",
-  "supersededByVersion",
-  "lastLifecycleMutationAt",
-  "evaluation",
-  "prerequisiteStatus",
-  "activation",
-  "triggerSatisfaction",
-  "permissionEvaluationStatus",
-  "permissionBlocker",
-  "currentPermissionOutcome",
-  "recoveryGate",
-  "currentDssEvaluationId",
-  "currentDssEvaluationStale",
-  "currentDssEvaluationStaleAt",
-  "currentDssEvaluationStaleReason",
-  "currentDssEvaluationStaleBarTimestamp",
-  "runtimeOnlyMarker",
-  "armAuthorized",
-  "arm",
-  "armState",
-  "handoff",
-  "handoffAuthority",
-  "permissionOutcome",
-  "riskEvaluation",
-  "authorizedDssEvaluationId",
-  "authorizedRiskEvaluationId",
-  "selectedQuantity",
-  "executionState",
-  "authorizationId",
-  "declineId",
-  "reviewId",
-  "manualSupersessionReviews",
-  "manualSupersessionReview",
-  "manualSupersessionAuthorizations",
-  "manualSupersessionAuthorization",
-  "manualSupersessionDeclines",
-  "manualSupersessionDecline",
-  "manualSupersessionApproval",
-  "manualApproved",
-  "forceImport",
-  "supersessionApproved",
-]);
-
-const PROHIBITED_AUTHORITY_FIELDS = new Set([
-  "contentHash",
-  "contractAuthority",
-  "lifecycleState",
-  "status",
-  "stateRevision",
-  "armAuthorized",
-  "arm",
-  "armState",
-  "handoff",
-  "handoffAuthority",
-  "permissionOutcome",
-  "riskEvaluation",
-  "authorizedDssEvaluationId",
-  "authorizedRiskEvaluationId",
-  "selectedQuantity",
-  "executionState",
-  "authorizationId",
-  "declineId",
-  "reviewId",
-  "manualSupersessionReviews",
-  "manualSupersessionReview",
-  "manualSupersessionAuthorizations",
-  "manualSupersessionAuthorization",
-  "manualSupersessionDeclines",
-  "manualSupersessionDecline",
-  "manualSupersessionApproval",
-  "manualApproved",
-  "forceImport",
-  "supersessionApproved",
-]);
+const CANONICAL_AUTHORITY_FIELDS = new Set(LEGACY_CANONICAL_AUTHORITY_ROOTS);
+const PROHIBITED_AUTHORITY_FIELDS = new Set(SYSTEM_CANDIDATE_ROOTS);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -404,29 +324,152 @@ export function normalizeCanonicalCandidateProposal(input, { bundleSource = null
   return { normalized, errors: [...new Set(errors)] };
 }
 
-export function canonicalCandidateContent(candidate) {
+export const CANDIDATE_INTEGRITY_FORMAT_VERSION = 1;
+const MANIFEST_AUTHORITY_SCHEMA_VERSION = 2;
+
+function integrityError(message) {
+  const error = new Error(message);
+  error.code = "CANDIDATE_CONTRACT_INTEGRITY_ERROR";
+  return error;
+}
+
+function admissionEvent(candidate) {
+  const journalEvents = candidate?.lifecycleJournal?.events;
+  const splitEvents = candidate?.lifecycleEvents;
+  const events = [...(Array.isArray(journalEvents) ? journalEvents : []), ...(Array.isArray(splitEvents) ? splitEvents : [])]
+    .filter(event => event?.eventType === "CANDIDATE_ACCEPTED");
+  if (events.length > 1) throw integrityError("contradictory candidate admission anchors");
+  return events[0];
+}
+
+function hasIntegrityRepresentation(candidate) {
+  return Object.hasOwn(candidate || {}, "candidateIntegrityVersion")
+    || Object.hasOwn(candidate?.contractAuthority || {}, "integrity")
+    || candidate?.contractAuthority?.schemaVersion === MANIFEST_AUTHORITY_SCHEMA_VERSION
+    || admissionEvent(candidate)?.metadata?.candidateIntegrityVersion !== undefined;
+}
+
+function legacyContent(candidate) {
   const content = clone(candidate || {});
   for (const field of CANONICAL_AUTHORITY_FIELDS) delete content[field];
   return content;
+}
+
+function hasAmbiguousLegacyKeys(value) {
+  if (!value || typeof value !== "object") return false;
+  return Object.hasOwn(value, "__proto__") || Object.values(value).some(hasAmbiguousLegacyKeys);
+}
+
+function integrityBinding(candidate, authority) {
+  return {
+    candidateId: candidate.candidateId,
+    contractVersion: candidate.contractVersion,
+    schemaVersion: candidate.schemaVersion,
+    authority: authority.authority,
+    contentHash: candidate.contentHash ?? authority.contentHash,
+    bundleSource: authority.bundleSource,
+    bundleId: authority.bundleId,
+    acceptedAt: authority.acceptedAt,
+  };
+}
+
+function makeIntegrity(candidate, authority, mode) {
+  const body = {
+    version: CANDIDATE_INTEGRITY_FORMAT_VERSION,
+    mode,
+    roots: Object.keys(candidate).sort(),
+    binding: integrityBinding(candidate, authority),
+  };
+  return { ...body, manifestHash: contentHash(body) };
+}
+
+// A future runtime writer must check ownership before touching an optional root.
+// Unknown post-admission roots never enlarge the admitted hash domain.
+export function assertCandidateRuntimeRootOwnership(candidate, root) {
+  if (hasIntegrityRepresentation(candidate)) {
+    const integrity = validatedIntegrity(candidate);
+    if (integrity.roots.includes(root)) throw integrityError(`runtime root collides with admitted contract: ${root}`);
+  } else if (!CANONICAL_AUTHORITY_FIELDS.has(root) && Object.hasOwn(candidate || {}, root)) {
+    throw integrityError(`unproven legacy runtime ownership: ${root}`);
+  }
+}
+
+function validatedIntegrity(candidate) {
+  const authority = candidate?.contractAuthority;
+  const integrity = authority?.integrity;
+  const fail = () => { throw integrityError("invalid or downgraded admission-domain integrity metadata"); };
+  if (candidate?.candidateIntegrityVersion !== CANDIDATE_INTEGRITY_FORMAT_VERSION
+    || authority?.authority !== CANONICAL_CANDIDATE_CONTRACT_AUTHORITY
+    || authority.schemaVersion !== MANIFEST_AUTHORITY_SCHEMA_VERSION
+    || Object.keys(authority).sort().join(",") !== "acceptedAt,authority,bundleId,bundleSource,contentHash,integrity,schemaVersion"
+    || !integrity || integrity.version !== CANDIDATE_INTEGRITY_FORMAT_VERSION
+    || !["ADMISSION", "LEGACY_PROOF"].includes(integrity.mode)) fail();
+  try { assertJsonStructuralSafety(integrity); } catch { fail(); }
+  if (Object.keys(integrity).sort().join(",") !== "binding,manifestHash,mode,roots,version") fail();
+  const roots = integrity.roots;
+  if (!Array.isArray(roots) || !roots.length || roots.length > CANDIDATE_STRUCTURAL_LIMITS.maxObjectKeys
+    || roots.some((root, index) => typeof root !== "string"
+      || (index > 0 && roots[index - 1] >= root)
+      || SYSTEM_CANDIDATE_ROOTS.includes(root) || !Object.hasOwn(candidate, root))) fail();
+  for (const field of ["candidateId", "contractVersion", "schemaVersion"]) if (!roots.includes(field)) fail();
+  const { manifestHash, ...body } = integrity;
+  if (contentHash(body) !== manifestHash
+    || contentHash(integrity.binding) !== contentHash(integrityBinding(candidate, authority))
+    || candidate.contentHash !== authority.contentHash) fail();
+  const event = admissionEvent(candidate);
+  if (!event || event.source !== "CANDIDATE_INGRESS" || event.beforeState !== null || event.afterState !== "WAITING"
+    || event.resultingRevision !== 0 || event.provenance?.candidateSource !== candidate.source
+    || event.candidateId !== candidate.candidateId || event.contractVersion !== candidate.contractVersion
+    || event.provenance?.candidateContentHash !== candidate.contentHash
+    || event.provenance?.bundleId !== authority.bundleId
+    || event.provenance?.bundleSource !== authority.bundleSource
+    || event.occurredAt !== authority.acceptedAt) fail();
+  if (integrity.mode === "ADMISSION") {
+    if (event.metadata?.candidateIntegrityVersion !== CANDIDATE_INTEGRITY_FORMAT_VERSION
+      || event.metadata?.candidateManifestHash !== manifestHash) fail();
+  } else if (event.metadata?.candidateIntegrityVersion !== undefined) fail();
+  return integrity;
+}
+
+export function canonicalCandidateContent(candidate) {
+  if (hasIntegrityRepresentation(candidate)) {
+    const { roots } = validatedIntegrity(candidate);
+    const projection = Object.fromEntries(roots.map(root => [root, clone(candidate[root])]));
+    try { assertJsonStructuralSafety(projection); } catch { throw integrityError("invalid admitted JSON subtree"); }
+    return projection;
+  }
+  if (Object.hasOwn(candidate || {}, "contractAuthority")) {
+    if (candidate.contractAuthority?.authority !== CANONICAL_CANDIDATE_CONTRACT_AUTHORITY
+      || candidate.contractAuthority?.schemaVersion !== CANONICAL_CANDIDATE_CONTRACT_SCHEMA_VERSION) {
+      throw integrityError("unsupported canonical authority representation");
+    }
+    if (hasAmbiguousLegacyKeys(legacyContent(candidate))) throw integrityError("legacy hash cannot prove special-key completeness");
+  }
+  return legacyContent(candidate);
 }
 
 export function candidateContractHash(candidate) {
   return contentHash(canonicalCandidateContent(candidate));
 }
 
-export function buildCanonicalContractAuthority({ contentHash: hash, bundleSource, bundleId, acceptedAt } = {}) {
-  return {
+// Omitting admittedContent constructs the frozen v1 representation for explicit
+// compatibility callers. Production ingress always supplies admittedContent.
+export function buildCanonicalContractAuthority({ contentHash: hash, bundleSource, bundleId, acceptedAt, admittedContent } = {}) {
+  const authority = {
     authority: CANONICAL_CANDIDATE_CONTRACT_AUTHORITY,
-    schemaVersion: CANONICAL_CANDIDATE_CONTRACT_SCHEMA_VERSION,
+    schemaVersion: admittedContent ? MANIFEST_AUTHORITY_SCHEMA_VERSION : CANONICAL_CANDIDATE_CONTRACT_SCHEMA_VERSION,
     contentHash: text(hash),
     bundleSource: upper(bundleSource),
     bundleId: text(bundleId),
     acceptedAt: text(acceptedAt),
   };
+  if (admittedContent) authority.integrity = makeIntegrity(admittedContent, authority, "ADMISSION");
+  return authority;
 }
 
 export function isCanonicalCandidate(candidate) {
-  return candidate?.contractAuthority?.authority === CANONICAL_CANDIDATE_CONTRACT_AUTHORITY;
+  // Damaged authority must never be interpreted as an unmanaged legacy record.
+  return hasIntegrityRepresentation(candidate) || Object.hasOwn(candidate || {}, "contractAuthority");
 }
 
 export function assertCanonicalCandidateIntegrity(candidate) {
@@ -434,16 +477,56 @@ export function assertCanonicalCandidateIntegrity(candidate) {
   const expected = text(candidate.contentHash);
   const actual = candidateContractHash(candidate);
   if (!expected || expected !== actual || text(candidate.contractAuthority?.contentHash) !== expected) {
-    const error = new Error("canonical candidate contract content no longer matches its accepted immutable hash");
-    error.code = "CANDIDATE_CONTRACT_INTEGRITY_ERROR";
-    error.details = { expectedContentHash: expected || null, actualContentHash: actual };
-    throw error;
+    throw integrityError("canonical candidate contract content no longer matches its accepted immutable hash");
   }
   return { canonical: true, contentHash: actual };
 }
 
+// Explicit pure upgrade boundary; never called by reads, normalization or load.
+// The fixed v1 projection and retained acceptance event must both prove the
+// original hash. No runtime roots are guessed/stripped, and history is unchanged.
+export function upgradeLegacyCanonicalCandidateIntegrity(candidate) {
+  if (hasIntegrityRepresentation(candidate) || !isCanonicalCandidate(candidate)) {
+    throw integrityError("explicit upgrade requires a supported legacy canonical record");
+  }
+  assertCanonicalCandidateIntegrity(candidate);
+  const event = admissionEvent(candidate);
+  const operations = candidate.lifecycleJournal?.operations ?? candidate.lifecycleOperations;
+  const operationId = `INGRESS_ACCEPT:${candidate.candidateId}:v${candidate.contractVersion}:${candidate.contentHash}`;
+  const operationsForAdmission = Array.isArray(operations) ? operations.filter(operation => operation.operationId === operationId) : [];
+  const operation = operationsForAdmission[0];
+  const expectedOperationHash = createHash("sha256").update(JSON.stringify({
+    action: "ACCEPT_CANDIDATE", candidateId: candidate.candidateId,
+    contractVersion: candidate.contractVersion, contentHash: candidate.contentHash,
+  })).digest("hex");
+  if (event?.operationId !== operationId || operationsForAdmission.length !== 1
+    || (operation?.operationHash || operation?.fingerprint) !== expectedOperationHash
+    || (operation?.fingerprint && operation.fingerprint !== expectedOperationHash)
+    || operation?.result?.candidateId !== candidate.candidateId
+    || operation?.result?.contractVersion !== candidate.contractVersion
+    || operation?.result?.stateRevision !== 0 || operation?.result?.lifecycleState !== "WAITING"
+    || operationsForAdmission[0].action !== "ACCEPT_CANDIDATE"
+    || operationsForAdmission[0].candidateId !== candidate.candidateId
+    || operationsForAdmission[0].contractVersion !== candidate.contractVersion
+    || operationsForAdmission[0].result?.eventId !== event.eventId
+    || operationsForAdmission[0].committedAt !== candidate.contractAuthority.acceptedAt) {
+    throw integrityError("legacy admission operation proof is missing or contradictory");
+  }
+  const projection = legacyContent(candidate);
+  if (hasAmbiguousLegacyKeys(projection) || Object.keys(projection).some(root => SYSTEM_CANDIDATE_ROOTS.includes(root))) {
+    throw integrityError("legacy admitted substance is ambiguous or collides with runtime ownership");
+  }
+  const upgraded = clone(candidate);
+  upgraded.candidateIntegrityVersion = CANDIDATE_INTEGRITY_FORMAT_VERSION;
+  upgraded.contractAuthority.schemaVersion = MANIFEST_AUTHORITY_SCHEMA_VERSION;
+  upgraded.contractAuthority.integrity = makeIntegrity(projection, upgraded.contractAuthority, "LEGACY_PROOF");
+  assertCanonicalCandidateIntegrity(upgraded);
+  return upgraded;
+}
+
 export function candidateValidityStatusAt(candidate, at) {
   if (!isCanonicalCandidate(candidate)) return { status: "UNMANAGED_LEGACY", validFrom: null, validUntil: null };
+  assertCanonicalCandidateIntegrity(candidate);
   const now = Date.parse(String(at ?? ""));
   const validFrom = Date.parse(String(candidate?.validity?.validFrom ?? ""));
   const validUntil = Date.parse(String(candidate?.validity?.validUntil ?? ""));
