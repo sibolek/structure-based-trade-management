@@ -29,15 +29,25 @@ The accepted V2.4 implementation is merged to `main` and includes:
 4. Effective-Stop Risk Sizing;
 5. PRETRADE → ARM → Execution Board handoff integration;
 6. TODO #18 structural-evidence UX enforcement;
-7. TODO #19 PRETRADE quantity-safety policy.
+7. TODO #19 PRETRADE quantity-safety policy;
+8. accepted manual SOD / trade-card ingestion carried forward from its September 11 checkpoint;
+9. Decision 28 admission-anchored candidate integrity;
+10. Manual Candidate Import with local Preview and explicit canonical PRETRADE admission;
+11. Manual SOD individual candidate deliverables with top-level `ingressPolicy: "MANUAL_AUTHORIZED"`.
 
-Final merged implementation checkpoint:
+Last runtime/code checkpoint:
 
 ```text
-26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
+885ee94110e6a91352796c340e6ca40d6d775aff
 ```
 
-Subsequent documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint.
+Final integrated `main` tip after the production-core status documentation:
+
+```text
+c23faf5c08f3ba60339197be3687fcad37db0e4b
+```
+
+The September 15 fast-forward includes the accepted predecessor history plus Decision 28 integrity, Manual Candidate Import, and Manual SOD individual deliverables. Later documentation-only commits may advance `main` without changing the runtime/code checkpoint. The September 8 handoff checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains historical acceptance evidence.
 
 The former feature branch:
 
@@ -60,6 +70,7 @@ Implementation closeouts:
 ```text
 docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md
 docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md
+docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md
 ```
 
 Governing invariant:
@@ -68,12 +79,23 @@ Governing invariant:
 
 ---
 
+## Current manual SOD workflow
+
+Manual ChatGPT SOD is the current production-generation workflow. Deliver each finalized candidate as an individual one-candidate JSON bundle with top-level `"ingressPolicy": "MANUAL_AUTHORIZED"`, preserving the candidate payload and provenance. See the [Manual SOD Deliverable Specification](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md).
+
+In SOD, **Import Candidate JSON** accepts file selection, paste, or drag-and-drop. Preview is local inspection only; explicit **Import into PRETRADE** asks canonical PRETRADE to validate and admit the candidate. Valid new admission returns `ACCEPTED` / `WAITING`; an unchanged retry returns `DUPLICATE` and uses the existing candidate without resetting its lifecycle.
+
+Import grants no activation, permission, risk approval, ARM, Execution Board trade/handoff, execution ownership, or broker-write authority. Existing permission/risk checks, operator review, quantity selection, and manual ARM precede Execution Board handoff. Automated Production SOD is **deferred / not production-accepted**, with post-base automation work preserved separately at `593f4dd` on `v24-sod-production-analysis-provider`.
+
 ## Accepted end-to-end lifecycle
 
 ```text
-CANDIDATE SOURCE
-→ CANONICAL INGRESS
-→ WAITING
+MANUAL CHATGPT SOD
+→ INDIVIDUAL ONE-CANDIDATE JSON BUNDLE
+  (top-level ingressPolicy: MANUAL_AUTHORIZED)
+→ MANUAL CANDIDATE IMPORT / PREVIEW
+→ EXPLICIT IMPORT
+→ CANONICAL PRETRADE: ACCEPTED / WAITING
 → PRETRADE_TRIGGER_EVALUATING
 → PERMISSION_EVALUATING
 → READY / CAUTION / PASS
@@ -104,6 +126,8 @@ Imported `WAITING` candidates remain proposals until the explicit operator/serve
 ### PRETRADE / ARM
 
 - canonical candidate validity, hashing, versioning and supersession;
+- Decision 28 admission-anchored integrity protects substantive candidate JSON, including optional content; missing or contradictory integrity evidence fails closed;
+- Manual Candidate Import and individual manual-SOD deliverables preserve canonical admission and downstream authority boundaries;
 - versioned trigger contract and durable satisfaction evidence;
 - immutable permission attempts;
 - structural-validity authority;
@@ -347,6 +371,7 @@ Phase 4 supports normalized futures sizing calculations. Live NinjaTrader fill b
 
 ## Current deferred work
 
+- automated Production SOD: deferred / not production-accepted; manual ChatGPT SOD is the current production-generation workflow;
 - broker order placement/replacement/cancellation/modification/flattening;
 - general broker-write Governor enforcement;
 - buying-power/margin eligibility and portfolio-heat gates;
@@ -359,7 +384,13 @@ V3 has not started.
 
 ---
 
-## Final acceptance evidence
+## Acceptance evidence
+
+### September 15 production-core integration
+
+The [production-core manual-SOD final merge closeout](docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md) records the five-commit lineage, prior validation results, fast-forward to `main`, and deferred-automation isolation. Final full Node validation recorded **1004 passed of 1006**, with two environment-gated Schwab probe failures; full browser validation was **26/26**, and the production build passed. These are recorded implementation results, not fresh runtime tests from this documentation update.
+
+### Historical September 8 handoff acceptance
 
 September 6 closeout evidence remains preserved in the historical handoff-integration closeout. Final September 8 acceptance added TODO #18/#19 completion and reran the comprehensive pre-merge regression/build sequence successfully.
 
@@ -419,6 +450,7 @@ Use:
 - `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` — approved PRETRADE quantity-safety policy supplement;
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` — accepted Slices 1–7 implementation evidence;
 - `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` — final merge/TODO/regression/repository-closeout evidence;
+- `docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md` — September 15 integration, validation, authority, and deferred-automation disposition;
 - Phase 3/4 closeouts — subsystem acceptance evidence;
 - `docs/ExecutionOS_EOD_Report.md` — reporting semantics.
 

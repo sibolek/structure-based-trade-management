@@ -10,7 +10,7 @@ This file distinguishes current authoritative project records from historical pl
 
 ### `USER-GUIDE.md`
 
-Living operator guide for the accepted V2.4 system now merged to `main`.
+Living operator guide v1.8.0, dated 15 September 2026, for the accepted manual-SOD → PRETRADE → manual ARM → Execution Board production core on `main`; `README.md` and the generated PDF reflect the same operating state.
 
 Stable operating branch:
 
@@ -22,11 +22,11 @@ Release distinction:
 
 - V2.4 Phases 1–4 are merged to `main`;
 - the accepted PRETRADE → ARM → Execution Board integration is also merged to `main`;
-- final merged implementation checkpoint: `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`;
+- last runtime/code checkpoint: `885ee94110e6a91352796c340e6ca40d6d775aff`; final integrated main tip: `c23faf5c08f3ba60339197be3687fcad37db0e4b`;
 - subsequent documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint;
 - the former feature branch `v24-execution-board-handoff` has been retired and deleted;
-- accepted SOD orchestration/rendering lineage and manual-ingestion functionality are carried forward on `v24-production-core-manual-sod`; automated Production SOD is deferred and is not a production-accepted workflow;
-- production-core validation is complete at `885ee94110e6a91352796c340e6ca40d6d775aff`; Manual Candidate Import and Manual SOD individual deliverables are validated for integration to `main`.
+- accepted predecessor SOD orchestration/rendering lineage and manual-ingestion functionality were carried forward through `v24-production-core-manual-sod` and fast-forward merged to `main`; automated Production SOD remains deferred / not production-accepted;
+- Decision 28 admission integrity, Manual Candidate Import, and Manual SOD individual deliverables are validated and merged; see [the September 15 final merge closeout](docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md).
 
 ### Current frozen / approved design authority
 
@@ -48,6 +48,8 @@ The v0.5 baseline supersedes conflicting earlier top-level design assumptions. E
 The roadmap checkpoint is current product-planning authority. It is not a frozen technical design baseline, analytics implementation authority, implementation evidence, release evidence, or user acceptance.
 
 ### Accepted implementation / closeout records
+
+- `docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md` — current production-core lineage, validation, fast-forward, and deferred-automation isolation.
 
 - `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md`.
 - `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md`.
@@ -77,13 +79,10 @@ Legacy/manual V2.3 remains the frozen downstream reference. V2.4-origin trades u
 - Phase 4 Effective-Stop Risk Sizing — **COMPLETE / ACCEPTED / MERGED via PR #14**;
 - PRETRADE → ARM → Execution Board handoff integration — **COMPLETE / ACCEPTED / MERGED**;
 - TODO #18 structural-evidence UX enforcement — **COMPLETE / CLOSED**;
-- TODO #19 PRETRADE quantity-safety policy — **COMPLETE / CLOSED**.
+- TODO #19 PRETRADE quantity-safety policy — **COMPLETE / CLOSED**;
+- Decision 28 admission integrity, Manual Candidate Import, and Manual SOD individual deliverables — **VALIDATED / MERGED**.
 
-Final merged implementation checkpoint:
-
-```text
-26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
-```
+Last runtime/code checkpoint: `885ee94110e6a91352796c340e6ca40d6d775aff`. Final integrated main tip: `c23faf5c08f3ba60339197be3687fcad37db0e4b`. The September 8 handoff implementation checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains historical evidence.
 
 Status:
 
@@ -137,7 +136,7 @@ Not yet complete:
 
 Substantial OpenAI Responses adapter, production HTTP transport, provider-module wiring, browser initiation, structured output, and mocked tests already exist. That code is starting implementation, not an accepted production capability under the hardening baseline.
 
-Manual ChatGPT Start-of-Day generation is the current production SOD-generation workflow. The validated `v24-production-core-manual-sod` branch provides Manual Candidate Import and Manual SOD individual candidate deliverables and is the current integration candidate for `main`.
+Manual ChatGPT Start-of-Day generation is the current production SOD-generation workflow. Manual Candidate Import and Manual SOD individual candidate deliverables are now merged to `main` through `v24-production-core-manual-sod`. The operator path is individual top-level `MANUAL_AUTHORIZED` JSON → Preview → explicit Import → canonical PRETRADE `ACCEPTED` / `WAITING` → existing permission/risk/manual ARM → Execution Board. Import grants no ARM, execution, or broker-write authority.
 
 ### Deferred production SOD analysis-provider hardening work
 
@@ -224,7 +223,7 @@ ACCEPTANCE TEST MATRIX A–T: APPROVED / FROZEN
 DESIGN: APPROVED / FROZEN
 IMPLEMENTATION: ACCEPTED
 ACCEPTED SHA: b2a1a20f60b12f011fe2f5ff87d325752131ac06
-PRODUCTION INTEGRATION: CARRIED FORWARD ON v24-production-core-manual-sod
+PRODUCTION INTEGRATION: MERGED TO main VIA v24-production-core-manual-sod
 ORIGINAL BRANCH MERGE: NOT REQUIRED
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
@@ -285,8 +284,8 @@ DESIGN: PENDING
 IMPLEMENTATION: PENDING
 USER ACCEPTANCE: PENDING
 
-FINAL RELEASE INTEGRATION: PENDING / MANUAL-SOD PRODUCTION CORE VALIDATED; AUTOMATED SOD DEFERRED; PERFORMANCE INTELLIGENCE PENDING
-MERGE / MAIN RELEASE: PENDING
+FINAL PRODUCTION V1 RELEASE: PENDING / PERFORMANCE INTELLIGENCE PENDING; AUTOMATED SOD DEFERRED
+MANUAL-SOD PRODUCTION CORE: MERGED TO main AT c23faf5
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
@@ -427,19 +426,19 @@ Implemented/accepted:
 
 ## Current intentionally incomplete / deferred areas
 
-### Required before Production V1
+### Deferred automated Production SOD
 
-- Production SOD Provider hardening and run-integrity implementation;
-- offline provider tests, full V2.4 regression, and production build;
-- credentialed live OpenAI acceptance;
-- independent provider implementation review and user acceptance;
+Provider hardening, offline regression/build, credentialed live OpenAI acceptance, and independent review/user acceptance remain deferred. They are not prerequisites for the merged manual-SOD production core.
+
+### Remaining broader Production V1 work
+
 - Performance Intelligence repository, persistence/history, EOD-reporter, and data-availability inventory;
 - explicit Performance Intelligence design, skeptical review, and user approval/freeze;
 - Performance Intelligence implementation, analytics tests, regression, review, and user acceptance;
 - final release integration of all accepted V2.4 feature work;
 - full integrated regression;
 - production configuration and operator documentation;
-- merge/main release;
+- broader Production V1 merge/release after remaining acceptance; the manual-SOD production core is already merged;
 - installed-system smoke testing.
 
 ### Post-V1 / deferred
@@ -513,7 +512,9 @@ SOD orchestration, deterministic rendering, chart ingestion, Candidate Feeder wo
 
 ## Final acceptance evidence
 
-### Stable `main` release
+Current production-core validation is recorded in [the September 15 final merge closeout](docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md). Earlier checkpoint-specific results below remain historical evidence.
+
+### Historical September 8 handoff release
 
 September 6 closeout evidence remains preserved in the historical integration closeout. Final September 8 acceptance added the TODO #18/#19 fixes and reran the comprehensive pre-merge regression/build sequence successfully.
 
@@ -559,7 +560,7 @@ Full V2.4 regression:              ALL PASS
 Production Vite build:             PASS — 1,624 modules transformed
 Implementation acceptance:         USER ACCEPTED
 Accepted implementation SHA:       b2a1a20f60b12f011fe2f5ff87d325752131ac06
-Merge / main release:              PENDING
+Production integration:            MERGED TO main ON 2026-09-15
 Broker writes introduced:          NONE
 ```
 
@@ -602,7 +603,7 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - `docs/ExecutionOS_Project_Specification_v1.2_2026-08-26.md` — dated V2.3-era architecture record.
 - `research/30-day-management-study/methodology.md` — historical analytics provenance.
 
-`README.md` and `USER-GUIDE.md` should not describe automated SOD as operator-ready until its production workflow is implemented and accepted. They should not describe manual ingestion as a `main` operator capability until the accepted feature-branch checkpoint is merged/released and any required operator-facing workflow is actually available.
+`README.md` and `USER-GUIDE.md` now describe the merged manual-SOD production workflow and Manual Candidate Import. Automated Production SOD remains deferred / not production-accepted; its presence in predecessor code or frozen design documents does not establish operator readiness.
 
 ---
 
@@ -617,8 +618,8 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - GitHub issue #18 — structural evidence required for operator `VALID`; **COMPLETED / CLOSED**.
 - GitHub issue #19 — PRETRADE near-stop quantity-safety policy; **COMPLETED / CLOSED**.
 - SOD artifact rendering — **ACCEPTED / FROZEN** on `v24-sod-orchestration-lineage` at `4144c5c59494ae318bb736d64fba751a22046512`.
-- Manual SOD & Trade-Card Ingestion — **DESIGN APPROVED / FROZEN; IMPLEMENTATION USER ACCEPTED** on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06` on 2026-09-11; merge/main release pending.
-- Production SOD Analysis Provider Hardening & Run Integrity — **DESIGN APPROVED / FROZEN at `b45a67051c39d7f985cc190e7648dbac180bda1d`; IMPLEMENTATION READY TO BEGIN; LIVE PROVIDER ACCEPTANCE PENDING** on `v24-sod-production-analysis-provider`; merge/main release pending.
+- Manual SOD & Trade-Card Ingestion — **DESIGN APPROVED / FROZEN; IMPLEMENTATION USER ACCEPTED** on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06` on 2026-09-11; carried forward and merged to `main` in the September 15 production core.
+- Production SOD Analysis Provider Hardening & Run Integrity — **DESIGN APPROVED / FROZEN at `b45a67051c39d7f985cc190e7648dbac180bda1d`; IMPLEMENTATION DEFERRED / PRESERVED at `593f4dd`; LIVE PROVIDER ACCEPTANCE NOT COMPLETED** on `v24-sod-production-analysis-provider`; merge/main release pending.
 - Production V1 roadmap — Performance Intelligence / Analytics & Reporting is **PRODUCT REQUIREMENT APPROVED FOR PRODUCTION V1**; inventory, technical design, implementation, and user acceptance remain pending.
 
 ---

@@ -1,11 +1,12 @@
 # ExecutionOS User Guide
 
-**Version:** 1.7.0  
-**Date:** 8 September 2026  
-**Status:** Living operator guide for the accepted ExecutionOS V2.4 PRETRADE → Execution Board system on `main`  
+**Version:** 1.8.0<br>
+**Date:** 15 September 2026<br>
+**Status:** Living operator guide for the accepted ExecutionOS V2.4 manual-SOD → PRETRADE → Execution Board production core on `main`<br>
 **Repository:** `sibolek/structure-based-trade-management`  
 **Current operating branch:** `main`  
-**Final merged implementation checkpoint:** `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`  
+**Last runtime/code checkpoint:** `885ee94110e6a91352796c340e6ca40d6d775aff`<br>
+**Final integrated main tip:** `c23faf5c08f3ba60339197be3687fcad37db0e4b`<br>
 **Frozen downstream execution release:** `v2.3.0`
 
 > **Operating principle:** Structure decides. P&L emotion does not.
@@ -119,8 +120,11 @@ curl http://127.0.0.1:8788/api/candidates
 For a completely new operator, think of the workflow as this sequence:
 
 ```text
-1. CANDIDATE
-   A proposed trade plan enters ExecutionOS.
+1. MANUAL SOD / CANDIDATE IMPORT
+   Generate the manual ChatGPT SOD and its individual candidate JSON files.
+   Each one-candidate bundle has top-level ingressPolicy: MANUAL_AUTHORIZED.
+   In SOD, use Import Candidate JSON: file / paste / drop → Preview.
+   Click Import into PRETRADE explicitly; valid new admission is ACCEPTED / WAITING.
 
 2. WAITING / TRIGGER EVALUATION
    ExecutionOS waits for the candidate's trigger conditions and required evidence.
@@ -255,7 +259,7 @@ For the detailed workflow, continue through this guide. For a normal daily check
 
 # 1. Purpose
 
-This is the practical operator guide for ExecutionOS as it exists after the accepted V2.4 PRETRADE → ARM → Execution Board integration was merged to `main`, the September 8 follow-up TODOs were completed, and the final pre-merge regression/build sequence passed.
+This is the practical operator guide for ExecutionOS after the September 15, 2026 production-core manual-SOD fast-forward merge to `main`. It includes Decision 28 admission integrity, Manual Candidate Import, and individual manual-SOD deliverables, followed by the accepted PRETRADE → manual ARM → Execution Board workflow and September 8 quantity-safety controls.
 
 Use it to answer:
 
@@ -274,6 +278,7 @@ For implementation acceptance and final merge closeout use:
 ```text
 docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md
 docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md
+docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md
 ```
 
 Frozen approved historical documents remain approval-time evidence and should not be rewritten merely because implementation status advanced.
@@ -303,15 +308,25 @@ The accepted implementation now on `main` includes:
 4. Effective-Stop Risk Sizing;
 5. PRETRADE → ARM → Execution Board handoff integration;
 6. TODO #18 structural-evidence UX enforcement;
-7. TODO #19 PRETRADE quantity-safety policy.
+7. TODO #19 PRETRADE quantity-safety policy;
+8. accepted manual SOD / trade-card ingestion carried forward from its September 11 checkpoint;
+9. Decision 28 admission-anchored candidate integrity;
+10. Manual Candidate Import with local Preview and explicit canonical PRETRADE admission;
+11. Manual SOD individual candidate deliverables with top-level `ingressPolicy: "MANUAL_AUTHORIZED"`.
 
-Final merged implementation checkpoint:
+Last runtime/code checkpoint:
 
 ```text
-26ad8f86d2f0b4af96c186b26f250f4bb10a9dec
+885ee94110e6a91352796c340e6ca40d6d775aff
 ```
 
-Subsequent documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint.
+Final integrated `main` tip after the production-core status documentation:
+
+```text
+c23faf5c08f3ba60339197be3687fcad37db0e4b
+```
+
+The September 15 fast-forward includes the accepted predecessor history plus Decision 28 integrity, Manual Candidate Import, and Manual SOD individual deliverables. Later documentation-only commits may advance `main` without changing the runtime/code checkpoint. The September 8 handoff checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains historical acceptance evidence.
 
 The former feature branch `v24-execution-board-handoff` was retired and deleted after the verified fast-forward merge. It is not an operating branch.
 
@@ -324,11 +339,12 @@ Governing invariant:
 ## 2.3 Final accepted lifecycle
 
 ```text
-CANDIDATE SOURCE
-      ↓
-CANONICAL CANDIDATE INGRESS
-      ↓
-WAITING
+MANUAL CHATGPT SOD
+→ INDIVIDUAL ONE-CANDIDATE JSON BUNDLE
+  (top-level ingressPolicy: MANUAL_AUTHORIZED)
+→ MANUAL CANDIDATE IMPORT / PREVIEW
+→ EXPLICIT IMPORT
+→ CANONICAL PRETRADE: ACCEPTED / WAITING
       ↓
 PRETRADE_TRIGGER_EVALUATING
       ↓
@@ -738,7 +754,46 @@ A complete proposal should include:
 - management contract/intent;
 - finite validity window.
 
-## 7.1 Candidate import
+## 7.1 Manual ChatGPT SOD and Candidate Import
+
+Manual ChatGPT SOD is the current production-generation workflow. Request the report with an individual, ready-to-import JSON file for each finalized candidate. Each file must be a canonical bundle containing exactly one unchanged candidate and **top-level** `"ingressPolicy": "MANUAL_AUTHORIZED"`. This policy belongs on the bundle, never inside the candidate or its provenance.
+
+The candidate's identity, version, source, provenance, trade logic, and optional content must be preserved. Do not inject a missing policy into a supplied bundle or relabel automated output to make it importable. Correct manual-package authoring at the source. The combined A+ archival/export bundle keeps its existing shape and policy behavior; use the individual manual import files for this workflow.
+
+See the [Manual SOD Deliverable Specification](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md) and its [individual candidate template](examples/ExecutionOS_MANUAL_SOD_individual_candidate_v24_template.json). Template placeholders must be completed during authoring before a candidate is finalized.
+
+### Load and Preview
+
+In the **SOD** workspace, find **Import Candidate JSON** (the Manual Candidate Import control).
+
+1. Choose one `.json` file with **Choose JSON file**, drop one `.json` file into the import area, or use **Paste candidate JSON**. The input limit is 768 KiB and exactly one candidate at a time.
+2. File selection and drop automatically open the local preview. After pasting, click **Preview JSON**. Editing the input clears the previous preview/result and requires another Preview.
+3. Inspect symbol, direction, setup, trigger, structural invalidation, targets, source/date, candidateId, and contractVersion against the intended trade. Optional candidate content is preserved even when it is not shown in the summary.
+
+Preview parses and checks the input locally. **It sends no import request, creates no PRETRADE candidate, and does not prove server admission, permission, or risk approval.** Preview is available while PRETRADE is offline; Import is disabled until the service is connected. Canonical validation, identity, validity, conflict, and supersession checks occur on the server when you import.
+
+The control also accepts supported standalone canonical candidates and existing standalone trade-card envelopes. Existing canonical bundles must already carry `MANUAL_AUTHORIZED`; they are not silently converted from another ingress policy.
+
+### Explicit Import and results
+
+Click **Import into PRETRADE** only after reviewing the preview. Read the **Canonical import result**, then use **Open PRETRADE** to inspect current state.
+
+| Result | Meaning and next step |
+|---|---|
+| `ACCEPTED` / `WAITING` | A valid new candidate was admitted as a proposal. Continue the existing PRETRADE trigger, permission, risk, review, quantity-selection, and manual ARM workflow. |
+| `DUPLICATE` / Already imported | The unchanged candidate/version is already admitted. Use that existing candidate; a retry does not create a second candidate or reset its lifecycle to WAITING. |
+| `CONFLICT` | The same version has different content. Resolve the contract/version conflict; do not force replacement. |
+| `STALE` | An older version was not imported. Inspect the current candidate. |
+| `ACTION_REQUIRED` | The prior candidate is unchanged. Complete the existing manual supersession review/authorization process before importing a replacement. |
+| `REJECTED` | Read the validation reasons and correct the proposal at its source. |
+
+`WAITING at admission` records the admission result. PRETRADE shows the current lifecycle, including any validity expiration or later operator action. If delivery is uncertain, check PRETRADE and retry the same unchanged contract to resolve the outcome; do not invent a new identity to bypass uncertainty. An integrity error stops import and must be resolved through the existing recovery process, not by editing stored authority.
+
+**Import grants no activation, permission, risk approval, ARM authorization, Execution Board trade/handoff, execution ownership, or broker-write authority.** `MANUAL_AUTHORIZED` selects the manual admission path; it does not authorize a trade. Existing permission/risk checks, explicit review, quantity selection, and manual ARM remain mandatory. Actual equity order entry remains manual in thinkorswim/Schwab after the authorized handoff reaches LISTENING.
+
+### Canonical admission and Decision 28 integrity
+
+Decision 28 anchors the admitted candidate's substantive JSON, including arbitrary optional content, to its accepted immutable contract and admission record. Runtime bookkeeping cannot silently redefine the admitted contract. Tampering or missing/contradictory integrity evidence fails closed; import cannot supply system-owned lifecycle or authorization fields.
 
 Canonical bundles enter through:
 
@@ -1676,6 +1731,7 @@ Check:
 
 Current deferred areas include:
 
+- automated Production SOD: deferred / not production-accepted; manual ChatGPT SOD is the current production-generation workflow;
 - broker order placement/replacement/cancellation/modification/flattening;
 - general broker-write Governor enforcement;
 - buying-power/margin eligibility gate;
@@ -1697,11 +1753,12 @@ Treat:
 
 - `v2.3.0` as the frozen downstream reference;
 - `main` as the accepted operating branch for the merged V2.4 implementation;
-- `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` as the final merged **implementation** checkpoint, even though later documentation-only commits advance `main`;
+- `885ee94110e6a91352796c340e6ca40d6d775aff` as the last runtime/code checkpoint and `c23faf5c08f3ba60339197be3687fcad37db0e4b` as the September 15 final integrated main tip;
 - the v0.5 baseline + traceability audit as frozen V2.4 design authority for Decisions 22–97;
 - the approved PRETRADE Quantity Safety Addendum v0.1 as the September 8 quantity-safety policy authority;
 - the September 6 handoff-integration closeout as Slices 1–7 acceptance evidence;
-- the September 8 final merge closeout as merge/TODO/regression/repository-closeout evidence.
+- the September 8 final merge closeout as historical handoff/TODO/regression evidence;
+- the September 15 production-core manual-SOD final merge closeout as current integration evidence.
 
 The retired `v24-execution-board-handoff` branch is historical only and should not be recreated for normal operation.
 
@@ -1733,9 +1790,9 @@ A material architecture change requires a new approved future design decision.
 
 ## Candidate / PRETRADE
 
-1. Perform the READ and define the trade contract.
+1. Perform the READ and generate the manual ChatGPT SOD with one finalized candidate per individual top-level `MANUAL_AUTHORIZED` JSON bundle.
 2. Preserve `structure → invalidation → effective stop → risk budget → Phase 4 size → quantity-safety ceiling → explicit selected size`.
-3. Import/receive a canonical candidate.
+3. In SOD, load the individual JSON by file, paste, or drop; inspect Preview; explicitly Import into PRETRADE. Confirm `ACCEPTED` / `WAITING`, or open the existing candidate after `DUPLICATE`.
 4. Confirm the candidate is within its validity window.
 5. Activate/observe trigger evidence as appropriate.
 6. If selecting `STRUCTURE = VALID`, provide a non-empty structural evidence/reference.
@@ -1876,7 +1933,7 @@ npm run analytics:test
 npm run build
 ```
 
-September 8 final acceptance state:
+Historical September 8 handoff acceptance state:
 
 ```text
 Focused Slice 7:                     26 / 26 PASS
@@ -1891,6 +1948,8 @@ Broker writes introduced:             NONE
 The final aggregate numeric test count is intentionally not restated because the September 8 acceptance was recorded as an all-green multi-command regression rather than one single aggregate-count artifact.
 
 ---
+
+September 15 production-core validation and the two environment-gated Schwab probes are recorded in [the final merge closeout](docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md). These are prior implementation acceptance results; this guide refresh changes documentation only.
 
 # 22. Documentation map and glossary
 
@@ -1908,6 +1967,8 @@ The final aggregate numeric test count is intentionally not restated because the
 | PRETRADE quantity-safety policy | `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` |
 | Slices 1–7 accepted closeout | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Integration_Closeout_2026-09-06.md` |
 | Final merge / TODO / repository closeout | `docs/ExecutionOS_V2.4_Execution_Board_Handoff_Final_Merge_Closeout_2026-09-08.md` |
+| September 15 production-core final merge | `docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md` |
+| Manual SOD individual import files | `docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md` |
 | Phase 3 closeout | `docs/ExecutionOS_V2.4_Phase3_DSS_Closeout_2026-08-31.md` |
 | Phase 4 closeout | `docs/ExecutionOS_V2.4_Phase4_Risk_Sizing_Closeout_2026-09-01.md` |
 | EOD semantics | `docs/ExecutionOS_EOD_Report.md` |
