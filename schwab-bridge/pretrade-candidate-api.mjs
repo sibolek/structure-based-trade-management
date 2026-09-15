@@ -1,3 +1,5 @@
+import { importStandaloneManualEnvelope } from "./pretrade-manual-import.mjs";
+import { parseManualIngestionEnvelopeBytes } from "./manual-sod-ingestion.mjs";
 import { isAllowedLocalOrigin } from "./local-origin.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -17,7 +19,7 @@ function json(res, statusCode, value, origin = null) {
   res.end(body);
 }
 
-function readJson(req) {
+function readJson(req, parse = JSON.parse) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
@@ -35,7 +37,7 @@ function readJson(req) {
     req.on("end", () => {
       try {
         const body = Buffer.concat(chunks).toString("utf8");
-        resolve(body ? JSON.parse(body) : {});
+        resolve(body ? parse(body) : {});
       } catch (error) {
         error.code = "INVALID_JSON";
         reject(error);
@@ -107,10 +109,11 @@ export function createPreTradeCandidateApiHandler({
       return true;
     }
 
-    if (req.method === "POST" && pathname === "/api/candidates/import") {
+    if (req.method === "POST" && ["/api/candidates/import", "/api/candidates/manual-import"].includes(pathname)) {
       try {
-        const payload = await readJson(req);
-        const result = candidateIngress.importBundle(payload);
+        const envelopeImport = pathname === "/api/candidates/manual-import";
+        const payload = await readJson(req, envelopeImport ? parseManualIngestionEnvelopeBytes : JSON.parse);
+        const result = envelopeImport ? importStandaloneManualEnvelope(candidateIngress, payload) : candidateIngress.importBundle(payload);
         const validityReconciliation = lifecycleCoordinator.reconcileAllValidity({
           source: "INGRESS_VALIDITY_RECONCILIATION",
         });

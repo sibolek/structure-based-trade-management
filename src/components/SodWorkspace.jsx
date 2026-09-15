@@ -1,3 +1,4 @@
+import ManualCandidateImport from "./ManualCandidateImport.jsx";
 import { useState } from "react";
 import {
   AlertTriangle,
@@ -198,7 +199,7 @@ function TrustedChartSet({ sod }) {
   );
 }
 
-export default function SodWorkspace({ sod }) {
+export default function SodWorkspace({ sod, pretrade, onOpenPretrade }) {
   const [sourceDate, setSourceDate] = useState(localDateValue);
   const charts = Array.isArray(sod?.charts) ? sod.charts : [];
   const inputsReady = Boolean(sourceDate && charts.length > 0);
@@ -224,6 +225,7 @@ export default function SodWorkspace({ sod }) {
 
   return (
     <div className="space-y-3">
+      <ManualCandidateImport pretrade={pretrade} onOpenPretrade={onOpenPretrade} />
       <section className="rounded border border-white/10 bg-ink-850/95 shadow-terminal">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
           <div>
