@@ -1,4 +1,6 @@
 import { test, expect } from "@playwright/test";
+import fs from "node:fs";
+import { buildManualSodIndividualCandidateBundles } from "../../schwab-bridge/manual-sod-deliverables.mjs";
 import { manualCandidateFixture } from "../helpers/manual-candidate-fixture.mjs";
 const card = manualCandidateFixture({ targets: [181, 182] });
 const json = JSON.stringify(card);
@@ -117,4 +119,22 @@ test('manual import works with SOD offline and incomplete responses cannot confi
   await page.getByRole('button', { name: 'Import into PRETRADE' }).click();
   await expect(page.getByRole('alert')).toContainText('MANUAL_IMPORT_INVALID_RESULT');
   await expect(page.getByRole('status')).toHaveCount(0);
+});
+
+
+test('generated manual SOD individual file previews and imports intact with SOD provenance', async ({ page }) => {
+  const input = JSON.parse(fs.readFileSync(new URL('../../fixtures/v24-sod-candidates.example.json', import.meta.url), 'utf8'));
+  const [individual] = buildManualSodIndividualCandidateBundles(input);
+  const requests = await open(page);
+  await page.getByLabel('Choose JSON file').setInputFiles({ name: 'manual-sod-candidate.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(individual)) });
+  await expect(page.getByRole('heading', { name: 'Candidate preview' })).toBeVisible();
+  await expect(page.locator('dd').filter({ hasText: 'SOD_A_PLUS_TRADES' }).first()).toBeVisible();
+  expect(requests).toHaveLength(0);
+  await page.getByRole('button', { name: 'Import into PRETRADE' }).click();
+  await expect(page.getByRole('status')).toContainText('ACCEPTED · WAITING');
+  expect(requests).toHaveLength(1);
+  expect(requests[0].url).toContain('/api/candidates/import');
+  expect(requests[0].body).toEqual(individual);
+  expect(requests[0].body.candidates[0]).toEqual(input.candidates[0]);
+  expect(requests[0].body.ingressPolicy).toBe('MANUAL_AUTHORIZED');
 });
