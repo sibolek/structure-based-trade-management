@@ -155,7 +155,7 @@ Status:
 ```text
 DESIGN: APPROVED / FROZEN
 DESIGN CHECKPOINT: b45a67051c39d7f985cc190e7648dbac180bda1d
-IMPLEMENTATION: READY TO BEGIN
+IMPLEMENTATION: DEFERRED / PRESERVED
 LIVE OPENAI ACCEPTANCE: PENDING
 USER IMPLEMENTATION ACCEPTANCE: PENDING
 MERGE / MAIN RELEASE: PENDING
@@ -164,7 +164,7 @@ BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 
 The substantial existing implementation is starting code, not accepted implementation evidence under this baseline. The Performance Intelligence roadmap requirement does not interrupt or broaden the frozen provider slice.
 
-### Active manual SOD / trade-card ingestion feature branch
+### Accepted predecessor manual SOD / trade-card ingestion branch
 
 ```text
 v24-manual-sod-trade-card-ingestion
@@ -234,7 +234,7 @@ IMPLEMENTATION: PENDING
 
 The existing EOD reporter is **PERFORMANCE INTELLIGENCE FOUNDATION / PHASE 0** and partial analytics only. It is not the complete subsystem and does not yet replace TradeZella-style journaling, reporting, and analysis.
 
-Performance Intelligence inventory begins after Production SOD Provider implementation, validation, independent review, and user acceptance. Its later design and implementation precede final release integration. No analytics technical architecture is approved by this checkpoint, and the current provider implementation proceeds unchanged.
+Performance Intelligence inventory remains a separate pending Production V1 workstream. Automated Production SOD provider work is preserved but deferred and is not a prerequisite for the current manual-SOD production-core integration. No analytics technical architecture is approved by this checkpoint.
 
 ### Retired feature branch
 
@@ -291,7 +291,7 @@ Authority invariants:
 
 Individual candidate JSON files in every manual SOD package must follow [the canonical Manual SOD Deliverable Specification](sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md): one unchanged canonical candidate per bundle with top-level `ingressPolicy: "MANUAL_AUTHORIZED"`. Combined archival bundles and automated Production SOD publication keep their existing behavior.
 
-Manual ChatGPT SOD generation remains the current manual-generation workflow. The accepted manual-ingestion feature-branch implementation now provides the explicit Manual Proposal Inbox-to-PRETRADE path for structured candidate artifacts. It has not been merged or released to `main`, and no operator-facing Submit UI beyond the accepted slice is claimed here.
+Manual ChatGPT SOD generation remains the current production-generation workflow. The validated `v24-production-core-manual-sod` branch provides Manual Candidate Import plus individual manual-SOD candidate bundles with top-level `ingressPolicy: "MANUAL_AUTHORIZED"`; the production-core checkpoint is validated for integration to `main`. Automated Production SOD is deferred and is not production-accepted, with the deferred post-base work preserved separately on `v24-sod-production-analysis-provider`.
 
 ---
 

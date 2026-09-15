@@ -1,6 +1,6 @@
 # ExecutionOS Documentation Status
 
-**Updated:** 2026-09-12
+**Updated:** 2026-09-15
 
 This file distinguishes current authoritative project records from historical planning snapshots and dated approval artifacts.
 
@@ -25,8 +25,8 @@ Release distinction:
 - final merged implementation checkpoint: `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec`;
 - subsequent documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint;
 - the former feature branch `v24-execution-board-handoff` has been retired and deleted;
-- accepted SOD rendering remains isolated on `v24-sod-orchestration-lineage`; production-provider hardening is active on `v24-sod-production-analysis-provider`, and automated SOD is not yet an operator-ready `main` capability;
-- manual SOD / standalone trade-card ingestion is implementation-accepted on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06`; merge/main release and any later operator-facing Submit workflow remain pending.
+- accepted SOD orchestration/rendering lineage and manual-ingestion functionality are carried forward on `v24-production-core-manual-sod`; automated Production SOD is deferred and is not a production-accepted workflow;
+- production-core validation is complete at `885ee94110e6a91352796c340e6ca40d6d775aff`; Manual Candidate Import and Manual SOD individual deliverables are validated for integration to `main`.
 
 ### Current frozen / approved design authority
 
@@ -95,7 +95,7 @@ TODO #19: COMPLETED / CLOSED
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
-### Active SOD orchestration / lineage feature branch
+### Accepted predecessor SOD orchestration / lineage checkpoint
 
 ```text
 v24-sod-orchestration-lineage
@@ -132,14 +132,14 @@ Not yet complete:
 - production-provider hardening and run-integrity acceptance under the September 12 baseline;
 - credentialed live OpenAI acceptance evidence;
 - complete operator-ready automated SOD workflow;
-- release/merge of SOD orchestration to `main`;
+- operator-ready automated Production SOD release to `main`;
 - authoritative automated REVISED-candidate supersession preflight remains an explicit later design/implementation decision.
 
 Substantial OpenAI Responses adapter, production HTTP transport, provider-module wiring, browser initiation, structured output, and mocked tests already exist. That code is starting implementation, not an accepted production capability under the hardening baseline.
 
-Manual ChatGPT Start-of-Day generation remains the current manual-generation workflow. The accepted manual-ingestion feature-branch implementation provides the explicit Manual Proposal Inbox-to-PRETRADE path for its structured candidate artifacts, but it has not yet been merged or released to `main`.
+Manual ChatGPT Start-of-Day generation is the current production SOD-generation workflow. The validated `v24-production-core-manual-sod` branch provides Manual Candidate Import and Manual SOD individual candidate deliverables and is the current integration candidate for `main`.
 
-### Active production SOD analysis-provider hardening branch
+### Deferred production SOD analysis-provider hardening work
 
 ```text
 v24-sod-production-analysis-provider
@@ -174,16 +174,17 @@ Current status:
 ```text
 DESIGN: APPROVED / FROZEN
 DESIGN CHECKPOINT: b45a67051c39d7f985cc190e7648dbac180bda1d
-IMPLEMENTATION: READY TO BEGIN
-LIVE OPENAI ACCEPTANCE: PENDING
-USER IMPLEMENTATION ACCEPTANCE: PENDING
-MERGE / MAIN RELEASE: PENDING
+IMPLEMENTATION: DEFERRED / PRESERVED
+PRESERVATION CHECKPOINT: 593f4dd97c9e23500ed5b59beb0bab2d9f03c3ec
+LIVE OPENAI ACCEPTANCE: NOT COMPLETED
+USER IMPLEMENTATION ACCEPTANCE: NOT GRANTED
+MERGE / MAIN RELEASE: NOT PART OF CURRENT PRODUCTION-CORE MERGE
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
 The approved scope hardens artifact-link trust, chart/request/response resources, strict local structured-output validation, durable per-date run identity and recovery, post-provider PRETRADE freshness, pre-publication authority fencing, deterministic publication recovery, readiness reporting, and explicit live acceptance. It preserves candidate identity and all existing PRETRADE, Candidate Feeder, ARM, execution, and broker boundaries. The Performance Intelligence roadmap requirement does not interrupt or broaden this slice.
 
-### Active manual SOD / trade-card ingestion feature branch
+### Accepted predecessor manual SOD / trade-card ingestion branch
 
 ```text
 v24-manual-sod-trade-card-ingestion
@@ -223,7 +224,8 @@ ACCEPTANCE TEST MATRIX A–T: APPROVED / FROZEN
 DESIGN: APPROVED / FROZEN
 IMPLEMENTATION: ACCEPTED
 ACCEPTED SHA: b2a1a20f60b12f011fe2f5ff87d325752131ac06
-MERGE / MAIN RELEASE: PENDING
+PRODUCTION INTEGRATION: CARRIED FORWARD ON v24-production-core-manual-sod
+ORIGINAL BRANCH MERGE: NOT REQUIRED
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
@@ -271,9 +273,9 @@ Current roadmap status:
 PRODUCTION SOD PROVIDER
 DESIGN: APPROVED / FROZEN
 DESIGN CHECKPOINT: b45a67051c39d7f985cc190e7648dbac180bda1d
-IMPLEMENTATION: READY TO BEGIN
-LIVE OPENAI ACCEPTANCE: PENDING
-USER IMPLEMENTATION ACCEPTANCE: PENDING
+IMPLEMENTATION: DEFERRED / PRESERVED
+LIVE OPENAI ACCEPTANCE: NOT COMPLETED
+USER IMPLEMENTATION ACCEPTANCE: NOT GRANTED
 
 PERFORMANCE INTELLIGENCE / ANALYTICS & REPORTING
 PRODUCT REQUIREMENT: APPROVED FOR PRODUCTION V1
@@ -283,12 +285,12 @@ DESIGN: PENDING
 IMPLEMENTATION: PENDING
 USER ACCEPTANCE: PENDING
 
-FINAL RELEASE INTEGRATION: PENDING / BLOCKED ON ACCEPTANCE OF BOTH MAJOR REMAINING SLICES
+FINAL RELEASE INTEGRATION: PENDING / MANUAL-SOD PRODUCTION CORE VALIDATED; AUTOMATED SOD DEFERRED; PERFORMANCE INTELLIGENCE PENDING
 MERGE / MAIN RELEASE: PENDING
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
-Detailed Performance Intelligence architecture remains intentionally pending repository, persistence/history, EOD-reporter, and data-availability inventory followed by explicit design, skeptical review, and user approval. It follows Production SOD Provider acceptance and precedes final release integration. The current provider implementation proceeds unchanged.
+Detailed Performance Intelligence architecture remains intentionally pending repository, persistence/history, EOD-reporter, and data-availability inventory followed by explicit design, skeptical review, and user approval. Automated Production SOD provider work is preserved but deferred; the current production workflow proceeds through manual ChatGPT SOD generation and Manual Candidate Import.
 
 ### Retired integration branch
 
