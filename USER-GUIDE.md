@@ -756,7 +756,19 @@ A complete proposal should include:
 
 ## 7.1 Manual ChatGPT SOD and Candidate Import
 
-Manual ChatGPT SOD is the current production-generation workflow. Request the report with an individual, ready-to-import JSON file for each finalized candidate. Each file must be a canonical bundle containing exactly one unchanged candidate and **top-level** `"ingressPolicy": "MANUAL_AUTHORIZED"`. This policy belongs on the bundle, never inside the candidate or its provenance.
+Manual ChatGPT SOD is the current production-generation workflow. Supply charts/screenshots to ChatGPT/manual analysis and request **`manual-sod-analysis-YYYY-MM-DD.json` as a standard deliverable**, containing the report's structured `artifactContent`, authored `candidateProposals`, and `bundleMetadata`. Use the [transport template](examples/manual-sod-analysis.template.json) for the outer shape; candidate contracts still come from the current repository's existing candidate template and validator.
+
+Run the downloaded transport through the local report packager:
+
+```sh
+npm run v24:manual-sod-package -- ~/Downloads/manual-sod-analysis-2026-09-16.json ~/Downloads/SOD-2026-09-16-validated
+```
+
+Choose the actual session date and a fresh output directory. The morning flow is **charts/screenshots → ChatGPT/manual analysis → dated analysis JSON → packager → reports/dashboard always for valid reporting input; candidate JSON only when the current local validator passes**. Check `candidate-delivery-status.json` for `DELIVERED`, `WITHHELD` and its reason, or `NO_CANDIDATES`.
+
+There is no local upstream generator for manual chart analysis. If authored data needs the standard filename, use `npm run v24:manual-sod-analysis -- <authored-sod.json> <YYYY-MM-DD> <output-directory>`. This optional serializer creates transport only; no screenshots, AI request, service startup, candidate validation, import, or state change is involved. It does not automatically retrieve analysis from ChatGPT.
+
+PRETRADE, Schwab, and Execution Board may remain offline for both steps. Reporting uses the existing 19-section renderer and dashboard styling. An unavailable validator or failed candidate validation withholds the entire candidate package while reports still complete; malformed report content or report filesystem errors still fail. Each delivered file in `individual-candidates/` is a canonical bundle containing exactly one unchanged candidate and **top-level** `"ingressPolicy": "MANUAL_AUTHORIZED"`. This policy belongs on the bundle, never inside the candidate or its provenance. Import only these validated individual files; the intermediate analysis JSON is not an import file.
 
 The candidate's identity, version, source, provenance, trade logic, and optional content must be preserved. Do not inject a missing policy into a supplied bundle or relabel automated output to make it importable. Correct manual-package authoring at the source. The combined A+ archival/export bundle keeps its existing shape and policy behavior; use the individual manual import files for this workflow.
 

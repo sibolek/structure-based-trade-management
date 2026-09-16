@@ -1,0 +1,215 @@
+{
+  "artifactContent": {
+    "hero": {
+      "kicker": "Manual Start of Day • Transport template",
+      "title": "YYYY-MM-DD — replace with the authored session title",
+      "snapshot": "TEMPLATE ONLY — replace all report placeholders with chart/manual analysis before use.",
+      "badges": [
+        {
+          "tone": "amber",
+          "text": "TRANSPORT TEMPLATE — NOT A COMPLETED SOD"
+        }
+      ]
+    },
+    "sections": [
+      {
+        "id": "executive-summary",
+        "title": "Executive Summary",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Executive Summary analysis."
+          }
+        ]
+      },
+      {
+        "id": "execution-discipline",
+        "title": "Execution Discipline",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Execution Discipline analysis."
+          }
+        ]
+      },
+      {
+        "id": "macro-overnight-context",
+        "title": "Macro / Overnight Context",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Macro / Overnight Context analysis."
+          }
+        ]
+      },
+      {
+        "id": "scheduled-risk",
+        "title": "Today’s Scheduled Risk",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Today’s Scheduled Risk analysis."
+          }
+        ]
+      },
+      {
+        "id": "rates-volatility-commodities",
+        "title": "Rates, Volatility & Commodities",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with current VIX context, rates, and commodities analysis; state unavailable observations explicitly."
+          }
+        ]
+      },
+      {
+        "id": "mes",
+        "title": "MES",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored MES analysis."
+          }
+        ]
+      },
+      {
+        "id": "mnq",
+        "title": "MNQ",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored MNQ analysis."
+          }
+        ]
+      },
+      {
+        "id": "market-regime-breadth",
+        "title": "Market Regime / Breadth",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Market Regime / Breadth analysis."
+          }
+        ]
+      },
+      {
+        "id": "semiconductors-primary-sector",
+        "title": "Semiconductors / Primary Sector Focus",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Semiconductors / Primary Sector Focus analysis."
+          }
+        ]
+      },
+      {
+        "id": "mega-cap-tech",
+        "title": "Mega-Cap Tech",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Mega-Cap Tech analysis."
+          }
+        ]
+      },
+      {
+        "id": "momentum-special-situations",
+        "title": "Momentum / Special Situations",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Momentum / Special Situations analysis."
+          }
+        ]
+      },
+      {
+        "id": "crude-oil-mcl",
+        "title": "Crude Oil / MCL",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Crude Oil / MCL analysis."
+          }
+        ]
+      },
+      {
+        "id": "key-levels",
+        "title": "Key Levels",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Key Levels analysis."
+          }
+        ]
+      },
+      {
+        "id": "validation-no-trade-zones",
+        "title": "Validation Map / No-Trade Zones",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Validation Map / No-Trade Zones analysis."
+          }
+        ]
+      },
+      {
+        "id": "a-plus-trades",
+        "title": "A+ Trades",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored A+ Trades analysis."
+          }
+        ]
+      },
+      {
+        "id": "morning-priority",
+        "title": "Morning Priority",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Morning Priority analysis."
+          }
+        ]
+      },
+      {
+        "id": "earnings-risk-events",
+        "title": "Earnings / Risk Events",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Earnings / Risk Events analysis."
+          }
+        ]
+      },
+      {
+        "id": "risk-management",
+        "title": "Risk Management",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Risk Management analysis."
+          }
+        ]
+      },
+      {
+        "id": "opening-game-plan",
+        "title": "Opening Game Plan / Process Goals",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "Replace with authored Opening Game Plan / Process Goals analysis."
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "label": "Author-supplied chart/screenshots",
+        "note": "Replace with actual snapshot times and source context."
+      }
+    ]
+  },
+  "candidateProposals": [],
+  "bundleMetadata": null
+}

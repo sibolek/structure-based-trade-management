@@ -1,6 +1,6 @@
 # ExecutionOS V2.4 Manual SOD Deliverable Specification v1.0
 
-Updated: 2026-09-15. Scope: **MANUAL Start-of-Day report** packaging and optional individual candidate JSON delivery. This is the canonical manual-package delivery requirement; it supplements the ingestion and rendering baselines without changing their authority rules.
+Updated: 2026-09-16. Scope: **MANUAL Start-of-Day report** packaging and optional individual candidate JSON delivery. This is the canonical manual-package delivery requirement; it supplements the ingestion and rendering baselines without changing their authority rules.
 
 ## Frozen reporting / candidate-delivery boundary
 
@@ -10,15 +10,51 @@ Candidate JSON may be delivered only after every individual file passes the **cu
 
 This boundary applies to the manual workflow. The deferred automated Production SOD provider, its validation/lineage/publication order, and its authority rules are unchanged.
 
+## Standard morning deliverables and transport artifact
+
+The standard manual workflow is:
+
+```text
+charts/screenshots
+  → ChatGPT/manual SOD analysis
+  → manual-sod-analysis-YYYY-MM-DD.json
+  → npm run v24:manual-sod-package -- <analysis.json> <fresh-output-directory>
+  → report.md + report.html + dashboard.html + candidate-delivery-status.json
+  → individual-candidates/ only if the current local validator passes
+```
+
+ChatGPT/manual SOD authoring **must emit `manual-sod-analysis-YYYY-MM-DD.json` as part of the standard deliverables**, using the same report content and A+ proposals as the human-readable analysis. Download that JSON and pass it directly to the packager. The JSON is an intermediate transport artifact, **not an importable candidate bundle or evidence of validation**. Never upload it to Manual Candidate Import; use only the downstream individual candidate files after successful validation.
+
+There is no upstream local generator for the ordinary ChatGPT/manual chart-analysis workflow in this repository. The existing local renderer and manual packager consume already-authored content; the separate automated analysis providers are not this workflow. The explicit serializer below is an authoring utility, not an automatic connection to a ChatGPT conversation. Neither CLI accepts screenshots, calls an AI model, fetches market data, or starts services. Analysis remains upstream.
+
+The canonical [transport template](../../examples/manual-sod-analysis.template.json) contains all 19 report sections, clearly marked placeholders, an empty `candidateProposals` array, and `bundleMetadata: null`. It is transport/report-shape guidance, **not a second candidate schema**. Replace the report placeholders with authored content, including current VIX context or an explicit unavailable observation. For A+ proposals, author against the current [individual candidate template](../../examples/ExecutionOS_MANUAL_SOD_individual_candidate_v24_template.json): put the completed bundle's `candidates` in `candidateProposals` and its remaining top-level fields in `bundleMetadata`. Do not paste an entire bundle into `candidateProposals`. Keep the existing renderer's structured blocks; do not substitute rendered Markdown, HTML, or CSS for `artifactContent`.
+
+If there are no A+ ideas, use `candidateProposals: []` and `bundleMetadata: null`; the downstream status is `NO_CANDIDATES`. Authored ideas without canonical bundle metadata may also be transported with `bundleMetadata: null`; their analysis renders, while candidate delivery is `WITHHELD / CANDIDATE_INPUT_UNAVAILABLE`.
+
+For already-authored data saved under another filename, the optional local serializer provides the standard artifact name:
+
+```sh
+npm run v24:manual-sod-analysis -- authored-sod.json 2026-09-16 ~/Downloads/SOD-2026-09-16-analysis
+npm run v24:manual-sod-package -- ~/Downloads/SOD-2026-09-16-analysis/manual-sod-analysis-2026-09-16.json ~/Downloads/SOD-2026-09-16-validated
+```
+
+If ChatGPT already supplied the correctly named transport file, only the second command is needed, with that file's actual location. These dates are examples; choose the actual analysis session date and a fresh package directory each morning.
+
+`serializeManualSodAnalysis(input)` returns deterministic two-space JSON with a trailing newline. It extracts only `artifactContent`, `candidateProposals` (default `[]`), and `bundleMetadata` (default `null`), without adding timestamps, status, policy, or authority metadata. It checks those outer container types and lossless JSON serialization only; it does **not** validate report sections or candidate contracts. Invalid/draft candidate JSON values remain unchanged for the downstream validator to reject. The JavaScript helper rejects non-JSON/lossy values such as `undefined`, nonfinite numbers, Dates, and sparse arrays rather than silently changing them. CLI input must be ordinary JSON; authored numeric values must fit JSON/JavaScript number precision, and object keys must be unique.
+
+`writeManualSodAnalysis(input, analysisDate, outputDirectory)` writes `manual-sod-analysis-YYYY-MM-DD.json` and returns its absolute path. The date must be an explicit valid calendar date. It is a filename label only: authors must keep it consistent with report/bundle/candidate dates, which the serializer never infers or rewrites. Existing files are never overwritten; use a new transport directory for another version of the same date. No network, validator, renderer, runtime, or service availability is required. The standalone module uses only Node built-ins. The CLI prints `{ "analysisPath": "..." }`; exit status is 0 on serialization success, 1 on input/date/serialization/filesystem error, and 2 on usage error. Success certifies transport creation only.
+
+For valid reporting content and writable output, reports/dashboard complete independently of candidate validation. Missing validators and invalid candidates remain nonfatal downstream withholding cases. Malformed reporting input and report filesystem errors still fail; neither a serialized transport nor the template guarantees a completed report or valid candidate delivery.
+
 ## Manual report package entry point
 
 Use the report-aware command for a completed manual analysis:
 
 ```sh
-npm run v24:manual-sod-package -- manual-sod-analysis.json manual-package-new-run
+npm run v24:manual-sod-package -- manual-sod-analysis-2026-09-16.json manual-package-new-run
 ```
 
-The input contains:
+The dated transport is directly compatible with the existing input shape. Existing undated/direct JSON inputs and `writeManualSodPackage()` callers remain supported without migration. The input contains:
 
 - `artifactContent`: the existing structured 19-section rendering content;
 - `candidateProposals`: the authored A+ trade ideas used by the existing renderer (default `[]`);
@@ -98,4 +134,4 @@ Only the individual manual import files are required to be `MANUAL_AUTHORIZED`. 
 
 ## Offline acceptance
 
-Run `npm run v24:manual-sod-test` for the focused delivery/contract regression suite. Tests cover reporting with services offline, absent/unloadable validator code, rejected candidates, a later candidate failing validation/serialization, no partial candidate delivery, full candidate preservation, the existing manual UI adapter, real canonical API admission as `ACCEPTED` / `WAITING`, retry as `DUPLICATE`, no ARM/Execution/broker authority, and unchanged automated publication bytes/policy. Browser tests verify that an emitted file can be Previewed and Imported intact through the existing control. No live analysis request is required.
+Run `npm run v24:manual-sod-test` for the focused delivery/contract regression suite. Tests cover transport CLI round trips, deterministic/lossless serialization with no runtime or validator, compatibility with direct inputs, transport template rendering, reporting with services offline, absent/unloadable validator code, rejected candidates, a later candidate failing validation/serialization, no partial candidate delivery, full candidate preservation, the existing manual UI adapter, real canonical API admission as `ACCEPTED` / `WAITING`, retry as `DUPLICATE`, no ARM/Execution/broker authority, and unchanged automated publication bytes/policy. Browser tests verify that an emitted file can be Previewed and Imported intact through the existing control. No live analysis request is required.

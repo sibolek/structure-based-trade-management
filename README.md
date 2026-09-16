@@ -81,7 +81,13 @@ Governing invariant:
 
 ## Current manual SOD workflow
 
-Manual ChatGPT SOD is the current production-generation workflow. Deliver each finalized candidate as an individual one-candidate JSON bundle with top-level `"ingressPolicy": "MANUAL_AUTHORIZED"`, preserving the candidate payload and provenance. See the [Manual SOD Deliverable Specification](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md).
+Manual ChatGPT SOD is the current production-generation workflow: **charts/screenshots → ChatGPT/manual analysis → `manual-sod-analysis-YYYY-MM-DD.json` → `v24:manual-sod-package` → reports/dashboard, plus individual candidate JSON only if the current local validator passes**. Request the dated transport JSON as a standard deliverable; it contains `artifactContent`, `candidateProposals`, and `bundleMetadata`. The [transport template](examples/manual-sod-analysis.template.json) guides authoring without copying the candidate schema.
+
+```sh
+npm run v24:manual-sod-package -- ~/Downloads/manual-sod-analysis-2026-09-16.json ~/Downloads/SOD-2026-09-16-validated
+```
+
+Use the actual session date and a fresh package directory. If needed, `npm run v24:manual-sod-analysis -- <authored-sod.json> <YYYY-MM-DD> <output-directory>` serializes already-authored data to the standard filename without services or candidate validation. There is no local manual chart-analysis generator; neither CLI analyzes images. Reporting remains independent of ExecutionOS services, and candidate validation failures withhold candidate files while reports succeed. Delivered candidate bundles have top-level `"ingressPolicy": "MANUAL_AUTHORIZED"` and unchanged candidate values. See the [Manual SOD Deliverable Specification](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md) for authoring, commands, statuses, and limitations.
 
 In SOD, **Import Candidate JSON** accepts file selection, paste, or drag-and-drop. Preview is local inspection only; explicit **Import into PRETRADE** asks canonical PRETRADE to validate and admit the candidate. Valid new admission returns `ACCEPTED` / `WAITING`; an unchanged retry returns `DUPLICATE` and uses the existing candidate without resetting its lifecycle.
 
