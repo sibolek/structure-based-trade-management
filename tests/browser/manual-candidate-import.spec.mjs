@@ -1,6 +1,9 @@
 import { test, expect } from "@playwright/test";
 import fs from "node:fs";
-import { buildManualSodIndividualCandidateBundles } from "../../schwab-bridge/manual-sod-deliverables.mjs";
+import os from "node:os";
+import path from "node:path";
+import { writeManualSodPackage } from "../../schwab-bridge/manual-sod-package.mjs";
+import { sodArtifactContentFixture } from "../helpers/sod-artifact-content-fixture.mjs";
 import { manualCandidateFixture } from "../helpers/manual-candidate-fixture.mjs";
 const card = manualCandidateFixture({ targets: [181, 182] });
 const json = JSON.stringify(card);
@@ -124,7 +127,16 @@ test('manual import works with SOD offline and incomplete responses cannot confi
 
 test('generated manual SOD individual file previews and imports intact with SOD provenance', async ({ page }) => {
   const input = JSON.parse(fs.readFileSync(new URL('../../fixtures/v24-sod-candidates.example.json', import.meta.url), 'utf8'));
-  const [individual] = buildManualSodIndividualCandidateBundles(input);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "manual-sod-import-browser-"));
+  let individual;
+  try {
+    const { candidates, ...bundleMetadata } = input;
+    const result = await writeManualSodPackage({ artifactContent: sodArtifactContentFixture(), candidateProposals: candidates, bundleMetadata }, path.join(directory, "package"));
+    expect(result.candidateDelivery.status).toBe("DELIVERED");
+    individual = JSON.parse(fs.readFileSync(result.candidateDelivery.files[0], "utf8"));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
   const requests = await open(page);
   await page.getByLabel('Choose JSON file').setInputFiles({ name: 'manual-sod-candidate.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(individual)) });
   await expect(page.getByRole('heading', { name: 'Candidate preview' })).toBeVisible();

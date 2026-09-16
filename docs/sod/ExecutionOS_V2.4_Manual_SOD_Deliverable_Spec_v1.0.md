@@ -1,6 +1,36 @@
 # ExecutionOS V2.4 Manual SOD Deliverable Specification v1.0
 
-Date: 2026-09-14. Scope: individual candidate JSON files delivered with a **MANUAL Start-of-Day report**. This is the canonical manual-package delivery requirement; it supplements the ingestion and rendering baselines without changing their authority rules.
+Updated: 2026-09-15. Scope: **MANUAL Start-of-Day report** packaging and optional individual candidate JSON delivery. This is the canonical manual-package delivery requirement; it supplements the ingestion and rendering baselines without changing their authority rules.
+
+## Frozen reporting / candidate-delivery boundary
+
+Start-of-Day report generation is independent of ExecutionOS availability. The 19-section Markdown report, canonical HTML report, SOD dashboard, and A+ trade analysis must complete when PRETRADE, Schwab monitor, Execution Board, broker connectivity, or ExecutionOS services are offline. ExecutionOS candidate JSON is an **optional downstream deliverable**.
+
+Candidate JSON may be delivered only after every individual file passes the **current local ExecutionOS canonical validator**. Missing/unloadable validator or repository contract, invalid candidate proposals, or candidate-delivery failures withhold the entire candidate package and surface a reason; they do not fail report/dashboard generation. Service availability is never a prerequisite for local candidate validation. No schema fallback, cached contract, repair, automatic import, ARM, execution, or broker write is allowed.
+
+This boundary applies to the manual workflow. The deferred automated Production SOD provider, its validation/lineage/publication order, and its authority rules are unchanged.
+
+## Manual report package entry point
+
+Use the report-aware command for a completed manual analysis:
+
+```sh
+npm run v24:manual-sod-package -- manual-sod-analysis.json manual-package-new-run
+```
+
+The input contains:
+
+- `artifactContent`: the existing structured 19-section rendering content;
+- `candidateProposals`: the authored A+ trade ideas used by the existing renderer (default `[]`);
+- optional `bundleMetadata`: the completed canonical bundle's existing top-level metadata, excluding `candidates`. When supplied, the package combines it with the same `candidateProposals` and invokes the current manual candidate writer. This is not a new candidate schema.
+
+For an existing completed bundle, use its `candidates` as `candidateProposals` and its remaining fields as `bundleMetadata`. Reports render the authored ideas without requiring canonical candidate admission validity. There is only one trade-substance input: packaging cannot replace report ideas with different candidate contracts. Without bundle metadata, A+ analysis still renders and candidate JSON is explicitly withheld.
+
+`writeManualSodPackage(input, outputDirectory)` requires a **fresh directory** and writes `report.md`, `report.html`, and `dashboard.html` before loading the optional local `manual-sod-deliverables.mjs` gate. It reuses the established renderer without changing automated rendering. It then stages the existing writer's validated individual files and exposes `individual-candidates/` only as a complete set. No combined candidate JSON is delivered by this command.
+
+Every completed package includes `candidate-delivery-status.json` and a status badge in all three reports. Status is `DELIVERED`, `WITHHELD`, or `NO_CANDIDATES`; withholding reasons distinguish `VALIDATOR_UNAVAILABLE`, `VALIDATION_FAILED`, `CANDIDATE_INPUT_UNAVAILABLE`, and `DELIVERY_FAILED`. Full underlying errors, including candidate index/identity when provided by the validator, remain in the status file. The CLI prints the result and status as JSON. A completed report package exits 0 even when candidates are withheld; malformed report input/report filesystem failures exit 1, usage errors exit 2. Existing directories are rejected to prevent stale candidate files from appearing to belong to a new run.
+
+The reporting runtime needs only the package entry point, renderer, and rendering-content module; it has no static dependency on the ExecutionOS candidate contract. If ExecutionOS has been removed, an independently retained reporting runtime can still render supplied analysis. Removing the reporting runtime itself cannot leave a runnable local command. This command packages already-authored analysis; it does not fetch charts or perform a live analysis request.
 
 ## Required individual import files
 
@@ -24,7 +54,7 @@ Packaging MUST preserve the completed candidate payload in substance, including 
 
 ## Required generation-time contract check
 
-At each manual SOD generation, use the **current repository checkout** of the full template above and validate with its authoritative `normalizeCanonicalCandidateProposal` implementation. Cached ChatGPT examples, prior reports, and the combined/draft template do not establish the current candidate contract. Do not create a second schema or strip rejected fields to make an old artifact pass; re-author the proposal against the current template.
+At each manual SOD generation **that delivers ExecutionOS candidate JSON**, use the **current repository checkout** of the full template above and validate with its authoritative `normalizeCanonicalCandidateProposal` implementation. Cached ChatGPT examples, prior reports, and the combined/draft template do not establish the current candidate contract. Do not create a second schema or strip rejected fields to make an old artifact pass; re-author the proposal against the current template.
 
 Delivery validation enforces the current authoritative canonical validator contract, not literal byte or shape equality with the example template. Accepted shorthand, such as `{"type":"MANUAL_CONFIRMATION","description":"..."}`, may normalize internally for validation; packaging preserves the original candidate values, including the shorthand trigger.
 
@@ -42,13 +72,15 @@ A pass certifies file format and contract validity only. It does not evaluate cu
 
 ## Local manual package generator
 
-For a completed canonical manual SOD bundle, emit all individual import files with:
+For a completed canonical manual SOD bundle, the lower-level candidate-only command remains available:
 
 ```sh
 node schwab-bridge/manual-sod-deliverables.mjs manual-canonical-bundle.json manual-package/individual-candidates
 ```
 
 `buildManualSodIndividualCandidateBundles()` / `writeManualSodIndividualCandidateFiles()` validate the canonical proposals without substituting normalized candidates. Before creating output, the writer also runs the same delivery gate on every final serialized individual file; an invalid later candidate or oversized final file prevents any files from being written. Each file copies the original bundle metadata and exactly one original candidate, adding the manual policy. Filenames contain an ordinal and a filesystem-safe candidateId; candidateId itself is unchanged. The original combined bundle is never written or mutated. Existing output files are not overwritten; use a fresh output directory for a new package. With no candidates, there are no individual candidate files.
+
+The candidate-only command and validation-only command remain strict/nonzero on rejection; report workflows must use the report package entry point above to contain candidate failures.
 
 This dedicated manual generator accepts policy-less manual archival bundles or explicitly manual bundles. It rejects automated or unknown ingress policies and legacy manual proposal envelopes rather than converting their authority or vocabulary. For legacy draft material, complete the existing canonical export first; the packaging step itself must not normalize or reconstruct trade content.
 
@@ -66,4 +98,4 @@ Only the individual manual import files are required to be `MANUAL_AUTHORIZED`. 
 
 ## Offline acceptance
 
-Run `npm run v24:manual-sod-test` for the focused delivery/contract regression suite. Tests must cover emitted files and full candidate preservation, the existing manual UI adapter, real canonical API admission as `ACCEPTED` / `WAITING`, retry as `DUPLICATE`, no ARM/Execution/broker authority, and unchanged automated publication bytes/policy. Browser tests verify that an emitted file can be Previewed and Imported intact through the existing control. No live analysis request is required.
+Run `npm run v24:manual-sod-test` for the focused delivery/contract regression suite. Tests cover reporting with services offline, absent/unloadable validator code, rejected candidates, a later candidate failing validation/serialization, no partial candidate delivery, full candidate preservation, the existing manual UI adapter, real canonical API admission as `ACCEPTED` / `WAITING`, retry as `DUPLICATE`, no ARM/Execution/broker authority, and unchanged automated publication bytes/policy. Browser tests verify that an emitted file can be Previewed and Imported intact through the existing control. No live analysis request is required.

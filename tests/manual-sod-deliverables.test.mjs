@@ -16,6 +16,9 @@ import { PreTradeLifecycleCoordinator } from "../schwab-bridge/pretrade-lifecycl
 import { createPreTradeCandidateApiHandler } from "../schwab-bridge/pretrade-candidate-api.mjs";
 import { candidateContractHash, assertCanonicalCandidateIntegrity, normalizeCanonicalCandidateProposal } from "../schwab-bridge/pretrade-candidate-contract.mjs";
 
+import { writeManualSodPackage } from "../schwab-bridge/manual-sod-package.mjs";
+import { sodArtifactContentFixture } from "./helpers/sod-artifact-content-fixture.mjs";
+
 const fixtureUrl = new URL("../fixtures/v24-sod-candidates.example.json", import.meta.url);
 const clock = () => "2026-08-29T15:00:00.000Z";
 function bundle() {
@@ -95,7 +98,10 @@ test("manual package CLI writes ready-to-import files and leaves the combined ar
 
 test("generated manual file uses real canonical HTTP admission: ACCEPTED/WAITING then DUPLICATE with no execution authority", async t => {
   const dir = directory(t); const input = bundle();
-  const [file] = writeManualSodIndividualCandidateFiles(input, path.join(dir, "individual"));
+  const { candidates, ...bundleMetadata } = input;
+  const delivered = await writeManualSodPackage({ artifactContent: sodArtifactContentFixture(), candidateProposals: candidates, bundleMetadata }, path.join(dir, "individual"));
+  assert.equal(delivered.candidateDelivery.status, "DELIVERED");
+  const [file] = delivered.candidateDelivery.files;
   const prepared = prepareManualCandidateImport(fs.readFileSync(file, "utf8"));
   const store = new PreTradeStore({ filePath: path.join(dir, "state.json"), clock }); store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock });
