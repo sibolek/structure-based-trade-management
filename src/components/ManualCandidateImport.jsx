@@ -16,7 +16,8 @@ export default function ManualCandidateImport({ pretrade, onOpenPretrade }) {
     edit.current++; setRaw(value); setPrepared(null); setResult(null); setError("");
   }
   function preview(value = raw) {
-    try { setPrepared(prepareManualCandidateImport(value)); setError(""); setResult(null); }
+    setResult(null);
+    try { setPrepared(prepareManualCandidateImport(value)); setError(""); }
     catch (err) { setPrepared(null); setError(err.message); }
   }
   async function fileSelected(files) {
@@ -30,7 +31,7 @@ export default function ManualCandidateImport({ pretrade, onOpenPretrade }) {
     } catch (err) { if (edit.current === current) setError(err.message); }
   }
   async function submit() {
-    if (!prepared || submitting.current) return;
+    if (!prepared || submitting.current || result) return;
     submitting.current = true; setBusy(true); setError(""); setResult(null);
     try {
       const response = prepared.kind === "manual-envelope"
@@ -46,6 +47,11 @@ export default function ManualCandidateImport({ pretrade, onOpenPretrade }) {
     } catch (err) { setError(manualImportError(err)); }
     finally { submitting.current = false; setBusy(false); }
   }
+  const outcome = result?.outcomes[0]?.status;
+  const importLabel = outcome === "ACCEPTED" ? "Imported ✓"
+    : outcome === "DUPLICATE" ? "Already imported"
+    : outcome ? "Not imported — review result"
+    : busy ? "Importing…" : "Import into PRETRADE";
   const candidate = prepared?.candidate;
   const fields = candidate ? {
     Symbol: candidate.symbol, Direction: candidate.direction, Setup: candidate.setup,
@@ -74,7 +80,7 @@ export default function ManualCandidateImport({ pretrade, onOpenPretrade }) {
         <dl className="mt-3 grid gap-3 sm:grid-cols-2">
           {Object.entries(fields).map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-zinc-400">{label}</dt><dd className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-sm text-zinc-100">{fieldValue(value)}</dd></div>)}
         </dl>
-        <button type="button" disabled={busy || !pretrade?.client || !pretrade?.connected} onClick={submit} className="mt-4 rounded border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-sm font-semibold text-emerald-100 disabled:opacity-40">{busy ? "Importing…" : "Import into PRETRADE"}</button>
+        <button type="button" disabled={busy || !!result || !pretrade?.client || !pretrade?.connected} onClick={submit} className="mt-4 rounded border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-sm font-semibold text-emerald-100 disabled:opacity-40">{importLabel}</button>
         {!pretrade?.connected && <p className="mt-2 text-xs text-amber-200">PRETRADE is offline. You can preview JSON now and import when it reconnects.</p>}
       </div>}
       {result && <div role="status" aria-label="Canonical import result" className="mt-4 rounded border border-white/15 p-3">

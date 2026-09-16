@@ -31,6 +31,7 @@ test('file picker parses a JSON card, previews its fields, and submits only to c
   await page.screenshot({ path: '/tmp/sod-manual-v1/manual-preview.png', fullPage: true });
   await page.getByRole('button', { name: 'Import into PRETRADE' }).click();
   await expect(page.getByRole('status')).toContainText('ACCEPTED · WAITING');
+  await expect(page.getByRole('button', { name: 'Imported ✓', exact: true })).toBeDisabled();
   expect(requests).toHaveLength(1); expect(requests[0].url).toContain('/api/candidates/import');
   expect(requests[0].body.candidates[0]).toEqual(card); expect(requests[0].body.ingressPolicy).toBe('MANUAL_AUTHORIZED');
   await page.getByRole('button', { name: 'Open PRETRADE' }).click();
@@ -48,11 +49,14 @@ test('pasted JSON requires preview and edits invalidate the previous preview', a
   expect(requests).toHaveLength(0);
 });
 
-for (const [status, message] of [['DUPLICATE', 'Already imported'], ['CONFLICT', 'same version has different content'], ['ACTION_REQUIRED', 'Supersession review required']]) {
+for (const [status, message] of [['DUPLICATE', 'Already imported'], ['CONFLICT', 'same version has different content'], ['ACTION_REQUIRED', 'Supersession review required'], ['REJECTED', 'Invalid candidate'], ['STALE', 'Older version']]) {
   test(`canonical ${status} is understandable and never authorizes replacement`, async ({ page }) => {
     const requests = await open(page, { status }); await paste(page);
     await page.getByRole('button', { name: 'Import into PRETRADE' }).click();
     await expect(page.getByRole('status')).toContainText(message);
+    const button = page.getByRole('button', { name: status === 'DUPLICATE' ? 'Already imported' : 'Not imported — review result', exact: true });
+    await expect(button).toBeDisabled();
+    await button.evaluate(button => { button.click(); button.click(); });
     expect(requests).toHaveLength(1);
     expect(requests[0].url).not.toContain('authorize');
   });
@@ -63,11 +67,13 @@ test('prohibited authority and integrity responses are surfaced without leaking 
   await paste(page, JSON.stringify({ ...card, armAuthorized: false }));
   await page.getByRole('button', { name: 'Import into PRETRADE' }).click();
   await expect(page.getByRole('status')).toContainText('armAuthorized is system-owned authority');
+  await expect(page.getByRole('button', { name: 'Not imported — review result', exact: true })).toBeDisabled();
   await page.unroute('**/api/candidates/*');
   await page.route('**/api/candidates/import', route => route.fulfill({ status: 500, json: { code: 'CANDIDATE_CONTRACT_INTEGRITY_ERROR', error: '/private/sensitive/state.json' } }));
   await paste(page);
   await page.getByRole('button', { name: 'Import into PRETRADE' }).click();
   await expect(page.getByRole('alert')).toContainText('Stored candidate integrity check failed');
+  await expect(page.getByRole('button', { name: 'Import into PRETRADE', exact: true })).toBeEnabled();
   await expect(page.locator('body')).not.toContainText('/private/sensitive');
 });
 
@@ -119,8 +125,10 @@ test('manual import works with SOD offline and incomplete responses cannot confi
   expect(requests).toHaveLength(1);
   await page.unroute('**/api/candidates/*');
   await page.route('**/api/candidates/import', route => route.fulfill({ status: 200, json: {} }));
+  await page.getByRole('button', { name: 'Preview JSON', exact: true }).click();
   await page.getByRole('button', { name: 'Import into PRETRADE' }).click();
   await expect(page.getByRole('alert')).toContainText('MANUAL_IMPORT_INVALID_RESULT');
+  await expect(page.getByRole('button', { name: 'Import into PRETRADE', exact: true })).toBeEnabled();
   await expect(page.getByRole('status')).toHaveCount(0);
 });
 
@@ -144,9 +152,109 @@ test('generated manual SOD individual file previews and imports intact with SOD 
   expect(requests).toHaveLength(0);
   await page.getByRole('button', { name: 'Import into PRETRADE' }).click();
   await expect(page.getByRole('status')).toContainText('ACCEPTED · WAITING');
+  await expect(page.getByRole('button', { name: 'Imported ✓', exact: true })).toBeDisabled();
   expect(requests).toHaveLength(1);
   expect(requests[0].url).toContain('/api/candidates/import');
   expect(requests[0].body).toEqual(individual);
   expect(requests[0].body.candidates[0]).toEqual(input.candidates[0]);
   expect(requests[0].body.ingressPolicy).toBe('MANUAL_AUTHORIZED');
 });
+
+
+test('import is visibly disabled in flight and repeated clicks send only one request', async ({ page }) => {
+  await open(page);
+  await page.unroute('**/api/candidates/*');
+  const requests = [];
+  let release;
+  const responseReady = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/candidates/import', async route => {
+    requests.push(route.request().postDataJSON());
+    await responseReady;
+    await route.fulfill({ status: 200, json: { outcomes: [{ status: 'ACCEPTED', lifecycleState: 'WAITING', candidateId: card.candidateId, contractVersion: 1 }] } });
+  });
+  await paste(page);
+  const button = page.getByRole('button', { name: 'Import into PRETRADE', exact: true });
+  await expect(button).toBeEnabled();
+  try {
+    // Same-turn clicks exercise the synchronous submission guard as well as the disabled UI.
+    await button.evaluate(button => { button.click(); button.click(); button.click(); });
+    const importing = page.getByRole('button', { name: 'Importing…', exact: true });
+    await expect(importing).toBeDisabled();
+    await expect(page.getByLabel('Paste candidate JSON')).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Preview JSON', exact: true })).toBeDisabled();
+    await importing.evaluate(button => { button.click(); button.click(); });
+    await expect.poll(() => requests.length).toBe(1);
+  } finally {
+    release();
+  }
+  const imported = page.getByRole('button', { name: 'Imported ✓', exact: true });
+  await expect(imported).toBeDisabled();
+  await expect(page.getByRole('status')).toContainText('ACCEPTED · WAITING');
+  await imported.evaluate(button => { button.click(); button.click(); });
+  expect(requests).toHaveLength(1);
+});
+
+for (const reset of ['edit/paste', 'file picker', 'drop', 're-preview']) {
+  test(`${reset} resets terminal import state and allows a new preview to import`, async ({ page }) => {
+    const requests = await open(page);
+    await paste(page);
+    await page.getByRole('button', { name: 'Import into PRETRADE', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Imported ✓', exact: true })).toBeDisabled();
+    const nextCard = { ...card, candidateId: `${card.candidateId}-next` };
+    const nextJson = JSON.stringify(nextCard);
+    if (reset === 'edit/paste') {
+      await page.getByLabel('Paste candidate JSON').fill('{');
+      await expect(page.getByRole('heading', { name: 'Candidate preview' })).toHaveCount(0);
+      await expect(page.getByRole('status')).toHaveCount(0);
+      await page.getByRole('button', { name: 'Preview JSON', exact: true }).click();
+      await expect(page.getByRole('alert')).toContainText('Malformed JSON');
+      await paste(page, nextJson);
+    } else if (reset === 'file picker') {
+      await page.getByLabel('Choose JSON file').setInputFiles({ name: 'next.json', mimeType: 'application/json', buffer: Buffer.from(nextJson) });
+    } else if (reset === 'drop') {
+      const data = await page.evaluateHandle(raw => { const dt = new DataTransfer(); dt.items.add(new File([raw], 'next.json', { type: 'application/json' })); return dt; }, nextJson);
+      await page.getByLabel('Paste candidate JSON').dispatchEvent('drop', { dataTransfer: data });
+      await data.dispose();
+    } else {
+      await page.getByRole('button', { name: 'Preview JSON', exact: true }).click();
+    }
+    await expect(page.getByRole('status')).toHaveCount(0);
+    const button = page.getByRole('button', { name: 'Import into PRETRADE', exact: true });
+    await expect(button).toBeEnabled();
+    expect(requests).toHaveLength(1);
+    await button.click();
+    await expect(page.getByRole('button', { name: 'Imported ✓', exact: true })).toBeDisabled();
+    expect(requests).toHaveLength(2);
+    expect(requests[1].body.candidates[0]).toEqual(reset === 're-preview' ? card : nextCard);
+  });
+}
+
+for (const failure of ['network', 'server', 'incomplete result']) {
+  test(`${failure} failure restores the import button and allows retry without another preview`, async ({ page }) => {
+    await open(page);
+    await page.unroute('**/api/candidates/*');
+    const requests = [];
+    await page.route('**/api/candidates/import', route => {
+      requests.push(route.request().postDataJSON());
+      if (requests.length === 1) {
+        if (failure === 'network') return route.abort('failed');
+        if (failure === 'server') return route.fulfill({ status: 503, json: { code: 'PRETRADE_UNAVAILABLE' } });
+        return route.fulfill({ status: 200, json: {} });
+      }
+      return route.fulfill({ status: 200, json: { outcomes: [{ status: 'ACCEPTED', lifecycleState: 'WAITING', candidateId: card.candidateId, contractVersion: 1 }] } });
+    });
+    await paste(page);
+    const button = page.getByRole('button', { name: 'Import into PRETRADE', exact: true });
+    await button.click();
+    await expect(page.getByRole('alert')).toContainText('Import was not confirmed');
+    await expect(page.getByRole('status')).toHaveCount(0);
+    await expect(button).toBeEnabled();
+    expect(requests).toHaveLength(1);
+    await button.click();
+    await expect(page.getByRole('button', { name: 'Imported ✓', exact: true })).toBeDisabled();
+    await expect(page.getByRole('status')).toContainText('ACCEPTED · WAITING');
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual(requests[0]);
+  });
+}
