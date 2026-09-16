@@ -25,6 +25,17 @@ charts/screenshots
 
 ChatGPT/manual SOD authoring **must emit `manual-sod-analysis-YYYY-MM-DD.json` as part of the standard deliverables**, using the same report content and A+ proposals as the human-readable analysis. Download that JSON and pass it directly to the packager. The JSON is an intermediate transport artifact, **not an importable candidate bundle or evidence of validation**. Never upload it to Manual Candidate Import; use only the downstream individual candidate files after successful validation.
 
+### Required transport write and recovery procedure
+
+This is a standing requirement for every ordinary “Create today's Start of Day report” request; the user must not need to request the transport separately.
+
+1. Preserve the completed analysis and serialize its transport once. Emit `manual-sod-analysis-YYYY-MM-DD.json` as a **standalone top-level downloadable artifact in a fresh writable location**, separate from the report package. Never put it inside an existing SOD output directory. For example, use `/mnt/data/manual-sod-analysis-2026-09-16.json` when that path is unused and writable, or the root of a newly created unique transport staging directory. Locally, use a fresh transport directory and a separate fresh report-package directory.
+2. Before reporting transport success, verify that the exact returned path exists as a regular file, reopen it for reading, and parse its JSON. Check that the read-back transport matches the preserved analysis (`artifactContent`, `candidateProposals`, and `bundleMetadata`). Provide the verified downloadable path alongside the normal report deliverables. A planned path or serializer success message alone is not verification.
+3. On a filesystem permission or write failure, retain the same serialized transport and **retry only the write** in a new writable top-level location or newly created unique transport directory. Keep the standard dated filename there. Do not regenerate analysis, re-fetch data, alter trade/report content, dates, or metadata, rerun candidate authoring, or overwrite an existing artifact to work around a filesystem error. Verify the retry by the same read-back checks. Input/serialization errors are separate from filesystem recovery; do not hide them by changing paths.
+4. If no writable location succeeds, report transport delivery as incomplete with the actual filesystem error; do not claim a completed SOD package or provide an unverified download. Preserve the authored analysis for a later write-only retry. Once the transport is verified, run the existing packager into its own fresh directory and report its actual candidate-delivery status separately.
+
+These are generation-workflow responsibilities. The current local serializer does not select a fallback directory or perform the workflow's read-back verification automatically; the caller must carry out those steps. Transport recovery does not rerun analysis or change candidate validation/admission rules.
+
 There is no upstream local generator for the ordinary ChatGPT/manual chart-analysis workflow in this repository. The existing local renderer and manual packager consume already-authored content; the separate automated analysis providers are not this workflow. The explicit serializer below is an authoring utility, not an automatic connection to a ChatGPT conversation. Neither CLI accepts screenshots, calls an AI model, fetches market data, or starts services. Analysis remains upstream.
 
 The canonical [transport template](../../examples/manual-sod-analysis.template.json) contains all 19 report sections, clearly marked placeholders, an empty `candidateProposals` array, and `bundleMetadata: null`. It is transport/report-shape guidance, **not a second candidate schema**. Replace the report placeholders with authored content, including current VIX context or an explicit unavailable observation. For A+ proposals, author against the current [individual candidate template](../../examples/ExecutionOS_MANUAL_SOD_individual_candidate_v24_template.json): put the completed bundle's `candidates` in `candidateProposals` and its remaining top-level fields in `bundleMetadata`. Do not paste an entire bundle into `candidateProposals`. Keep the existing renderer's structured blocks; do not substitute rendered Markdown, HTML, or CSS for `artifactContent`.
@@ -34,11 +45,13 @@ If there are no A+ ideas, use `candidateProposals: []` and `bundleMetadata: null
 For already-authored data saved under another filename, the optional local serializer provides the standard artifact name:
 
 ```sh
-npm run v24:manual-sod-analysis -- authored-sod.json 2026-09-16 ~/Downloads/SOD-2026-09-16-analysis
-npm run v24:manual-sod-package -- ~/Downloads/SOD-2026-09-16-analysis/manual-sod-analysis-2026-09-16.json ~/Downloads/SOD-2026-09-16-validated
+transport_dir="$(mktemp -d "$HOME/Downloads/manual-sod-transport-2026-09-16-XXXXXX")"
+npm run v24:manual-sod-analysis -- authored-sod.json 2026-09-16 "$transport_dir"
+# Perform the required existence/read-back/content checks above before packaging.
+npm run v24:manual-sod-package -- "$transport_dir/manual-sod-analysis-2026-09-16.json" ~/Downloads/SOD-2026-09-16-validated
 ```
 
-If ChatGPT already supplied the correctly named transport file, only the second command is needed, with that file's actual location. These dates are examples; choose the actual analysis session date and a fresh package directory each morning.
+If ChatGPT already supplied the correctly named transport file, only the packager command is needed, with that file's actual location. These dates are examples; choose the actual analysis session date and a fresh package directory each morning.
 
 `serializeManualSodAnalysis(input)` returns deterministic two-space JSON with a trailing newline. It extracts only `artifactContent`, `candidateProposals` (default `[]`), and `bundleMetadata` (default `null`), without adding timestamps, status, policy, or authority metadata. It checks those outer container types and lossless JSON serialization only; it does **not** validate report sections or candidate contracts. Invalid/draft candidate JSON values remain unchanged for the downstream validator to reject. The JavaScript helper rejects non-JSON/lossy values such as `undefined`, nonfinite numbers, Dates, and sparse arrays rather than silently changing them. CLI input must be ordinary JSON; authored numeric values must fit JSON/JavaScript number precision, and object keys must be unique.
 

@@ -81,7 +81,9 @@ Governing invariant:
 
 ## Current manual SOD workflow
 
-Manual ChatGPT SOD is the current production-generation workflow: **charts/screenshots → ChatGPT/manual analysis → `manual-sod-analysis-YYYY-MM-DD.json` → `v24:manual-sod-package` → reports/dashboard, plus individual candidate JSON only if the current local validator passes**. Request the dated transport JSON as a standard deliverable; it contains `artifactContent`, `candidateProposals`, and `bundleMetadata`. The [transport template](examples/manual-sod-analysis.template.json) guides authoring without copying the candidate schema.
+Manual ChatGPT SOD is the current production-generation workflow: **charts/screenshots → ChatGPT/manual analysis → `manual-sod-analysis-YYYY-MM-DD.json` → `v24:manual-sod-package` → reports/dashboard, plus individual candidate JSON only if the current local validator passes**. Every ordinary SOD request automatically includes the dated transport JSON as a standard deliverable; it contains `artifactContent`, `candidateProposals`, and `bundleMetadata`. The [transport template](examples/manual-sod-analysis.template.json) guides authoring without copying the candidate schema.
+
+Emit the transport as a standalone top-level artifact in a fresh writable location, never inside an existing SOD output directory. Verify that the exact file exists, is readable, and parses back to the same analysis before reporting success. On a filesystem permission/write failure, retry only the write of the preserved serialized analysis to a fresh writable path; never regenerate or change analysis. Follow the [required transport write and recovery procedure](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md#required-transport-write-and-recovery-procedure).
 
 ```sh
 npm run v24:manual-sod-package -- ~/Downloads/manual-sod-analysis-2026-09-16.json ~/Downloads/SOD-2026-09-16-validated
