@@ -774,6 +774,20 @@ The candidate's identity, version, source, provenance, trade logic, and optional
 
 See the [Manual SOD Deliverable Specification](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md) and its [individual candidate template](examples/ExecutionOS_MANUAL_SOD_individual_candidate_v24_template.json). Template placeholders must be completed during authoring before a candidate is finalized.
 
+### Ad-hoc standalone trade card from a chart
+
+Ask ChatGPT, for example, **“create a trade card for this chart.”** Normal authoring delivers the standalone HTML and `manual-trade-card-analysis-YYYY-MM-DD-SYMBOL.json`. The transport carries the exact authored HTML, one structured candidate proposal from the same analysis, and available manual bundle metadata. It is not an import file. Use the [transport-shape template](examples/manual-trade-card-analysis.template.json); the current local validator remains the candidate contract authority.
+
+```sh
+npm run v24:manual-trade-card-package -- ~/Downloads/manual-trade-card-analysis-2026-09-16-NVDA.json ~/Downloads/trade-card-2026-09-16-NVDA-validated
+```
+
+Choose a fresh output directory. The command writes `trade-card.html` without changing the author's styling, plus `candidate-delivery-status.json`. Only `DELIVERED` includes an individual candidate JSON ready for Preview. `WITHHELD` explains why the optional candidate could not be delivered; the authored HTML remains available. A `PENDING` status is incomplete and must not be imported. The ordinary flow is **chart screenshot → ChatGPT/manual analysis → transport → local package → HTML; validated candidate if available → Preview → explicit Import**.
+
+No full SOD report or running PRETRADE/Schwab/Execution Board/broker service is required. Chart analysis remains upstream; the local command neither analyzes screenshots nor calls a model. Candidate output reuses the manual SOD individual-file gate and one-candidate `MANUAL_AUTHORIZED` bundle. Import behavior and all review/ARM/execution boundaries below are unchanged.
+
+For local serialization, use `npm run v24:manual-trade-card-analysis -- <authored-trade-card.json> <YYYY-MM-DD> <SYMBOL> <fresh-transport-directory>`. Write the transport as a standalone top-level artifact in a fresh writable location, outside existing SOD output directories. The caller must verify existence, readability, and content before reporting success. On permission/write failure, retry only the preserved serialized bytes at a fresh path, without regenerating analysis. Existing transport files are never overwritten; neither CLI retries automatically. See the [complete standalone procedure and statuses](docs/sod/ExecutionOS_V2.4_Manual_Trade_Card_Deliverable_Spec_v1.0.md).
+
 ### Load and Preview
 
 In the **SOD** workspace, find **Import Candidate JSON** (the Manual Candidate Import control).

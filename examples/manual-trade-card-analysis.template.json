@@ -1,0 +1,9 @@
+{
+  "artifactContent": {
+    "html": "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>TRANSPORT SHAPE GUIDANCE ONLY</title></head><body><p>Replace this entire HTML string with the complete authored standalone trade card, preserving its existing template and styling. This placeholder is not a trade-card visual template.</p><p>The one proposal object below is a placeholder, not a second candidate schema or a valid import. Author it against the current repository contract and manual delivery path. Never import this transport.</p></body></html>"
+  },
+  "candidateProposals": [
+    {}
+  ],
+  "bundleMetadata": null
+}

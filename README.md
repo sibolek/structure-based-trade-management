@@ -95,6 +95,18 @@ In SOD, **Import Candidate JSON** accepts file selection, paste, or drag-and-dro
 
 Import grants no activation, permission, risk approval, ARM, Execution Board trade/handoff, execution ownership, or broker-write authority. Existing permission/risk checks, operator review, quantity selection, and manual ARM precede Execution Board handoff. Automated Production SOD is **deferred / not production-accepted**, with post-base automation work preserved separately at `593f4dd` on `v24-sod-production-analysis-provider`.
 
+## Ad-hoc standalone trade cards
+
+An ordinary **“create a trade card for this chart”** request produces the authored standalone HTML plus `manual-trade-card-analysis-YYYY-MM-DD-SYMBOL.json`. The flow is **chart screenshot → ChatGPT/manual analysis → dated symbol transport → local package → standalone HTML; candidate JSON only if the current local validator passes → Preview → explicit Import**. Full SOD machinery is not required.
+
+```sh
+npm run v24:manual-trade-card-package -- ~/Downloads/manual-trade-card-analysis-2026-09-16-NVDA.json ~/Downloads/trade-card-2026-09-16-NVDA-validated
+```
+
+The package preserves the authored HTML and its styling verbatim and writes `candidate-delivery-status.json`. Its optional candidate file uses the existing authoritative manual delivery gate and canonical one-candidate `MANUAL_AUTHORIZED` bundle. Services may remain offline; unavailable/failed validation withholds candidate JSON while valid HTML still writes. Packaging never imports, ARMs, hands off, executes, or grants broker authority.
+
+Use the [transport-shape example](examples/manual-trade-card-analysis.template.json), not a copied candidate schema. The optional `v24:manual-trade-card-analysis` serializer accepts `<authored-trade-card.json> <YYYY-MM-DD> <SYMBOL> <fresh-transport-directory>`. Deliver transport at a standalone top-level path in a fresh writable location, outside existing SOD output directories; verify existence, readability, and unchanged content before success. On write failure, the caller retries only the preserved serialized bytes at a fresh path. Neither CLI automatically retries. See the [standalone trade-card deliverable specification](docs/sod/ExecutionOS_V2.4_Manual_Trade_Card_Deliverable_Spec_v1.0.md).
+
 ## Accepted end-to-end lifecycle
 
 ```text
