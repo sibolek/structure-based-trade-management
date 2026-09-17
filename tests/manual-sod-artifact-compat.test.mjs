@@ -43,7 +43,8 @@ test("canonicalizer repairs known chat/manual section aliases and bullets withou
   const html = fs.readFileSync(result.report.htmlPath, "utf8");
   for (const section of SOD_REPORT_SECTIONS) assert.ok(html.includes(`id="${section.id}"`));
   for (const alias of Object.values(SECTION_ALIASES)) assert.equal(html.includes(`id="${alias}"`), false);
-  assert.match(fs.readFileSync(result.report.markdownPath, "utf8"), /Macro context remains a bullet list\./);
+  const markdown = fs.readFileSync(result.report.markdownPath, "utf8");
+  assert.ok(markdown.includes("Macro context remains a bullet list"));
 });
 
 test("canonicalizer repairs provider-style listItems and metricItems field names", () => {
