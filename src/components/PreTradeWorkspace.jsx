@@ -48,6 +48,24 @@ function clock(value) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function dateTime(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "—";
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function readableCode(value) {
+  const normalized = text(value).replaceAll("_", " ").toLowerCase();
+  return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 function statusTone(state) {
   const value = upper(state);
   if (["READY", "ARMED", "LIVE", "HISTORY"].includes(value)) return "border-emerald-400/30 bg-emerald-950/15 text-emerald-100";
@@ -748,13 +766,28 @@ function AuthorizedCard({ item }) {
 function HistoryCard({ item }) {
   const candidate = item.candidate;
   const state = item.execution?.executionState || candidate.lifecycleState;
-  const reason = candidate.terminalOutcome?.reasonCode || candidate.terminalOutcome?.note || null;
+  const terminal = candidate.terminalOutcome && typeof candidate.terminalOutcome === "object"
+    ? candidate.terminalOutcome
+    : null;
+  const reasonNote = text(terminal?.note);
+  const reasonCode = text(terminal?.reasonCode);
+  const reason = reasonNote || readableCode(reasonCode) || null;
+  const source = readableCode(terminal?.source);
   return (
     <article className="overflow-hidden rounded border border-white/10 bg-ink-850/70">
       <CandidateHeader candidate={candidate} subtitle={item.execution ? `Execution ${state}` : "Terminal unarmed"} />
-      <div className="grid gap-3 p-4 text-sm lg:grid-cols-3">
+      <div className="grid gap-3 p-4 text-sm sm:grid-cols-2 xl:grid-cols-4">
         <div><p className="section-label">Outcome</p><p className="font-semibold">{state}</p></div>
-        <div><p className="section-label">Reason</p><p className="text-zinc-400">{reason || "—"}</p></div>
+        <div>
+          <p className="section-label">When</p>
+          <p className="text-zinc-300">{dateTime(terminal?.occurredAt)}</p>
+          {source && <p className="mt-1 text-[11px] text-zinc-600">Source: {source}</p>}
+        </div>
+        <div>
+          <p className="section-label">Reason</p>
+          <p className="text-zinc-300">{reason || "—"}</p>
+          {reasonNote && reasonCode && <p className="mt-1 font-mono text-[10px] text-zinc-600">{reasonCode}</p>}
+        </div>
         <div><p className="section-label">Authorization</p><p className="text-zinc-400">{candidate.arm ? `${candidate.arm.selectedQuantity} · ${candidate.arm.handoffId}` : "Never ARMED"}</p></div>
       </div>
     </article>
