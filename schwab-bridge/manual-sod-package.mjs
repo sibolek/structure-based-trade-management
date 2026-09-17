@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expandManualPath, defaultManualPackageDirectory } from "./manual-output-paths.mjs";
+import { canonicalizeManualSodArtifactContent } from "./manual-sod-artifact-compat.mjs";
 import { renderSodArtifacts } from "./sod-artifact-renderer.mjs";
 
 // Reporting has no static dependency on the ExecutionOS candidate contract.
@@ -69,6 +70,10 @@ async function deliverCandidates(candidateProposals, bundleMetadata, outputDirec
 export async function writeManualSodPackage({ artifactContent, candidateProposals = [], bundleMetadata } = {}, outputDirectory) {
   if (!Array.isArray(candidateProposals)) throw new Error("Manual SOD candidateProposals must be an array of trade ideas.");
   const input = structuredClone({ artifactContent, candidateProposals, bundleMetadata });
+  // Repair only known presentation/report-shape aliases from manual/chat-authored
+  // transport. Candidate proposals remain byte-for-byte authored input and still
+  // pass through the current canonical ExecutionOS delivery validator unchanged.
+  input.artifactContent = canonicalizeManualSodArtifactContent(input.artifactContent);
   const output = path.resolve(outputDirectory);
   const pending = { status: "PENDING", message: "ExecutionOS candidate delivery pending; no candidate JSON has been delivered.", files: [] };
   const render = delivery => renderSodArtifacts({
