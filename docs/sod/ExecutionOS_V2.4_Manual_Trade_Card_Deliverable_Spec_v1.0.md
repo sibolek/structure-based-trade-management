@@ -12,6 +12,26 @@ chart screenshot → ChatGPT/manual trade-card analysis + authored HTML
 → Preview → explicit Import
 ```
 
+## Standard default destinations
+
+```text
+~/Downloads/ExecutionOS/TradeCards/YYYY-MM-DD/
+├── SYMBOL/
+│   ├── trade-card.html
+│   ├── candidate-delivery-status.json
+│   └── 01-<safe-candidateId>.json       # only when DELIVERED
+└── SYMBOL-transport/
+    └── manual-trade-card-analysis-YYYY-MM-DD-SYMBOL.json
+```
+
+The final output-directory argument is optional on both manual serializers and both manual packagers. Package defaults come only from the standard transport **filename** (valid calendar date and, for trade cards, a safe uppercase symbol label), never the clock or candidate fields. Labels do not rewrite or validate authored dates/symbols; authors must keep them consistent. An undated or renamed input still works with an explicit output directory. The `-TRANSPORT` suffix (case-insensitive) is reserved for transport-directory naming only in default trade-card path derivation; labels such as `NVDA-TRANSPORT` require explicit output directories for transport and package destinations.
+
+Transport defaults use a fresh sibling directory so the transport never occupies an existing or future package directory. Both default transport directories and package directories must be absent, including empty directories and symlinks. A repeated run fails; there is no overwrite, auto-suffix, automatic retry, or silent fallback. For a new version or write-only recovery, supply an explicit fresh output directory as the last argument; preserve and verify the existing serialized analysis. Explicit transport destinations retain their existing exclusive-file behavior. Never choose an existing package as a transport destination.
+
+CLI input and output paths expand `~` or `~/` using the current user's home directory, including when quoted; `~otheruser` is rejected. Default mode requires an existing writable `~/Downloads` directory. Missing/unavailable Downloads fails clearly and allows an explicit destination override. Other filesystem errors name the failing path; partial or interrupted output must be retried at a new path. Programmatic writer APIs still require explicit output paths. No changes to automated Production SOD, analysis, validator gating, Manual Import, PRETRADE, permission checks, ARM, execution, or broker authority.
+
+Run `npm run v24:manual-output-test` for default-path sandbox smoke tests and regression coverage.
+
 ## Authoring and transport
 
 The [transport example](../../examples/manual-trade-card-analysis.template.json) is transport-shape guidance only, not a second candidate schema or a visual template. Its placeholder proposal is deliberately incomplete. Replace the HTML and proposal during authoring; the example itself yields HTML with candidate delivery withheld.
@@ -27,10 +47,10 @@ Repository inspection found no dedicated standalone trade-card renderer, HTML te
 Optional serializer for already-authored JSON:
 
 ```sh
-npm run v24:manual-trade-card-analysis -- /path/to/authored-trade-card.json 2026-09-16 NVDA /path/to/fresh-transport-directory
+npm run v24:manual-trade-card-analysis -- /path/to/authored-trade-card.json 2026-09-16 NVDA
 ```
 
-`serializeManualTradeCardAnalysis(input)` returns lossless transport JSON. `writeManualTradeCardAnalysis(input, analysisDate, symbol, outputDirectory)` writes the dated, symbol-labeled file exclusively and returns its absolute path. These functions require only Node built-ins, with no validator/runtime/repository contract. The serializer checks the transport shape and JSON fidelity, not candidate validity. Filename labels never rewrite authored candidate fields. Use a valid calendar date and a safe uppercase symbol label (1–32 letters/digits/dots/underscores/hyphens, starting with a letter/digit); for symbols containing slashes, supply a safe filename label while preserving the actual candidate symbol.
+`serializeManualTradeCardAnalysis(input)` returns lossless transport JSON. `writeManualTradeCardAnalysis(input, analysisDate, symbol, outputDirectory)` writes the dated, symbol-labeled file exclusively and returns its absolute path. The serializer and its CLI path helper (distribute `manual-output-paths.mjs` alongside it) require only Node built-ins, with no validator/runtime/repository contract. The serializer checks the transport shape and JSON fidelity, not candidate validity. Filename labels never rewrite authored candidate fields. Use a valid calendar date and a safe uppercase symbol label (1–32 letters/digits/dots/underscores/hyphens, starting with a letter/digit); for symbols containing slashes, supply a safe filename label while preserving the actual candidate symbol.
 
 ### Required durable write and recovery procedure
 
@@ -42,7 +62,7 @@ npm run v24:manual-trade-card-analysis -- /path/to/authored-trade-card.json 2026
 ## Local packaging and candidate delivery
 
 ```sh
-npm run v24:manual-trade-card-package -- /path/to/manual-trade-card-analysis-2026-09-16-NVDA.json /path/to/fresh-trade-card-package
+npm run v24:manual-trade-card-package -- ~/Downloads/ExecutionOS/TradeCards/2026-09-16/NVDA-transport/manual-trade-card-analysis-2026-09-16-NVDA.json
 ```
 
 Use the actual date/symbol and a fresh output directory; even an existing empty package directory is refused. `writeManualTradeCardPackage(input, outputDirectory)` returns `htmlPath`, `candidateDeliveryStatusPath`, and `candidateDelivery`. The package contains:

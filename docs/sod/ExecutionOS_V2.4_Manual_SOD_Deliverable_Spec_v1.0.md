@@ -18,12 +18,32 @@ The standard manual workflow is:
 charts/screenshots
   → ChatGPT/manual SOD analysis
   → manual-sod-analysis-YYYY-MM-DD.json
-  → npm run v24:manual-sod-package -- <analysis.json> <fresh-output-directory>
+  → npm run v24:manual-sod-package -- <analysis.json> [fresh-output-directory]
   → report.md + report.html + dashboard.html + candidate-delivery-status.json
   → individual-candidates/ only if the current local validator passes
 ```
 
 ChatGPT/manual SOD authoring **must emit `manual-sod-analysis-YYYY-MM-DD.json` as part of the standard deliverables**, using the same report content and A+ proposals as the human-readable analysis. Download that JSON and pass it directly to the packager. The JSON is an intermediate transport artifact, **not an importable candidate bundle or evidence of validation**. Never upload it to Manual Candidate Import; use only the downstream individual candidate files after successful validation.
+
+### Standard default destinations
+
+```text
+~/Downloads/ExecutionOS/SOD/
+├── YYYY-MM-DD/
+│   ├── report.md
+│   ├── report.html
+│   ├── dashboard.html
+│   ├── candidate-delivery-status.json
+│   └── individual-candidates/          # only when DELIVERED
+└── YYYY-MM-DD-transport/
+    └── manual-sod-analysis-YYYY-MM-DD.json
+```
+
+The final output-directory argument is optional on both manual serializers and both manual packagers. Package defaults come only from the standard transport **filename** (valid calendar date and, for trade cards, a safe uppercase symbol label), never the clock or candidate fields. Labels do not rewrite or validate authored dates/symbols; authors must keep them consistent. An undated or renamed input still works with an explicit output directory. The `-TRANSPORT` suffix (case-insensitive) is reserved for transport-directory naming only in default trade-card path derivation; labels such as `NVDA-TRANSPORT` require explicit output directories for transport and package destinations.
+
+Transport defaults use a fresh sibling directory so the transport never occupies an existing or future package directory. Both default transport directories and package directories must be absent, including empty directories and symlinks. A repeated run fails; there is no overwrite, auto-suffix, automatic retry, or silent fallback. For a new version or write-only recovery, supply an explicit fresh output directory as the last argument; preserve and verify the existing serialized analysis. Explicit transport destinations retain their existing exclusive-file behavior. Never choose an existing package as a transport destination.
+
+CLI input and output paths expand `~` or `~/` using the current user's home directory, including when quoted; `~otheruser` is rejected. Default mode requires an existing writable `~/Downloads` directory. Missing/unavailable Downloads fails clearly and allows an explicit destination override. Other filesystem errors name the failing path; partial or interrupted output must be retried at a new path. Programmatic writer APIs still require explicit output paths. No changes to automated Production SOD, analysis, validator gating, Manual Import, PRETRADE, permission checks, ARM, execution, or broker authority.
 
 ### Required transport write and recovery procedure
 
@@ -45,17 +65,16 @@ If there are no A+ ideas, use `candidateProposals: []` and `bundleMetadata: null
 For already-authored data saved under another filename, the optional local serializer provides the standard artifact name:
 
 ```sh
-transport_dir="$(mktemp -d "$HOME/Downloads/manual-sod-transport-2026-09-16-XXXXXX")"
-npm run v24:manual-sod-analysis -- authored-sod.json 2026-09-16 "$transport_dir"
+npm run v24:manual-sod-analysis -- authored-sod.json 2026-09-16
 # Perform the required existence/read-back/content checks above before packaging.
-npm run v24:manual-sod-package -- "$transport_dir/manual-sod-analysis-2026-09-16.json" ~/Downloads/SOD-2026-09-16-validated
+npm run v24:manual-sod-package -- ~/Downloads/ExecutionOS/SOD/2026-09-16-transport/manual-sod-analysis-2026-09-16.json
 ```
 
 If ChatGPT already supplied the correctly named transport file, only the packager command is needed, with that file's actual location. These dates are examples; choose the actual analysis session date and a fresh package directory each morning.
 
 `serializeManualSodAnalysis(input)` returns deterministic two-space JSON with a trailing newline. It extracts only `artifactContent`, `candidateProposals` (default `[]`), and `bundleMetadata` (default `null`), without adding timestamps, status, policy, or authority metadata. It checks those outer container types and lossless JSON serialization only; it does **not** validate report sections or candidate contracts. Invalid/draft candidate JSON values remain unchanged for the downstream validator to reject. The JavaScript helper rejects non-JSON/lossy values such as `undefined`, nonfinite numbers, Dates, and sparse arrays rather than silently changing them. CLI input must be ordinary JSON; authored numeric values must fit JSON/JavaScript number precision, and object keys must be unique.
 
-`writeManualSodAnalysis(input, analysisDate, outputDirectory)` writes `manual-sod-analysis-YYYY-MM-DD.json` and returns its absolute path. The date must be an explicit valid calendar date. It is a filename label only: authors must keep it consistent with report/bundle/candidate dates, which the serializer never infers or rewrites. Existing files are never overwritten; use a new transport directory for another version of the same date. No network, validator, renderer, runtime, or service availability is required. The standalone module uses only Node built-ins. The CLI prints `{ "analysisPath": "..." }`; exit status is 0 on serialization success, 1 on input/date/serialization/filesystem error, and 2 on usage error. Success certifies transport creation only.
+`writeManualSodAnalysis(input, analysisDate, outputDirectory)` writes `manual-sod-analysis-YYYY-MM-DD.json` and returns its absolute path. The date must be an explicit valid calendar date. It is a filename label only: authors must keep it consistent with report/bundle/candidate dates, which the serializer never infers or rewrites. Existing files are never overwritten; use a new transport directory for another version of the same date. No network, validator, renderer, runtime, or service availability is required. The serializer and its CLI path helper depend only on Node built-ins; distribute `manual-output-paths.mjs` alongside the serializer. The CLI prints `{ "analysisPath": "..." }`; exit status is 0 on serialization success, 1 on input/date/serialization/filesystem error, and 2 on usage error. Success certifies transport creation only.
 
 For valid reporting content and writable output, reports/dashboard complete independently of candidate validation. Missing validators and invalid candidates remain nonfatal downstream withholding cases. Malformed reporting input and report filesystem errors still fail; neither a serialized transport nor the template guarantees a completed report or valid candidate delivery.
 
@@ -147,4 +166,4 @@ Only the individual manual import files are required to be `MANUAL_AUTHORIZED`. 
 
 ## Offline acceptance
 
-Run `npm run v24:manual-sod-test` for the focused delivery/contract regression suite. Tests cover transport CLI round trips, deterministic/lossless serialization with no runtime or validator, compatibility with direct inputs, transport template rendering, reporting with services offline, absent/unloadable validator code, rejected candidates, a later candidate failing validation/serialization, no partial candidate delivery, full candidate preservation, the existing manual UI adapter, real canonical API admission as `ACCEPTED` / `WAITING`, retry as `DUPLICATE`, no ARM/Execution/broker authority, and unchanged automated publication bytes/policy. Browser tests verify that an emitted file can be Previewed and Imported intact through the existing control. No live analysis request is required.
+Run `npm run v24:manual-output-test` for default-path sandbox smoke tests, fresh-directory refusal, home expansion, explicit overrides, and unchanged validator withholding. Run `npm run v24:manual-sod-test` for the focused delivery/contract regression suite. Tests cover transport CLI round trips, deterministic/lossless serialization with no runtime or validator, compatibility with direct inputs, transport template rendering, reporting with services offline, absent/unloadable validator code, rejected candidates, a later candidate failing validation/serialization, no partial candidate delivery, full candidate preservation, the existing manual UI adapter, real canonical API admission as `ACCEPTED` / `WAITING`, retry as `DUPLICATE`, no ARM/Execution/broker authority, and unchanged automated publication bytes/policy. Browser tests verify that an emitted file can be Previewed and Imported intact through the existing control. No live analysis request is required.

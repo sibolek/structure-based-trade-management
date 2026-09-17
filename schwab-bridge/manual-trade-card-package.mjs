@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { expandManualPath, defaultManualPackageDirectory } from "./manual-output-paths.mjs";
 import { serializeManualTradeCardAnalysis, standaloneTradeCardHtml } from "./manual-trade-card-analysis.mjs";
 
 const withheld = (reason, message, error) => ({
@@ -84,14 +85,15 @@ export async function writeManualTradeCardPackage(input = {}, outputDirectory) {
 
 async function cli() {
   const [inputPath, outputDirectory, ...extra] = process.argv.slice(2);
-  if (!inputPath || !outputDirectory || extra.length || inputPath.startsWith("--")) {
-    console.error("Usage: node schwab-bridge/manual-trade-card-package.mjs <manual-trade-card-analysis.json> <fresh-package-directory>");
+  if (!inputPath || outputDirectory === "" || extra.length || inputPath.startsWith("--")) {
+    console.error("Usage: node schwab-bridge/manual-trade-card-package.mjs <manual-trade-card-analysis.json> [fresh-package-directory]");
     process.exitCode = 2;
     return;
   }
   try {
-    const input = JSON.parse(fs.readFileSync(path.resolve(inputPath), "utf8"));
-    console.log(JSON.stringify(await writeManualTradeCardPackage(input, outputDirectory), null, 2));
+    const output = outputDirectory === undefined ? defaultManualPackageDirectory("trade-card", inputPath) : expandManualPath(outputDirectory);
+    const input = JSON.parse(fs.readFileSync(path.resolve(expandManualPath(inputPath)), "utf8"));
+    console.log(JSON.stringify(await writeManualTradeCardPackage(input, output), null, 2));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

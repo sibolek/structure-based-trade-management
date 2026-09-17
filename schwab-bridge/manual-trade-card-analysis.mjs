@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { expandManualPath, writeDefaultManualTransport } from "./manual-output-paths.mjs";
 
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -51,14 +52,16 @@ export function writeManualTradeCardAnalysis(input, analysisDate, symbol, output
 
 function cli() {
   const [inputPath, analysisDate, symbol, outputDirectory, ...extra] = process.argv.slice(2);
-  if (!inputPath || !analysisDate || !symbol || !outputDirectory || extra.length || inputPath.startsWith("--")) {
-    console.error("Usage: node schwab-bridge/manual-trade-card-analysis.mjs <authored-trade-card.json> <YYYY-MM-DD> <SYMBOL> <fresh-transport-directory>");
+  if (!inputPath || !analysisDate || !symbol || outputDirectory === "" || extra.length || inputPath.startsWith("--")) {
+    console.error("Usage: node schwab-bridge/manual-trade-card-analysis.mjs <authored-trade-card.json> <YYYY-MM-DD> <SYMBOL> [fresh-transport-directory]");
     process.exitCode = 2;
     return;
   }
   try {
-    const input = JSON.parse(fs.readFileSync(path.resolve(inputPath), "utf8"));
-    const analysisPath = writeManualTradeCardAnalysis(input, analysisDate, symbol, outputDirectory);
+    const input = JSON.parse(fs.readFileSync(path.resolve(expandManualPath(inputPath)), "utf8"));
+    const analysisPath = outputDirectory === undefined
+      ? writeDefaultManualTransport(serializeManualTradeCardAnalysis(input), "trade-card", analysisDate, symbol)
+      : writeManualTradeCardAnalysis(input, analysisDate, symbol, expandManualPath(outputDirectory));
     console.log(JSON.stringify({ analysisPath }, null, 2));
   } catch (error) {
     console.error(error.message);

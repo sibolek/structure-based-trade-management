@@ -758,15 +758,17 @@ A complete proposal should include:
 
 Manual ChatGPT SOD is the current production-generation workflow. Supply charts/screenshots to ChatGPT/manual analysis and request **`manual-sod-analysis-YYYY-MM-DD.json` as a standard deliverable**, containing the report's structured `artifactContent`, authored `candidateProposals`, and `bundleMetadata`. Use the [transport template](examples/manual-sod-analysis.template.json) for the outer shape; candidate contracts still come from the current repository's existing candidate template and validator.
 
-Run the downloaded transport through the local report packager:
+Serialize already-authored analysis and package it in the standard Downloads location (if the transport already exists, run only the package command with its actual path):
 
 ```sh
-npm run v24:manual-sod-package -- ~/Downloads/manual-sod-analysis-2026-09-16.json ~/Downloads/SOD-2026-09-16-validated
+npm run v24:manual-sod-analysis -- authored-sod.json 2026-09-16
+# Verify the transport exists, is readable, and matches the authored analysis.
+npm run v24:manual-sod-package -- ~/Downloads/ExecutionOS/SOD/2026-09-16-transport/manual-sod-analysis-2026-09-16.json
 ```
 
 Choose the actual session date and a fresh output directory. The morning flow is **charts/screenshots → ChatGPT/manual analysis → dated analysis JSON → packager → reports/dashboard always for valid reporting input; candidate JSON only when the current local validator passes**. Check `candidate-delivery-status.json` for `DELIVERED`, `WITHHELD` and its reason, or `NO_CANDIDATES`.
 
-There is no local upstream generator for manual chart analysis. If authored data needs the standard filename, use `npm run v24:manual-sod-analysis -- <authored-sod.json> <YYYY-MM-DD> <output-directory>`. This optional serializer creates transport only; no screenshots, AI request, service startup, candidate validation, import, or state change is involved. It does not automatically retrieve analysis from ChatGPT.
+There is no local upstream generator for manual chart analysis. If authored data needs the standard filename, use `npm run v24:manual-sod-analysis -- <authored-sod.json> <YYYY-MM-DD> [output-directory]`. This optional serializer creates transport only; no screenshots, AI request, service startup, candidate validation, import, or state change is involved. It does not automatically retrieve analysis from ChatGPT.
 
 PRETRADE, Schwab, and Execution Board may remain offline for both steps. Reporting uses the existing 19-section renderer and dashboard styling. An unavailable validator or failed candidate validation withholds the entire candidate package while reports still complete; malformed report content or report filesystem errors still fail. Each delivered file in `individual-candidates/` is a canonical bundle containing exactly one unchanged candidate and **top-level** `"ingressPolicy": "MANUAL_AUTHORIZED"`. This policy belongs on the bundle, never inside the candidate or its provenance. Import only these validated individual files; the intermediate analysis JSON is not an import file.
 
@@ -774,19 +776,55 @@ The candidate's identity, version, source, provenance, trade logic, and optional
 
 See the [Manual SOD Deliverable Specification](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md) and its [individual candidate template](examples/ExecutionOS_MANUAL_SOD_individual_candidate_v24_template.json). Template placeholders must be completed during authoring before a candidate is finalized.
 
+Standard SOD output layout (use the actual session date):
+
+```text
+~/Downloads/ExecutionOS/SOD/
+├── YYYY-MM-DD/
+│   ├── report.md
+│   ├── report.html
+│   ├── dashboard.html
+│   ├── candidate-delivery-status.json
+│   └── individual-candidates/          # only when DELIVERED
+└── YYYY-MM-DD-transport/
+    └── manual-sod-analysis-YYYY-MM-DD.json
+```
+
 ### Ad-hoc standalone trade card from a chart
 
 Ask ChatGPT, for example, **“create a trade card for this chart.”** Normal authoring delivers the standalone HTML and `manual-trade-card-analysis-YYYY-MM-DD-SYMBOL.json`. The transport carries the exact authored HTML, one structured candidate proposal from the same analysis, and available manual bundle metadata. It is not an import file. Use the [transport-shape template](examples/manual-trade-card-analysis.template.json); the current local validator remains the candidate contract authority.
 
 ```sh
-npm run v24:manual-trade-card-package -- ~/Downloads/manual-trade-card-analysis-2026-09-16-NVDA.json ~/Downloads/trade-card-2026-09-16-NVDA-validated
+npm run v24:manual-trade-card-analysis -- authored-trade-card.json 2026-09-16 NVDA
+# Verify the transport exists, is readable, and matches the authored analysis.
+npm run v24:manual-trade-card-package -- ~/Downloads/ExecutionOS/TradeCards/2026-09-16/NVDA-transport/manual-trade-card-analysis-2026-09-16-NVDA.json
 ```
 
 Choose a fresh output directory. The command writes `trade-card.html` without changing the author's styling, plus `candidate-delivery-status.json`. Only `DELIVERED` includes an individual candidate JSON ready for Preview. `WITHHELD` explains why the optional candidate could not be delivered; the authored HTML remains available. A `PENDING` status is incomplete and must not be imported. The ordinary flow is **chart screenshot → ChatGPT/manual analysis → transport → local package → HTML; validated candidate if available → Preview → explicit Import**.
 
 No full SOD report or running PRETRADE/Schwab/Execution Board/broker service is required. Chart analysis remains upstream; the local command neither analyzes screenshots nor calls a model. Candidate output reuses the manual SOD individual-file gate and one-candidate `MANUAL_AUTHORIZED` bundle. Import behavior and all review/ARM/execution boundaries below are unchanged.
 
-For local serialization, use `npm run v24:manual-trade-card-analysis -- <authored-trade-card.json> <YYYY-MM-DD> <SYMBOL> <fresh-transport-directory>`. Write the transport as a standalone top-level artifact in a fresh writable location, outside existing SOD output directories. The caller must verify existence, readability, and content before reporting success. On permission/write failure, retry only the preserved serialized bytes at a fresh path, without regenerating analysis. Existing transport files are never overwritten; neither CLI retries automatically. See the [complete standalone procedure and statuses](docs/sod/ExecutionOS_V2.4_Manual_Trade_Card_Deliverable_Spec_v1.0.md).
+For local serialization, use `npm run v24:manual-trade-card-analysis -- <authored-trade-card.json> <YYYY-MM-DD> <SYMBOL> [fresh-transport-directory]`. Write the transport as a standalone top-level artifact in a fresh writable location, outside existing SOD output directories. The caller must verify existence, readability, and content before reporting success. On permission/write failure, retry only the preserved serialized bytes at a fresh path, without regenerating analysis. Existing transport files are never overwritten; neither CLI retries automatically. See the [complete standalone procedure and statuses](docs/sod/ExecutionOS_V2.4_Manual_Trade_Card_Deliverable_Spec_v1.0.md).
+
+Standard standalone trade-card output layout:
+
+```text
+~/Downloads/ExecutionOS/TradeCards/YYYY-MM-DD/
+├── SYMBOL/
+│   ├── trade-card.html
+│   ├── candidate-delivery-status.json
+│   └── 01-<safe-candidateId>.json       # only when DELIVERED
+└── SYMBOL-transport/
+    └── manual-trade-card-analysis-YYYY-MM-DD-SYMBOL.json
+```
+
+#### Manual output path rules
+
+The final output-directory argument is optional on both manual serializers and both manual packagers. Package defaults come only from the standard transport **filename** (valid calendar date and, for trade cards, a safe uppercase symbol label), never the clock or candidate fields. Labels do not rewrite or validate authored dates/symbols; authors must keep them consistent. An undated or renamed input still works with an explicit output directory. The `-TRANSPORT` suffix (case-insensitive) is reserved for transport-directory naming only in default trade-card path derivation; labels such as `NVDA-TRANSPORT` require explicit output directories for transport and package destinations.
+
+Transport defaults use a fresh sibling directory so the transport never occupies an existing or future package directory. Both default transport directories and package directories must be absent, including empty directories and symlinks. A repeated run fails; there is no overwrite, auto-suffix, automatic retry, or silent fallback. For a new version or write-only recovery, supply an explicit fresh output directory as the last argument; preserve and verify the existing serialized analysis. Explicit transport destinations retain their existing exclusive-file behavior. Never choose an existing package as a transport destination.
+
+CLI input and output paths expand `~` or `~/` using the current user's home directory, including when quoted; `~otheruser` is rejected. Default mode requires an existing writable `~/Downloads` directory. Missing/unavailable Downloads fails clearly and allows an explicit destination override. Other filesystem errors name the failing path; partial or interrupted output must be retried at a new path. Programmatic writer APIs still require explicit output paths. No changes to automated Production SOD, analysis, validator gating, Manual Import, PRETRADE, permission checks, ARM, execution, or broker authority.
 
 ### Load and Preview
 

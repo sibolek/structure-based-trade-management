@@ -72,7 +72,7 @@ test("all services offline: HTML and validated candidate require no network, ser
 for (const mode of ["missing gate", "missing contract", "broken validator"]) {
   test(`${mode}: isolated package CLI still delivers identical HTML`, t => {
     const dir = directory(t); const runtime = path.join(dir, "runtime"); fs.mkdirSync(runtime);
-    for (const name of ["manual-trade-card-package.mjs", "manual-trade-card-analysis.mjs"]) fs.copyFileSync(new URL(`../schwab-bridge/${name}`, import.meta.url), path.join(runtime, name));
+    for (const name of ["manual-output-paths.mjs", "manual-trade-card-package.mjs", "manual-trade-card-analysis.mjs"]) fs.copyFileSync(new URL(`../schwab-bridge/${name}`, import.meta.url), path.join(runtime, name));
     if (mode === "missing contract") fs.copyFileSync(new URL("../schwab-bridge/manual-sod-deliverables.mjs", import.meta.url), path.join(runtime, "manual-sod-deliverables.mjs"));
     if (mode === "broken validator") fs.writeFileSync(path.join(runtime, "manual-sod-deliverables.mjs"), 'throw new Error("Validator initialization failed");');
     const analysis = input(); const file = path.join(dir, "analysis.json"); fs.writeFileSync(file, JSON.stringify(analysis));

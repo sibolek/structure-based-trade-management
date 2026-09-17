@@ -76,7 +76,7 @@ for (const mode of ["missing delivery gate", "missing canonical contract", "brok
     const dir = directory(t); const runtime = path.join(dir, "runtime");
     fs.mkdirSync(runtime);
     // Only reporting code is installed. No candidate schema or validator copy.
-    for (const name of ["manual-sod-package.mjs", "sod-artifact-renderer.mjs", "sod-artifact-content.mjs"]) {
+    for (const name of ["manual-output-paths.mjs", "manual-sod-package.mjs", "sod-artifact-renderer.mjs", "sod-artifact-content.mjs"]) {
       fs.copyFileSync(new URL(`../schwab-bridge/${name}`, import.meta.url), path.join(runtime, name));
     }
     if (mode === "missing canonical contract") {

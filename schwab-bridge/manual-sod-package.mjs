@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { expandManualPath, defaultManualPackageDirectory } from "./manual-output-paths.mjs";
 import { renderSodArtifacts } from "./sod-artifact-renderer.mjs";
 
 // Reporting has no static dependency on the ExecutionOS candidate contract.
@@ -104,14 +105,15 @@ export async function writeManualSodPackage({ artifactContent, candidateProposal
 
 async function cli() {
   const [inputPath, outputDirectory, ...extra] = process.argv.slice(2);
-  if (!inputPath || !outputDirectory || extra.length || inputPath.startsWith("--")) {
-    console.error("Usage: node schwab-bridge/manual-sod-package.mjs <manual-sod-analysis.json> <fresh-package-directory>");
+  if (!inputPath || outputDirectory === "" || extra.length || inputPath.startsWith("--")) {
+    console.error("Usage: node schwab-bridge/manual-sod-package.mjs <manual-sod-analysis.json> [fresh-package-directory]");
     process.exitCode = 2;
     return;
   }
   try {
-    const input = JSON.parse(fs.readFileSync(path.resolve(inputPath), "utf8"));
-    const result = await writeManualSodPackage(input, outputDirectory);
+    const output = outputDirectory === undefined ? defaultManualPackageDirectory("sod", inputPath) : expandManualPath(outputDirectory);
+    const input = JSON.parse(fs.readFileSync(path.resolve(expandManualPath(inputPath)), "utf8"));
+    const result = await writeManualSodPackage(input, output);
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     console.error(error.message);

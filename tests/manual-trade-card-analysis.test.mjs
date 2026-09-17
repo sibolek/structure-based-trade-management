@@ -47,6 +47,7 @@ test("transport rejects non-single proposals, lossy JSON, absent HTML and unsafe
 test("isolated serializer CLI works without validator, renderer, runtime or repository", t => {
   const dir = directory(t); const cli = path.join(dir, "manual-trade-card-analysis.mjs");
   fs.copyFileSync(new URL("../schwab-bridge/manual-trade-card-analysis.mjs", import.meta.url), cli);
+  fs.copyFileSync(new URL("../schwab-bridge/manual-output-paths.mjs", import.meta.url), path.join(dir, "manual-output-paths.mjs"));
   const source = path.join(dir, "authored.json"); fs.writeFileSync(source, JSON.stringify(input()));
   const run = spawnSync(process.execPath, [cli, source, "2026-09-16", "NVDA", path.join(dir, "transport")], { encoding: "utf8" });
   assert.equal(run.status, 0, run.stderr);

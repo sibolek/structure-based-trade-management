@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { expandManualPath, writeDefaultManualTransport } from "./manual-output-paths.mjs";
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -44,14 +45,16 @@ export function writeManualSodAnalysis(input, analysisDate, outputDirectory) {
 
 function cli() {
   const [inputPath, analysisDate, outputDirectory, ...extra] = process.argv.slice(2);
-  if (!inputPath || !analysisDate || !outputDirectory || extra.length || inputPath.startsWith("--")) {
-    console.error("Usage: node schwab-bridge/manual-sod-analysis.mjs <authored-sod.json> <YYYY-MM-DD> <output-directory>");
+  if (!inputPath || !analysisDate || outputDirectory === "" || extra.length || inputPath.startsWith("--")) {
+    console.error("Usage: node schwab-bridge/manual-sod-analysis.mjs <authored-sod.json> <YYYY-MM-DD> [output-directory]");
     process.exitCode = 2;
     return;
   }
   try {
-    const input = JSON.parse(fs.readFileSync(path.resolve(inputPath), "utf8"));
-    const analysisPath = writeManualSodAnalysis(input, analysisDate, outputDirectory);
+    const input = JSON.parse(fs.readFileSync(path.resolve(expandManualPath(inputPath)), "utf8"));
+    const analysisPath = outputDirectory === undefined
+      ? writeDefaultManualTransport(serializeManualSodAnalysis(input), "sod", analysisDate)
+      : writeManualSodAnalysis(input, analysisDate, expandManualPath(outputDirectory));
     console.log(JSON.stringify({ analysisPath }, null, 2));
   } catch (error) {
     console.error(error.message);

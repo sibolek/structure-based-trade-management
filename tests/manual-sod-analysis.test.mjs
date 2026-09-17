@@ -81,6 +81,7 @@ test("transport and local candidate delivery work with network and service start
 test("standalone serializer CLI needs no validator, renderer, provider, or ExecutionOS runtime", t => {
   const dir = directory(t); const isolatedCli = path.join(dir, "manual-sod-analysis.mjs");
   fs.copyFileSync(serializerCli, isolatedCli);
+  fs.copyFileSync(new URL("../schwab-bridge/manual-output-paths.mjs", import.meta.url), path.join(dir, "manual-output-paths.mjs"));
   const analysis = { artifactContent: {}, candidateProposals: [{ arbitraryDraft: true, armAuthorized: false }], bundleMetadata: null };
   const authoredPath = path.join(dir, "authored.json");
   fs.writeFileSync(authoredPath, JSON.stringify(analysis));
@@ -94,7 +95,7 @@ test("transport remains reportable when the downstream local validator is unavai
   const dir = directory(t); const runtime = path.join(dir, "report-runtime");
   const file = writeManualSodAnalysis(input(), "2026-09-16", dir);
   fs.mkdirSync(runtime);
-  for (const name of ["manual-sod-package.mjs", "sod-artifact-renderer.mjs", "sod-artifact-content.mjs"]) {
+  for (const name of ["manual-output-paths.mjs", "manual-sod-package.mjs", "sod-artifact-renderer.mjs", "sod-artifact-content.mjs"]) {
     fs.copyFileSync(new URL(`../schwab-bridge/${name}`, import.meta.url), path.join(runtime, name));
   }
   const packaged = run(path.join(runtime, "manual-sod-package.mjs"), file, path.join(dir, "package"));

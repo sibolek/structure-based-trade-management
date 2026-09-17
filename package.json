@@ -17,6 +17,7 @@
     "v24:manual-sod-analysis": "node schwab-bridge/manual-sod-analysis.mjs",
     "v24:manual-sod-package": "node schwab-bridge/manual-sod-package.mjs",
     "v24:manual-sod-validate": "node schwab-bridge/manual-sod-deliverables.mjs --validate-only",
+    "v24:manual-output-test": "node --test tests/manual-output-paths.test.mjs",
     "v24:manual-sod-test": "node --test tests/manual-sod-analysis.test.mjs tests/manual-sod-deliverables.test.mjs tests/manual-sod-package.test.mjs",
     "v24:sod-export": "node schwab-bridge/sod-candidate-export.mjs",
     "v24:sod-export-test": "node --test tests/sod-candidate-export.test.mjs",
