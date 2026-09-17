@@ -3,8 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { canonicalizeManualSodArtifactContent } from "../schwab-bridge/manual-sod-artifact-compat.mjs";
-import { writeManualSodPackage } from "../schwab-bridge/manual-sod-package.mjs";
+import { canonicalizeManualSodArtifactContent, writeManualSodPackage } from "../schwab-bridge/manual-sod-package.mjs";
 import { SOD_REPORT_SECTIONS } from "../schwab-bridge/sod-artifact-content.mjs";
 import { sodArtifactContentFixture } from "./helpers/sod-artifact-content-fixture.mjs";
 
