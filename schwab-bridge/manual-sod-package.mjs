@@ -2,8 +2,66 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expandManualPath, defaultManualPackageDirectory } from "./manual-output-paths.mjs";
-import { canonicalizeManualSodArtifactContent } from "./manual-sod-artifact-compat.mjs";
+import { SOD_REPORT_SECTIONS } from "./sod-artifact-content.mjs";
 import { renderSodArtifacts } from "./sod-artifact-renderer.mjs";
+
+// Manual-package compatibility only. Repair superficial report-shape aliases
+// without ever rewriting candidate proposals or conferring trade authority.
+const SECTION_ID_ALIASES = Object.freeze({
+  "macro-context": "macro-overnight-context",
+  "market-regime": "market-regime-breadth",
+  semiconductors: "semiconductors-primary-sector",
+  "software-ai": "mega-cap-tech",
+  "momentum-special": "momentum-special-situations",
+  "crude-oil": "crude-oil-mcl",
+});
+
+function text(value) {
+  return String(value ?? "").trim();
+}
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function canonicalizeReportBlock(block) {
+  if (!isObject(block)) return structuredClone(block);
+  const result = structuredClone(block);
+  const type = text(result.type).toLowerCase();
+
+  if (type === "bullets") {
+    result.type = "list";
+    result.style = text(result.style).toLowerCase() || "bullet";
+    if (!Array.isArray(result.items) && Array.isArray(result.listItems)) result.items = result.listItems;
+  } else if (type === "list") {
+    if (!Array.isArray(result.items) && Array.isArray(result.listItems)) result.items = result.listItems;
+  } else if (type === "metrics") {
+    if (!Array.isArray(result.items) && Array.isArray(result.metricItems)) result.items = result.metricItems;
+  }
+
+  return result;
+}
+
+export function canonicalizeManualSodArtifactContent(input) {
+  if (!isObject(input)) return structuredClone(input);
+  const content = structuredClone(input);
+  if (!Array.isArray(content.sections)) return content;
+
+  content.sections = content.sections.map((section, index) => {
+    if (!isObject(section)) return section;
+    const expected = SOD_REPORT_SECTIONS[index];
+    const actualId = text(section.id);
+    const aliasedId = SECTION_ID_ALIASES[actualId] ?? actualId;
+
+    // Only a known alias that resolves to the section expected at this exact
+    // position is repaired. Wrong order and unknown IDs remain strict errors.
+    if (expected && aliasedId === expected.id) section.id = expected.id;
+    if (Array.isArray(section.blocks)) section.blocks = section.blocks.map(canonicalizeReportBlock);
+    return section;
+  });
+
+  return content;
+}
 
 // Reporting has no static dependency on the ExecutionOS candidate contract.
 // Only this optional downstream step may load the current local delivery gate.
