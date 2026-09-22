@@ -87,10 +87,11 @@ The first implementation slice traces and corrects the shared helper plus the ex
 - invalid local clocks fail closed;
 - future source timestamps are accepted only within a fixed two-second clock-skew allowance and otherwise fail closed;
 - bid/ask freshness prefers `quoteTime`, so a newer trade timestamp cannot mask stale bid/ask data;
+- production PRETRADE live DSS/risk evaluation requires a valid local quote-receipt timestamp, source/receipt clock consistency and an explicit real-time entitlement flag;
 - the same policy is rechecked immediately before both current ARM authorization paths;
 - compatibility exports preserve existing `market-data-provider.mjs` imports.
 
-This is a cross-cutting prerequisite, not fast-path acceptance. Quote receipt age, explicit real-time entitlement, monotonic/backward-clock detection, chart/pane capture age and server preview/admission remain outstanding.
+The active live DSS/risk path retains the existing five-second quote threshold; the proposed three-second fast-path pilot limit is not active. No chart or candidate timestamp is rejected by this slice. This remains a cross-cutting prerequisite, not fast-path acceptance. Monotonic/backward-clock detection, chart/pane capture age and server preview/admission remain outstanding.
 
 Existing validity/ARM checks remain relevant safety controls. These findings do not establish that a broker order or ARM bypass occurred.
 
@@ -120,10 +121,10 @@ Fresh checks in the audit/design pass:
 Fresh verification after the clock-freshness implementation:
 
 - focused freshness/DSS/risk/ARM set: **94/94 passed**;
-- complete DSS suite: **93/93 passed**;
-- complete risk-sizing suite: **175/175 passed**;
+- complete DSS suite: **94/94 passed**;
+- complete risk-sizing suite: **177/177 passed**;
 - PRETRADE ARM service suite: **9/9 passed**;
-- complete repository test suite: **1,131/1,131 passed**;
+- complete repository test suite: **1,135/1,135 passed**;
 - production build: **passed**;
 - `git diff --check`: **passed**.
 

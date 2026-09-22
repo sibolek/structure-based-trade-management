@@ -49,7 +49,7 @@ The [September 21 audit](ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.
 | `DOCUMENTATION-STATUS.md` | Current vs historical map | **Documentation governance** |
 | `docs/ExecutionOS_Documentation_Index.md` | Cross-document authority/status | **Current index** |
 | `docs/ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md` | Refs, issue/PR state, evidence correction and sequencing | **September 21 audit; not implementation acceptance** |
-| `docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md` | Intraday profile, freshness, preview/admission/discard and qualification | **DRAFT / NOT APPROVED / FAST PATH NOT IMPLEMENTED; clock-freshness prerequisite implemented on working branch** |
+| `docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md` | Intraday profile, freshness, preview/admission/discard and qualification | **DRAFT / NOT APPROVED / FAST PATH NOT IMPLEMENTED; clock/quote-receipt/real-time prerequisites implemented on working branch** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md` | Consolidated PRETRADE→ARM→Execution architecture | **Current frozen V2.4 design authority** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` | Decision 22–97 traceability | **Approved implementation companion** |
 | `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` | Separate 2-ATR PRETRADE quantity-safety ceiling | **Approved current quantity-safety policy authority** |

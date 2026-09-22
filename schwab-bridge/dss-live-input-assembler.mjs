@@ -1,4 +1,5 @@
 import { DssInputAssembler, DssInputAssemblyError } from "./dss-input-assembler.mjs";
+import { assessQuoteEvidence } from "./clock-freshness.mjs";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -26,6 +27,7 @@ export class DssLiveInputAssembler {
     marketDataProvider,
     baseAssembler = null,
     now = () => Date.now(),
+    quoteEvidencePolicy = null,
     ...baseOptions
   } = {}) {
     if (!marketDataProvider || typeof marketDataProvider.getQuote !== "function") {
@@ -38,6 +40,7 @@ export class DssLiveInputAssembler {
 
     this.marketDataProvider = marketDataProvider;
     this.now = now;
+    this.quoteEvidencePolicy = quoteEvidencePolicy ? Object.freeze({ ...quoteEvidencePolicy }) : null;
     this.baseAssembler = baseAssembler || new DssInputAssembler({
       marketDataProvider,
       now,
@@ -76,6 +79,17 @@ export class DssLiveInputAssembler {
       });
     }
 
+    const quoteEvidence = this.quoteEvidencePolicy
+      ? assessQuoteEvidence(finalQuote, { nowMs: capturedAtMs, ...this.quoteEvidencePolicy })
+      : null;
+    if (quoteEvidence && !quoteEvidence.valid) {
+      throw new DssInputAssemblyError("final live quote evidence is stale, delayed, or not real time", {
+        status: "BLOCKED",
+        reasonCodes: [...quoteEvidence.reasonCodes],
+        stage: "FINAL_QUOTE_EVIDENCE",
+      });
+    }
+
     const refreshed = clone(assembled);
     refreshed.marketSnapshot = refreshed.marketSnapshot && typeof refreshed.marketSnapshot === "object"
       ? refreshed.marketSnapshot
@@ -86,6 +100,11 @@ export class DssLiveInputAssembler {
     refreshed.marketSnapshot.finalQuoteRefresh = {
       refreshedAt: new Date(capturedAtMs).toISOString(),
       source: text(finalQuote?.source || this.marketDataProvider.source || "UNKNOWN"),
+      ...(quoteEvidence ? {
+        sourceAsOf: quoteEvidence.sourceFreshness.asOf,
+        receivedAt: quoteEvidence.receiptFreshness?.asOf ?? null,
+        realtime: quoteEvidence.realtime,
+      } : {}),
     };
 
     refreshed.instrument = refreshed.instrument && typeof refreshed.instrument === "object"

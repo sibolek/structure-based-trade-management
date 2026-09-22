@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { resolveExpectedEntry } from "../schwab-bridge/expected-entry-resolver.mjs";
+import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from "../schwab-bridge/clock-freshness.mjs";
 
 const NOW = Date.parse("2026-09-01T00:00:05.000Z");
 const FRESH = "2026-09-01T00:00:01.000Z";
@@ -169,4 +170,42 @@ test("bid and ask freshness uses quoteTime rather than a newer trade asOf", () =
   assert.equal(result.status, "BLOCKED");
   assert.deepEqual(result.reasonCodes, ["QUOTE_STALE"]);
   assert.equal(result.quoteObservedAt, "2026-08-31T23:59:59.999Z");
+});
+
+test("strict live evidence requires a fresh receipt and real-time entitlement", () => {
+  const valid = resolve({
+    quote: quote({
+      receivedAt: "2026-09-01T00:00:04.500Z",
+      realtime: true,
+    }),
+    quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+  });
+  assert.equal(valid.status, "VALID");
+
+  const missingReceipt = resolve({
+    quote: quote({ realtime: true }),
+    quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+  });
+  assert.equal(missingReceipt.status, "BLOCKED");
+  assert.deepEqual(missingReceipt.reasonCodes, ["QUOTE_RECEIPT_UNAVAILABLE"]);
+
+  const delayed = resolve({
+    quote: quote({
+      receivedAt: "2026-09-01T00:00:04.500Z",
+      realtime: false,
+    }),
+    quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+  });
+  assert.equal(delayed.status, "BLOCKED");
+  assert.deepEqual(delayed.reasonCodes, ["QUOTE_NOT_REALTIME"]);
+
+  const staleReceipt = resolve({
+    quote: quote({
+      receivedAt: "2026-08-31T23:59:59.999Z",
+      realtime: true,
+    }),
+    quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+  });
+  assert.equal(staleReceipt.status, "BLOCKED");
+  assert.deepEqual(staleReceipt.reasonCodes, ["QUOTE_RECEIPT_STALE"]);
 });

@@ -1,5 +1,5 @@
 import { RISK_SIZING_POLICY_VERSION, riskSizingPolicyForVersion } from "./risk-sizing-policy.mjs";
-import { freshness } from "./clock-freshness.mjs";
+import { assessQuoteEvidence } from "./clock-freshness.mjs";
 
 function upper(value) {
   return String(value ?? "").trim().toUpperCase();
@@ -48,6 +48,15 @@ function quoteProvenance({ bid, ask, quoteObservedAt, quoteAgeMs, quoteSource })
   };
 }
 
+function quoteEvidenceReason(reasonCodes = []) {
+  if (reasonCodes.includes("QUOTE_NOT_REALTIME")) return "QUOTE_NOT_REALTIME";
+  if (reasonCodes.includes("QUOTE_RECEIPT_TIMESTAMP_UNAVAILABLE")) return "QUOTE_RECEIPT_UNAVAILABLE";
+  if (reasonCodes.includes("STALE_OR_INVALID_QUOTE_RECEIPT")) return "QUOTE_RECEIPT_STALE";
+  if (reasonCodes.includes("QUOTE_SOURCE_RECEIPT_CLOCK_MISMATCH")) return "QUOTE_CLOCK_INCONSISTENT";
+  if (reasonCodes.includes("STALE_OR_INVALID_QUOTE_SOURCE")) return "QUOTE_STALE";
+  return null;
+}
+
 export function resolveExpectedEntry({
   direction,
   entryMode,
@@ -56,6 +65,7 @@ export function resolveExpectedEntry({
   quote,
   nowMs = Date.now(),
   policyVersion = RISK_SIZING_POLICY_VERSION,
+  quoteEvidencePolicy = null,
 } = {}) {
   const policy = riskSizingPolicyForVersion(policyVersion);
   if (policy.quoteMaxAgeMs !== 5_000) {
@@ -109,10 +119,12 @@ export function resolveExpectedEntry({
     });
   }
 
-  const quoteFreshness = freshness(quoteTimeMs, {
+  const quoteEvidence = assessQuoteEvidence(quote, {
     nowMs: evaluatedAtMs,
-    maxAgeMs: policy.quoteMaxAgeMs,
+    sourceMaxAgeMs: policy.quoteMaxAgeMs,
+    ...(quoteEvidencePolicy || {}),
   });
+  const quoteFreshness = quoteEvidence.sourceFreshness;
   const quoteObservedAt = quoteFreshness.asOf;
   const quoteAgeMs = quoteFreshness.ageMs;
   const quoteSource = text(quote?.source) || null;
@@ -128,13 +140,15 @@ export function resolveExpectedEntry({
     });
   }
 
-  if (quoteFreshness.isStale) {
-    return blocked("QUOTE_STALE", {
+  const evidenceReason = quoteEvidenceReason(quoteEvidence.reasonCodes);
+  if (evidenceReason) {
+    return blocked(evidenceReason, {
       direction: normalizedDirection,
       entryMode: normalizedMode,
       policyId: policy.policyId,
       policyVersion: policy.policyVersion,
       quoteMaxAgeMs: policy.quoteMaxAgeMs,
+      quoteEvidenceReasonCodes: [...quoteEvidence.reasonCodes],
       ...provenance,
     });
   }

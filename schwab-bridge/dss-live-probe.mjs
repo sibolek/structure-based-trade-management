@@ -7,7 +7,7 @@ import { DssInputAssemblyError } from "./dss-input-assembler.mjs";
 import { evaluateDss } from "./dss-evaluator.mjs";
 import { RegNmsEquityPriceIncrementResolver } from "./reg-nms-equity-price-increment.mjs";
 import { SchwabMarketDataProvider } from "./schwab-market-data-provider.mjs";
-import { freshness } from "./clock-freshness.mjs";
+import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY, freshness } from "./clock-freshness.mjs";
 
 const ACCESS_SAFETY_MS = 30_000;
 
@@ -138,6 +138,7 @@ export async function runDssLiveProbe({
     instrumentMetadataResolver: resolver,
     now,
     snapshotIdFactory,
+    quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
   });
   const input = await assembler.assemble(context);
   const evaluationNowMs = Number(now());

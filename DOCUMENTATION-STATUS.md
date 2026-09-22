@@ -50,7 +50,7 @@ The roadmap checkpoint is current product-planning authority. It is not a frozen
 ### September 21 live-workflow checkpoint
 
 - [Repository audit](docs/ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md): current refs, open issues, incident, evidence correction and next-phase sequencing. It updates the dated roadmap's current-state/sequencing snapshot while preserving its four pillars and Performance Intelligence requirement.
-- [Live fast-path contract v0.1](docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md): **DRAFT / NOT APPROVED / FAST PATH NOT IMPLEMENTED**. The shared clock-freshness prerequisite is implemented and regression-tested on the working branch; compact analysis, server preview, race-safe admission, discard and qualification gates remain proposed.
+- [Live fast-path contract v0.1](docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md): **DRAFT / NOT APPROVED / FAST PATH NOT IMPLEMENTED**. Clock, quote-source, local-receipt and real-time-entitlement prerequisites are implemented and regression-tested for production PRETRADE live DSS/risk paths on the working branch; compact analysis, chart-age policy, server preview, race-safe admission, discard and qualification gates remain proposed.
 - GitHub query: no open PRs; issues #16 and #17 remain open. PR #21 does not complete all their acceptance criteria.
 - Development branch: `codex/live-fast-path-p0-contract`, based on `e49f30f`. It now contains the uncommitted documentation package plus the first clock-freshness implementation slice. Live account state was not changed or revalidated by this work.
 

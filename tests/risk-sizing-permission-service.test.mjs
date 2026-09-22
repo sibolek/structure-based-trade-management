@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { RiskSizingPermissionService } from "../schwab-bridge/risk-sizing-permission-service.mjs";
 import { RiskEvaluationRepository } from "../schwab-bridge/risk-evaluation-repository.mjs";
+import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from "../schwab-bridge/clock-freshness.mjs";
 
 const NOW = Date.parse("2026-09-01T17:30:05.000Z");
 
@@ -46,6 +47,8 @@ function validQuote(overrides = {}) {
     bid: 219.95,
     ask: 220.00,
     asOf: "2026-09-01T17:30:04.000Z",
+    receivedAt: "2026-09-01T17:30:04.500Z",
+    realtime: true,
     source: "SCHWAB",
     ...overrides,
   };
@@ -105,6 +108,7 @@ function makeHarness({
   repository = null,
   idFactory = null,
   now = () => NOW,
+  quoteEvidencePolicy = null,
 } = {}) {
   const calls = {
     quote: [],
@@ -163,6 +167,7 @@ function makeHarness({
     riskEvaluationRepository: riskRepository,
     now,
     idFactory: idFactory || (() => `risk-eval-${String(nextId++).padStart(3, "0")}`),
+    quoteEvidencePolicy,
   });
 
   return { service, repository: riskRepository, calls, candidate, currentDss };
@@ -256,6 +261,22 @@ test("service rechecks account freshness at the common evaluation time", async (
   assert.deepEqual(result.reasonCodes, ["ACCOUNT_SNAPSHOT_STALE"]);
   const persisted = repository.getById(result.riskEvaluationId);
   assert.equal(persisted.account.snapshotAgeMs, 15_001);
+});
+
+test("strict live quote evidence is enforced by the permission service", async () => {
+  for (const [quoteOverride, reasonCode] of [
+    [{ realtime: false }, "QUOTE_NOT_REALTIME"],
+    [{ receivedAt: null }, "QUOTE_RECEIPT_UNAVAILABLE"],
+    [{ receivedAt: "2026-09-01T17:29:59.999Z" }, "QUOTE_RECEIPT_STALE"],
+  ]) {
+    const { service } = makeHarness({
+      quote: validQuote(quoteOverride),
+      quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+    });
+    const result = await service.evaluate(request());
+    assert.equal(result.status, "BLOCKED");
+    assert.ok(result.reasonCodes.includes(reasonCode));
+  }
 });
 
 test("independent prerequisite blockers are retained together without running sizing", async () => {

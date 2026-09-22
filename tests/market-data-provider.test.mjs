@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   aggregateMinuteBars,
+  assessQuoteEvidence,
+  CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
   expectedClosedRthMinutes,
   freshness,
   isRegularTradingHours,
@@ -31,6 +33,7 @@ test("normalizes Schwab quote fields without leaking raw payload", () => {
   const payload = {
     NVDA: {
       assetMainType: "EQUITY",
+      realtime: true,
       quote: {
         bidPrice: 180.1,
         askPrice: 180.14,
@@ -48,6 +51,8 @@ test("normalizes Schwab quote fields without leaking raw payload", () => {
   assert.equal(quote.last, 180.12);
   assert.equal(quote.mark, 180.12);
   assert.equal(quote.assetMainType, "EQUITY");
+  assert.equal(quote.realtime, true);
+  assert.equal(quote.receivedAt, new Date(1_800_000_000_500).toISOString());
   assert.equal(quote.asOf, new Date(1_800_000_000_000).toISOString());
   assert.equal("quote" in quote, false);
 });
@@ -215,6 +220,47 @@ test("freshness permits at most two seconds of future clock skew", () => {
   assert.equal(exceeded.isStale, true);
   assert.equal(exceeded.ageMs, null);
   assert.equal(exceeded.clockSkewMs, 2_001);
+});
+
+test("live quote evidence separates provider time, local receipt time, and real-time entitlement", () => {
+  const nowMs = Date.parse("2026-09-01T17:30:05.000Z");
+  const valid = assessQuoteEvidence({
+    quoteTime: "2026-09-01T17:30:04.000Z",
+    receivedAt: "2026-09-01T17:30:04.500Z",
+    realtime: true,
+  }, { nowMs, ...CURRENT_LIVE_QUOTE_EVIDENCE_POLICY });
+  assert.equal(valid.valid, true);
+  assert.equal(valid.sourceFreshness.ageMs, 1_000);
+  assert.equal(valid.receiptFreshness.ageMs, 500);
+  assert.deepEqual(valid.reasonCodes, []);
+
+  const staleSource = assessQuoteEvidence({
+    quoteTime: "2026-09-01T17:29:59.999Z",
+    receivedAt: "2026-09-01T17:30:04.500Z",
+    realtime: true,
+  }, { nowMs, ...CURRENT_LIVE_QUOTE_EVIDENCE_POLICY });
+  assert.ok(staleSource.reasonCodes.includes("STALE_OR_INVALID_QUOTE_SOURCE"));
+
+  const staleReceipt = assessQuoteEvidence({
+    quoteTime: "2026-09-01T17:30:04.000Z",
+    receivedAt: "2026-09-01T17:29:59.999Z",
+    realtime: true,
+  }, { nowMs, ...CURRENT_LIVE_QUOTE_EVIDENCE_POLICY });
+  assert.ok(staleReceipt.reasonCodes.includes("STALE_OR_INVALID_QUOTE_RECEIPT"));
+  assert.ok(staleReceipt.reasonCodes.includes("QUOTE_SOURCE_RECEIPT_CLOCK_MISMATCH"));
+
+  const delayed = assessQuoteEvidence({
+    quoteTime: "2026-09-01T17:30:04.000Z",
+    receivedAt: "2026-09-01T17:30:04.500Z",
+    realtime: false,
+  }, { nowMs, ...CURRENT_LIVE_QUOTE_EVIDENCE_POLICY });
+  assert.deepEqual(delayed.reasonCodes, ["QUOTE_NOT_REALTIME"]);
+
+  const missingReceipt = assessQuoteEvidence({
+    quoteTime: "2026-09-01T17:30:04.000Z",
+    realtime: true,
+  }, { nowMs, ...CURRENT_LIVE_QUOTE_EVIDENCE_POLICY });
+  assert.deepEqual(missingReceipt.reasonCodes, ["QUOTE_RECEIPT_TIMESTAMP_UNAVAILABLE"]);
 });
 
 test("Schwab provider builds quote, minute, and daily read-only requests", async () => {

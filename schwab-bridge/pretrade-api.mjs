@@ -67,6 +67,7 @@ import {
   DEFAULT_EXECUTION_BOARD_HANDOFF_DELIVERY_FILE,
 } from "./execution-board-handoff-delivery-repository.mjs";
 import { createExecutionBoardHandoffApiHandler } from "./execution-board-handoff-api.mjs";
+import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from "./clock-freshness.mjs";
 
 const HOST = process.env.EXECUTIONOS_V24_HOST || "127.0.0.1";
 const PORT = Number(process.env.EXECUTIONOS_V24_PORT || 8788);
@@ -113,6 +114,7 @@ const dssInputAssembler = new DssLiveInputAssembler({
   marketDataProvider,
   instrumentMetadataResolver: new RegNmsEquityPriceIncrementResolver({ now: () => Date.now() }),
   now: () => Date.now(),
+  quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
 });
 const dssRuntime = new DssRuntime({ store, now: () => Date.now() });
 const dssPermissionService = new DssPermissionService({
@@ -131,6 +133,7 @@ const riskSizingPermissionService = new RiskSizingPermissionService({
   instrumentSizingMetadataProvider,
   riskEvaluationRepository,
   now: () => Date.now(),
+  quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
 });
 
 // Discretionary structure or macro/setup context is never guessed. Until a

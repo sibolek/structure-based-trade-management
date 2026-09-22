@@ -16,7 +16,12 @@ export class MarketDataProvider {
   }
 }
 
-export { freshness, MAX_FUTURE_CLOCK_SKEW_MS } from "./clock-freshness.mjs";
+export {
+  assessQuoteEvidence,
+  CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+  freshness,
+  MAX_FUTURE_CLOCK_SKEW_MS,
+} from "./clock-freshness.mjs";
 
 export const EASTERN_TIME_ZONE = "America/New_York";
 

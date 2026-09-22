@@ -137,6 +137,7 @@ export class RiskSizingPermissionService {
     now = () => Date.now(),
     idFactory = () => crypto.randomUUID(),
     policyVersion = RISK_SIZING_POLICY_VERSION,
+    quoteEvidencePolicy = null,
   } = {}) {
     if (!store || typeof store.snapshot !== "function" || typeof store.currentDssEvaluationForRiskHandoff !== "function") {
       throw new Error("RiskSizingPermissionService requires a pre-trade store with snapshot() and currentDssEvaluationForRiskHandoff()");
@@ -164,6 +165,7 @@ export class RiskSizingPermissionService {
     this.now = now;
     this.idFactory = idFactory;
     this.policyVersion = Number(policyVersion);
+    this.quoteEvidencePolicy = quoteEvidencePolicy ? Object.freeze({ ...quoteEvidencePolicy }) : null;
   }
 
   async evaluate({
@@ -279,6 +281,7 @@ export class RiskSizingPermissionService {
           quote,
           nowMs: evaluatedAtMs,
           policyVersion: this.policyVersion,
+          quoteEvidencePolicy: this.quoteEvidencePolicy,
         }));
       } catch {
         entryResult = errored("INTERNAL_ERROR");

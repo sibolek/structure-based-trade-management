@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DssLiveInputAssembler } from "../schwab-bridge/dss-live-input-assembler.mjs";
 import { DssInputAssemblyError } from "../schwab-bridge/dss-input-assembler.mjs";
+import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from "../schwab-bridge/clock-freshness.mjs";
 import {
   buildLiveProbeContext,
   parseLiveProbeArgs,
@@ -49,6 +50,8 @@ test("live assembler replaces the opening assembly quote with the final refreshe
         symbol: "NVDA",
         source: "SCHWAB",
         asOf: "2026-08-31T15:00:09.500Z",
+        receivedAt: "2026-08-31T15:00:09.800Z",
+        realtime: true,
         last: 101,
         tick: 0.01,
         tickAmount: 0.01,
@@ -59,6 +62,7 @@ test("live assembler replaces the opening assembly quote with the final refreshe
     marketDataProvider: provider,
     baseAssembler: base,
     now: () => Date.parse("2026-08-31T15:00:10.000Z"),
+    quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
   });
 
   const input = await assembler.assemble({});
@@ -67,6 +71,8 @@ test("live assembler replaces the opening assembly quote with the final refreshe
   assert.equal(input.marketSnapshot.quote.asOf, "2026-08-31T15:00:09.500Z");
   assert.equal(input.marketSnapshot.capturedAt, "2026-08-31T15:00:10.000Z");
   assert.equal(input.marketSnapshot.finalQuoteRefresh.refreshedAt, "2026-08-31T15:00:10.000Z");
+  assert.equal(input.marketSnapshot.finalQuoteRefresh.receivedAt, "2026-08-31T15:00:09.800Z");
+  assert.equal(input.marketSnapshot.finalQuoteRefresh.realtime, true);
   assert.equal(input.instrument.priceIncrement, 0.01);
   assert.equal(input.instrument.priceIncrementSource, "FINAL_LIVE_QUOTE_TICK");
   assert.equal(input.instrument.metadataVerified, true);
@@ -118,6 +124,50 @@ test("final quote refresh failure remains a typed assembly ERROR", async () => {
       && error.stage === "FINAL_QUOTE"
       && error.reasonCodes.includes("MARKET_DATA_PROVIDER_ERROR"),
   );
+});
+
+test("strict final quote evidence blocks delayed, missing-receipt, and stale-receipt quotes", async () => {
+  const invalidQuotes = [
+    {
+      asOf: "2026-08-31T15:00:09.500Z",
+      receivedAt: "2026-08-31T15:00:09.800Z",
+      realtime: false,
+      reasonCode: "QUOTE_NOT_REALTIME",
+    },
+    {
+      asOf: "2026-08-31T15:00:09.500Z",
+      realtime: true,
+      reasonCode: "QUOTE_RECEIPT_TIMESTAMP_UNAVAILABLE",
+    },
+    {
+      asOf: "2026-08-31T15:00:09.500Z",
+      receivedAt: "2026-08-31T15:00:04.999Z",
+      realtime: true,
+      reasonCode: "STALE_OR_INVALID_QUOTE_RECEIPT",
+    },
+  ];
+
+  for (const { reasonCode, ...quoteEvidence } of invalidQuotes) {
+    const assembler = new DssLiveInputAssembler({
+      marketDataProvider: {
+        source: "SCHWAB",
+        async getQuote() {
+          return { symbol: "NVDA", source: "SCHWAB", last: 101, tick: 0.01, ...quoteEvidence };
+        },
+      },
+      baseAssembler: { assemble: async () => assembledInput() },
+      now: () => Date.parse("2026-08-31T15:00:10.000Z"),
+      quoteEvidencePolicy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+    });
+
+    await assert.rejects(
+      () => assembler.assemble({}),
+      (error) => error instanceof DssInputAssemblyError
+        && error.status === "BLOCKED"
+        && error.stage === "FINAL_QUOTE_EVIDENCE"
+        && error.reasonCodes.includes(reasonCode),
+    );
+  }
 });
 
 test("live probe CLI arguments normalize symbol and direction without inventing structure", () => {
