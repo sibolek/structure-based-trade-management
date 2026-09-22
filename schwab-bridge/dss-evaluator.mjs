@@ -457,7 +457,7 @@ export function evaluateDss(input, {
       reasons.push("MARKET_SESSION_CALENDAR_UNVERIFIED");
     }
 
-    const quoteTimestamp = quote?.asOf ?? quote?.quoteTime ?? quote?.tradeTime;
+    const quoteTimestamp = quote?.quoteTime ?? quote?.asOf ?? quote?.tradeTime;
     const quoteFreshness = freshness(quoteTimestamp, {
       nowMs: evaluationTime,
       maxAgeMs: policy.quoteMaxAgeMs,

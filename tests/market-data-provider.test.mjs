@@ -193,9 +193,28 @@ test("closed 2-minute interval with a missing source minute remains incomplete",
 });
 
 test("freshness fails closed for invalid timestamps and marks old data stale", () => {
-  assert.equal(freshness(null, { nowMs: 10_000, maxAgeMs: 1_000 }).isStale, true);
+  const missing = freshness(null, { nowMs: 10_000, maxAgeMs: 1_000 });
+  assert.equal(missing.isStale, true);
+  assert.equal(missing.asOf, null);
+  assert.equal(missing.ageMs, null);
   assert.equal(freshness(9_500, { nowMs: 10_000, maxAgeMs: 1_000 }).isStale, false);
   assert.equal(freshness(8_000, { nowMs: 10_000, maxAgeMs: 1_000 }).isStale, true);
+
+  const invalidClock = freshness(9_500, { nowMs: Number.NaN, maxAgeMs: 1_000 });
+  assert.equal(invalidClock.isStale, true);
+  assert.equal(invalidClock.ageMs, null);
+});
+
+test("freshness permits at most two seconds of future clock skew", () => {
+  const boundary = freshness(12_000, { nowMs: 10_000, maxAgeMs: 1_000 });
+  assert.equal(boundary.isStale, false);
+  assert.equal(boundary.ageMs, 0);
+  assert.equal(boundary.clockSkewMs, 2_000);
+
+  const exceeded = freshness(12_001, { nowMs: 10_000, maxAgeMs: 1_000 });
+  assert.equal(exceeded.isStale, true);
+  assert.equal(exceeded.ageMs, null);
+  assert.equal(exceeded.clockSkewMs, 2_001);
 });
 
 test("Schwab provider builds quote, minute, and daily read-only requests", async () => {

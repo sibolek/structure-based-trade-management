@@ -1,6 +1,6 @@
 # ExecutionOS Documentation Status
 
-**Updated:** 2026-09-15
+**Updated:** 2026-09-21
 
 This file distinguishes current authoritative project records from historical planning snapshots and dated approval artifacts.
 
@@ -10,7 +10,7 @@ This file distinguishes current authoritative project records from historical pl
 
 ### `USER-GUIDE.md`
 
-Living operator guide v1.8.0, dated 15 September 2026, for the accepted manual-SOD → PRETRADE → manual ARM → Execution Board production core on `main`; `README.md` and the generated PDF reflect the same operating state.
+Living operator guide v1.8.1, dated 21 September 2026, for the accepted manual-SOD → PRETRADE → manual ARM → Execution Board production core on `main`. This branch updates the Markdown guide and README. The PDF remains at its prior generated revision until the existing main-branch rendering workflow runs after merge.
 
 Stable operating branch:
 
@@ -22,8 +22,8 @@ Release distinction:
 
 - V2.4 Phases 1–4 are merged to `main`;
 - the accepted PRETRADE → ARM → Execution Board integration is also merged to `main`;
-- last runtime/code checkpoint: `885ee94110e6a91352796c340e6ca40d6d775aff`; final integrated main tip: `c23faf5c08f3ba60339197be3687fcad37db0e4b`;
-- subsequent documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint;
+- current audited main code checkpoint: `e49f30f2f7dccc1c544002a0806eab40fd46bb54`;
+- historical September 15 runtime/integration checkpoints: `885ee94` / `c23faf5`; later runtime changes include manual serializers, trade-card packaging, output-path handling, report compatibility and terminal History details;
 - the former feature branch `v24-execution-board-handoff` has been retired and deleted;
 - accepted predecessor SOD orchestration/rendering lineage and manual-ingestion functionality were carried forward through `v24-production-core-manual-sod` and fast-forward merged to `main`; automated Production SOD remains deferred / not production-accepted;
 - Decision 28 admission integrity, Manual Candidate Import, and Manual SOD individual deliverables are validated and merged; see [the September 15 final merge closeout](docs/ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md).
@@ -46,6 +46,13 @@ The v0.5 baseline supersedes conflicting earlier top-level design assumptions. E
 - `docs/ExecutionOS_V2.4_Production_V1_Roadmap_Checkpoint_2026-09-12.md` — current Production V1 product scope and sequencing, including Performance Intelligence / Analytics & Reporting as a required pre-release pillar.
 
 The roadmap checkpoint is current product-planning authority. It is not a frozen technical design baseline, analytics implementation authority, implementation evidence, release evidence, or user acceptance.
+
+### September 21 live-workflow checkpoint
+
+- [Repository audit](docs/ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md): current refs, open issues, incident, evidence correction and next-phase sequencing. It updates the dated roadmap's current-state/sequencing snapshot while preserving its four pillars and Performance Intelligence requirement.
+- [Live fast-path contract v0.1](docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md): **DRAFT / NOT APPROVED / FAST PATH NOT IMPLEMENTED**. The shared clock-freshness prerequisite is implemented and regression-tested on the working branch; compact analysis, server preview, race-safe admission, discard and qualification gates remain proposed.
+- GitHub query: no open PRs; issues #16 and #17 remain open. PR #21 does not complete all their acceptance criteria.
+- Development branch: `codex/live-fast-path-p0-contract`, based on `e49f30f`. It now contains the uncommitted documentation package plus the first clock-freshness implementation slice. Live account state was not changed or revalidated by this work.
 
 ### Accepted implementation / closeout records
 
@@ -82,7 +89,7 @@ Legacy/manual V2.3 remains the frozen downstream reference. V2.4-origin trades u
 - TODO #19 PRETRADE quantity-safety policy — **COMPLETE / CLOSED**;
 - Decision 28 admission integrity, Manual Candidate Import, and Manual SOD individual deliverables — **VALIDATED / MERGED**.
 
-Last runtime/code checkpoint: `885ee94110e6a91352796c340e6ca40d6d775aff`. Final integrated main tip: `c23faf5c08f3ba60339197be3687fcad37db0e4b`. The September 8 handoff implementation checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains historical evidence.
+Current audited main code checkpoint: `e49f30f2f7dccc1c544002a0806eab40fd46bb54`. The September 15 runtime/integration checkpoints `885ee94` / `c23faf5` and September 8 handoff checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remain historical evidence.
 
 Status:
 
@@ -129,7 +136,7 @@ Accepted capabilities through this checkpoint:
 Not yet complete:
 
 - production-provider hardening and run-integrity acceptance under the September 12 baseline;
-- credentialed live OpenAI acceptance evidence;
+- current integrated/candidate-producing live OpenAI acceptance; a historical zero-candidate Gate V pass is recorded on the preserved branch;
 - complete operator-ready automated SOD workflow;
 - operator-ready automated Production SOD release to `main`;
 - authoritative automated REVISED-candidate supersession preflight remains an explicit later design/implementation decision.
@@ -175,13 +182,15 @@ DESIGN: APPROVED / FROZEN
 DESIGN CHECKPOINT: b45a67051c39d7f985cc190e7648dbac180bda1d
 IMPLEMENTATION: DEFERRED / PRESERVED
 PRESERVATION CHECKPOINT: 593f4dd97c9e23500ed5b59beb0bab2d9f03c3ec
-LIVE OPENAI ACCEPTANCE: NOT COMPLETED
+LIVE OPENAI ACCEPTANCE: HISTORICAL ZERO-CANDIDATE PASS RECORDED; CURRENT INTEGRATION PENDING
 USER IMPLEMENTATION ACCEPTANCE: NOT GRANTED
 MERGE / MAIN RELEASE: NOT PART OF CURRENT PRODUCTION-CORE MERGE
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
 The approved scope hardens artifact-link trust, chart/request/response resources, strict local structured-output validation, durable per-date run identity and recovery, post-provider PRETRADE freshness, pre-publication authority fencing, deterministic publication recovery, readiness reporting, and explicit live acceptance. It preserves candidate identity and all existing PRETRADE, Candidate Feeder, ARM, execution, and broker boundaries. The Performance Intelligence roadmap requirement does not interrupt or broaden this slice.
+
+Evidence qualification: the preserved September 13 Gate V report records a credentialed zero-candidate pass. Later September 14 provider changes were not retested live. This is historical branch evidence, not current integrated acceptance or proof of candidate publication/latency. See the September 21 audit; dated frozen records remain unchanged.
 
 ### Accepted predecessor manual SOD / trade-card ingestion branch
 
@@ -273,7 +282,7 @@ PRODUCTION SOD PROVIDER
 DESIGN: APPROVED / FROZEN
 DESIGN CHECKPOINT: b45a67051c39d7f985cc190e7648dbac180bda1d
 IMPLEMENTATION: DEFERRED / PRESERVED
-LIVE OPENAI ACCEPTANCE: NOT COMPLETED
+LIVE OPENAI ACCEPTANCE: HISTORICAL ZERO-CANDIDATE PASS RECORDED; CURRENT INTEGRATION PENDING
 USER IMPLEMENTATION ACCEPTANCE: NOT GRANTED
 
 PERFORMANCE INTELLIGENCE / ANALYTICS & REPORTING
@@ -285,7 +294,8 @@ IMPLEMENTATION: PENDING
 USER ACCEPTANCE: PENDING
 
 FINAL PRODUCTION V1 RELEASE: PENDING / PERFORMANCE INTELLIGENCE PENDING; AUTOMATED SOD DEFERRED
-MANUAL-SOD PRODUCTION CORE: MERGED TO main AT c23faf5
+MANUAL-SOD PRODUCTION CORE: SEPTEMBER 15 MERGE c23faf5; AUDITED MAIN e49f30f
+LIVE FAST PATH: DRAFT CONTRACT; IMPLEMENTATION / QUALIFICATION PENDING
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
@@ -428,7 +438,7 @@ Implemented/accepted:
 
 ### Deferred automated Production SOD
 
-Provider hardening, offline regression/build, credentialed live OpenAI acceptance, and independent review/user acceptance remain deferred. They are not prerequisites for the merged manual-SOD production core.
+Provider integration, current regression/build, candidate-producing live acceptance, and independent release review remain pending. The preserved branch records a historical zero-candidate Gate V pass; that evidence does not certify later changes. These are not prerequisites for the already-merged manual-SOD production core. The proposed intraday profile has its own draft qualification gates.
 
 ### Remaining broader Production V1 work
 
@@ -619,7 +629,7 @@ V2.4 structural invalidation remains separate provenance and is not substituted 
 - GitHub issue #19 — PRETRADE near-stop quantity-safety policy; **COMPLETED / CLOSED**.
 - SOD artifact rendering — **ACCEPTED / FROZEN** on `v24-sod-orchestration-lineage` at `4144c5c59494ae318bb736d64fba751a22046512`.
 - Manual SOD & Trade-Card Ingestion — **DESIGN APPROVED / FROZEN; IMPLEMENTATION USER ACCEPTED** on `v24-manual-sod-trade-card-ingestion` at `b2a1a20f60b12f011fe2f5ff87d325752131ac06` on 2026-09-11; carried forward and merged to `main` in the September 15 production core.
-- Production SOD Analysis Provider Hardening & Run Integrity — **DESIGN APPROVED / FROZEN at `b45a67051c39d7f985cc190e7648dbac180bda1d`; IMPLEMENTATION DEFERRED / PRESERVED at `593f4dd`; LIVE PROVIDER ACCEPTANCE NOT COMPLETED** on `v24-sod-production-analysis-provider`; merge/main release pending.
+- Production SOD Analysis Provider Hardening & Run Integrity — **DESIGN APPROVED / FROZEN at `b45a67051c39d7f985cc190e7648dbac180bda1d`; IMPLEMENTATION DEFERRED / PRESERVED at `593f4dd`; HISTORICAL ZERO-CANDIDATE LIVE PASS RECORDED, CURRENT INTEGRATION PENDING** on `v24-sod-production-analysis-provider`; merge/main release pending.
 - Production V1 roadmap — Performance Intelligence / Analytics & Reporting is **PRODUCT REQUIREMENT APPROVED FOR PRODUCTION V1**; inventory, technical design, implementation, and user acceptance remain pending.
 
 ---

@@ -1,14 +1,14 @@
 # ExecutionOS Documentation Index
 
 **Status:** Current documentation inventory  
-**Date:** 2026-09-15<br>
+**Date:** 2026-09-21<br>
 **Repository:** `sibolek/structure-based-trade-management`  
 **Stable operating branch:** `main`  
 **Predecessor SOD feature branch:** `v24-sod-orchestration-lineage`<br>
 **Predecessor manual-ingestion feature branch:** `v24-manual-sod-trade-card-ingestion`<br>
 **Deferred production-provider preservation branch:** `v24-sod-production-analysis-provider`<br>
-**Last runtime/code checkpoint:** `885ee94110e6a91352796c340e6ca40d6d775aff`<br>
-**Final integrated main tip:** `c23faf5c08f3ba60339197be3687fcad37db0e4b`<br>
+**Audited main code checkpoint:** `e49f30f2f7dccc1c544002a0806eab40fd46bb54`<br>
+**Historical September 15 integration tip:** `c23faf5c08f3ba60339197be3687fcad37db0e4b`<br>
 **Accepted SOD rendering checkpoint:** `4144c5c59494ae318bb736d64fba751a22046512`<br>
 **Accepted manual-ingestion checkpoint:** `b2a1a20f60b12f011fe2f5ff87d325752131ac06`<br>
 **Production-provider design base:** `e2357933147600e702c5e252020b257debbe3392`<br>
@@ -35,17 +35,21 @@
 
 Frozen approved design records should not be rewritten merely because implementation status later advanced.
 
+The [September 21 audit](ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md) updates current-state/sequencing facts from the September 12 roadmap while retaining its product scope. The associated [fast-path contract](ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md) is a draft proposal; it does not override frozen technical authority until its amendments are approved.
+
 ---
 
 ## 2. Current authoritative documentation
 
 | Document | Role | Authority |
 |---|---|---|
-| `USER-GUIDE.md` | v1.8.0 / September 15 manual-SOD operator workflow and Quick Start | **Authoritative living operator guide for `main`** |
-| `docs/ExecutionOS_User_Guide.pdf` | Rendered operator guide | **Generated PDF companion to `USER-GUIDE.md`** |
+| `USER-GUIDE.md` | v1.8.1 / September 21 manual-SOD workflow, preview discard and current limitations | **Living operator guide; updated on this documentation branch** |
+| `docs/ExecutionOS_User_Guide.pdf` | Rendered operator guide | **Prior generated revision; refresh through existing workflow after guide merge** |
 | `README.md` | Current repository overview | **Current overview of merged operating system** |
 | `DOCUMENTATION-STATUS.md` | Current vs historical map | **Documentation governance** |
 | `docs/ExecutionOS_Documentation_Index.md` | Cross-document authority/status | **Current index** |
+| `docs/ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md` | Refs, issue/PR state, evidence correction and sequencing | **September 21 audit; not implementation acceptance** |
+| `docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md` | Intraday profile, freshness, preview/admission/discard and qualification | **DRAFT / NOT APPROVED / FAST PATH NOT IMPLEMENTED; clock-freshness prerequisite implemented on working branch** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_APPROVED.md` | Consolidated PRETRADE→ARM→Execution architecture | **Current frozen V2.4 design authority** |
 | `docs/ExecutionOS_V2.4_Design_Baseline_v0.5_Traceability_Audit_APPROVED.md` | Decision 22–97 traceability | **Approved implementation companion** |
 | `docs/ExecutionOS_V2.4_PRETRADE_Quantity_Safety_Addendum_v0.1_APPROVED.md` | Separate 2-ATR PRETRADE quantity-safety ceiling | **Approved current quantity-safety policy authority** |
@@ -67,7 +71,7 @@ Earlier approved handoff baselines/addenda and `ExecutionOS_V2.4_Design_Baseline
 
 The PDF user guide is generated from `USER-GUIDE.md`; if the two ever differ, the current Markdown source plus validated application behavior governs.
 
-Manual ChatGPT SOD, Manual Candidate Import, and individual top-level `MANUAL_AUTHORIZED` deliverables are merged to `main` and documented in `USER-GUIDE.md` v1.8.0, its regenerated PDF, and `README.md`. Automated Production SOD remains deferred / not production-accepted. Performance Intelligence inventory, design, implementation, and acceptance remain pending; the manual-SOD production-core merge does not close the broader Production V1 release.
+Manual ChatGPT SOD, Manual Candidate Import, and individual top-level `MANUAL_AUTHORIZED` deliverables are merged to `main`. Guide v1.8.1 on this branch updates current-code references and the unimported-preview discard procedure; its PDF regeneration is pending the normal main-branch workflow. Automated Production SOD remains deferred / not production-accepted. Performance Intelligence inventory, design, implementation, and acceptance remain pending; the manual-SOD production-core merge does not close the broader Production V1 release.
 
 ---
 
@@ -77,9 +81,9 @@ Manual ChatGPT SOD, Manual Candidate Import, and individual top-level `MANUAL_AU
 
 The complete accepted V2.4 PRETRADE → ARM → Execution Board integration is merged to `main`.
 
-Last runtime/code checkpoint: `885ee94110e6a91352796c340e6ca40d6d775aff`. Final integrated main tip: `c23faf5c08f3ba60339197be3687fcad37db0e4b`. See [the September 15 final merge closeout](ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md); `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains the historical September 8 handoff checkpoint.
+Current audited main code checkpoint: `e49f30f2f7dccc1c544002a0806eab40fd46bb54`. Historical September 15 runtime/integration: `885ee94` / `c23faf5`. See [the September 15 final merge closeout](ExecutionOS_V2.4_Production_Core_Manual_SOD_Final_Merge_Closeout_2026-09-15.md); `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains the historical September 8 handoff checkpoint.
 
-Later documentation-only commits may advance the tip of `main` without changing that accepted implementation checkpoint.
+Later runtime commits added serializers, standalone trade-card packaging, output paths, report compatibility and History details. The September 21 audit records these separately from historical acceptance checkpoints.
 
 ### Accepted predecessor SOD feature branch
 
@@ -155,13 +159,15 @@ DESIGN: APPROVED / FROZEN
 DESIGN CHECKPOINT: b45a67051c39d7f985cc190e7648dbac180bda1d
 IMPLEMENTATION: DEFERRED / PRESERVED
 PRESERVATION CHECKPOINT: 593f4dd97c9e23500ed5b59beb0bab2d9f03c3ec
-LIVE OPENAI ACCEPTANCE: NOT COMPLETED
+LIVE OPENAI ACCEPTANCE: HISTORICAL ZERO-CANDIDATE PASS RECORDED; CURRENT INTEGRATION PENDING
 USER IMPLEMENTATION ACCEPTANCE: PENDING
 MERGE / MAIN RELEASE: PENDING
 BROKER AUTHORITY: READ ONLY / NO BROKER WRITES
 ```
 
 The substantial existing implementation is starting code, not accepted implementation evidence under this baseline. The Performance Intelligence roadmap requirement does not interrupt or broaden the frozen provider slice.
+
+The preserved September 13 report records a real zero-candidate Gate V pass. Later provider changes were not rerun through Gate V. Historical branch evidence does not establish current candidate-producing acceptance, latency qualification or release readiness; see the September 21 audit.
 
 ### Accepted predecessor manual SOD / trade-card ingestion branch
 
@@ -453,7 +459,7 @@ Actual equity order entry remains manual in thinkorswim/Schwab. Schwab observati
 
 - Decisions 1–27 and Acceptance Matrix A–V are approved/frozen;
 - hardening/run-integrity implementation is deferred / preserved at `593f4dd`;
-- credentialed live OpenAI acceptance remains pending;
+- current integrated/candidate-producing live acceptance remains pending; the preserved branch records a historical zero-candidate pass;
 - independent implementation review and user acceptance remain pending;
 - merge/release to `main` remains pending.
 
@@ -635,7 +641,7 @@ A repository GitHub Actions workflow regenerates the PDF when the guide or rende
 
 The Markdown guide remains the editable source of truth for operator documentation.
 
-The living guide v1.8.0 and README now document the merged manual ChatGPT SOD → individual `MANUAL_AUTHORIZED` JSON → Preview → explicit Import → PRETRADE → permission/risk/manual ARM → Execution Board workflow. The PDF was regenerated locally from that guide using the repository renderer. Automated Production SOD remains deferred / not production-accepted; Performance Intelligence remains pending.
+The living guide v1.8.1 and README document the merged manual ChatGPT SOD → individual `MANUAL_AUTHORIZED` JSON → Preview → explicit Import → PRETRADE → permission/risk/manual ARM → Execution Board workflow, with September 21 evidence and preview-discard guidance. The PDF remains at its prior generated revision until this guide update is merged and the existing workflow runs. Automated Production SOD remains deferred / not production-accepted; Performance Intelligence remains pending.
 
 ---
 

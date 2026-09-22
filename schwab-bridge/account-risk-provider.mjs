@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { RISK_SIZING_POLICY_VERSION, riskSizingPolicyForVersion } from "./risk-sizing-policy.mjs";
+import { freshness } from "./clock-freshness.mjs";
 
 const DEFAULT_SCHWAB_TRADER_BASE_URL = "https://api.schwabapi.com/trader/v1";
 const SCHWAB_ACCOUNT_CURRENCY = "USD";
@@ -105,7 +106,11 @@ export function assessAccountRiskSnapshot(snapshot, {
     });
   }
 
-  const ageMs = Math.max(0, currentMs - observedAtMs);
+  const snapshotFreshness = freshness(observedAtMs, {
+    nowMs: currentMs,
+    maxAgeMs: policy.accountSnapshotMaxAgeMs,
+  });
+  const ageMs = snapshotFreshness.ageMs;
   const normalized = {
     accountId,
     accountEquity,
@@ -117,7 +122,7 @@ export function assessAccountRiskSnapshot(snapshot, {
     equityField: text(snapshot?.equityField) || null,
   };
 
-  if (ageMs > policy.accountSnapshotMaxAgeMs) {
+  if (snapshotFreshness.isStale) {
     return blocked("ACCOUNT_SNAPSHOT_STALE", {
       snapshot: normalized,
       maxAgeMs: policy.accountSnapshotMaxAgeMs,

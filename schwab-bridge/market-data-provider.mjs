@@ -16,6 +16,8 @@ export class MarketDataProvider {
   }
 }
 
+export { freshness, MAX_FUTURE_CLOCK_SKEW_MS } from "./clock-freshness.mjs";
+
 export const EASTERN_TIME_ZONE = "America/New_York";
 
 function finite(value) {
@@ -209,25 +211,4 @@ export function aggregateMinuteBars(bars, { minutes = 2, nowMs = Date.now() } = 
         lastSourceTimestamp: Number(ordered[ordered.length - 1].timestamp),
       };
     });
-}
-
-export function freshness(asOf, { nowMs = Date.now(), maxAgeMs } = {}) {
-  const timestamp = typeof asOf === "string" ? Date.parse(asOf) : Number(asOf);
-  const threshold = Number(maxAgeMs);
-  if (!Number.isFinite(timestamp) || !Number.isFinite(threshold) || threshold < 0) {
-    return {
-      asOf: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null,
-      ageMs: null,
-      maxAgeMs: Number.isFinite(threshold) ? threshold : null,
-      isStale: true,
-    };
-  }
-
-  const ageMs = Math.max(0, Number(nowMs) - timestamp);
-  return {
-    asOf: new Date(timestamp).toISOString(),
-    ageMs,
-    maxAgeMs: threshold,
-    isStale: ageMs > threshold,
-  };
 }

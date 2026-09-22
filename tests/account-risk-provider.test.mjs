@@ -121,6 +121,19 @@ test("future-dated snapshot within clock skew is treated as age zero", () => {
   assert.equal(result.snapshot.ageMs, 0);
 });
 
+test("future-dated snapshot beyond clock skew blocks", () => {
+  const result = assessAccountRiskSnapshot({
+    accountId: "HASH-ABC",
+    accountEquity: 13_500,
+    currency: "USD",
+    observedAt: NOW + 2_001,
+    source: "SCHWAB",
+  }, { nowMs: NOW });
+  assert.equal(result.status, "BLOCKED");
+  assert.deepEqual(result.reasonCodes, ["ACCOUNT_SNAPSHOT_STALE"]);
+  assert.equal(result.snapshot.ageMs, null);
+});
+
 test("missing snapshot timestamp blocks", () => {
   const result = assessAccountRiskSnapshot({
     accountId: "HASH-ABC",

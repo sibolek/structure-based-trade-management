@@ -1,4 +1,5 @@
 import { RISK_SIZING_POLICY_VERSION, riskSizingPolicyForVersion } from "./risk-sizing-policy.mjs";
+import { freshness } from "./clock-freshness.mjs";
 
 function upper(value) {
   return String(value ?? "").trim().toUpperCase();
@@ -95,7 +96,7 @@ export function resolveExpectedEntry({
     });
   }
 
-  const quoteTimeMs = timestampMs(quote?.asOf ?? quote?.quoteObservedAt);
+  const quoteTimeMs = timestampMs(quote?.quoteTime ?? quote?.asOf ?? quote?.quoteObservedAt);
   if (quoteTimeMs === null) {
     return blocked("QUOTE_UNAVAILABLE", {
       direction: normalizedDirection,
@@ -108,8 +109,12 @@ export function resolveExpectedEntry({
     });
   }
 
-  const quoteObservedAt = new Date(quoteTimeMs).toISOString();
-  const quoteAgeMs = Math.max(0, evaluatedAtMs - quoteTimeMs);
+  const quoteFreshness = freshness(quoteTimeMs, {
+    nowMs: evaluatedAtMs,
+    maxAgeMs: policy.quoteMaxAgeMs,
+  });
+  const quoteObservedAt = quoteFreshness.asOf;
+  const quoteAgeMs = quoteFreshness.ageMs;
   const quoteSource = text(quote?.source) || null;
   const provenance = quoteProvenance({ bid, ask, quoteObservedAt, quoteAgeMs, quoteSource });
 
@@ -123,7 +128,7 @@ export function resolveExpectedEntry({
     });
   }
 
-  if (quoteAgeMs > policy.quoteMaxAgeMs) {
+  if (quoteFreshness.isStale) {
     return blocked("QUOTE_STALE", {
       direction: normalizedDirection,
       entryMode: normalizedMode,

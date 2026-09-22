@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { canonicalLifecycleState } from "./pretrade-state.mjs";
 import { buildExecutionBoardHandoff } from "./execution-board-handoff.mjs";
 import { armAuthorizationProof } from "./pretrade-arm-operation-repository.mjs";
+import { freshness } from "./clock-freshness.mjs";
 
 export const PRETRADE_ARM_SERVICE_AUTHORITY = "PRETRADE_ARM_SERVICE";
 
@@ -489,7 +490,9 @@ export class PreTradeArmService {
     const quoteMs = timestampMs(riskEvaluation.entry?.quoteObservedAt);
     const accountMs = timestampMs(riskEvaluation.account?.snapshotObservedAt);
     if (nowMs === null || quoteMs === null || accountMs === null) throw armError("ARM risk freshness provenance is incomplete", "ARM_RISK_EVALUATION_STALE");
-    if (Math.max(0, nowMs - quoteMs) > 5_000 || Math.max(0, nowMs - accountMs) > 15_000) throw armError("ARM risk evaluation is stale", "ARM_RISK_EVALUATION_STALE");
+    const quoteFreshness = freshness(quoteMs, { nowMs, maxAgeMs: 5_000 });
+    const accountFreshness = freshness(accountMs, { nowMs, maxAgeMs: 15_000 });
+    if (quoteFreshness.isStale || accountFreshness.isStale) throw armError("ARM risk evaluation is stale", "ARM_RISK_EVALUATION_STALE");
   }
 
   #time() {

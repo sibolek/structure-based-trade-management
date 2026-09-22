@@ -1,12 +1,12 @@
 # ExecutionOS User Guide
 
-**Version:** 1.8.0<br>
-**Date:** 15 September 2026<br>
+**Version:** 1.8.1<br>
+**Date:** 21 September 2026<br>
 **Status:** Living operator guide for the accepted ExecutionOS V2.4 manual-SOD → PRETRADE → Execution Board production core on `main`<br>
 **Repository:** `sibolek/structure-based-trade-management`  
 **Current operating branch:** `main`  
-**Last runtime/code checkpoint:** `885ee94110e6a91352796c340e6ca40d6d775aff`<br>
-**Final integrated main tip:** `c23faf5c08f3ba60339197be3687fcad37db0e4b`<br>
+**Audited main code checkpoint:** `e49f30f2f7dccc1c544002a0806eab40fd46bb54`<br>
+**Historical September 15 integration tip:** `c23faf5c08f3ba60339197be3687fcad37db0e4b`<br>
 **Frozen downstream execution release:** `v2.3.0`
 
 > **Operating principle:** Structure decides. P&L emotion does not.
@@ -314,19 +314,19 @@ The accepted implementation now on `main` includes:
 10. Manual Candidate Import with local Preview and explicit canonical PRETRADE admission;
 11. Manual SOD individual candidate deliverables with top-level `ingressPolicy: "MANUAL_AUTHORIZED"`.
 
-Last runtime/code checkpoint:
+Current audited `main` code checkpoint (September 21):
 
 ```text
-885ee94110e6a91352796c340e6ca40d6d775aff
+e49f30f2f7dccc1c544002a0806eab40fd46bb54
 ```
 
-Final integrated `main` tip after the production-core status documentation:
+Historical September 15 integration tip:
 
 ```text
 c23faf5c08f3ba60339197be3687fcad37db0e4b
 ```
 
-The September 15 fast-forward includes the accepted predecessor history plus Decision 28 integrity, Manual Candidate Import, and Manual SOD individual deliverables. Later documentation-only commits may advance `main` without changing the runtime/code checkpoint. The September 8 handoff checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains historical acceptance evidence.
+The September 15 runtime checkpoint was `885ee94`. Later runtime commits added manual analysis serialization, standalone trade-card delivery, output-path handling, report-shape compatibility and terminal History details. The [September 21 audit](docs/ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md) records the current code and remaining issues. The September 8 handoff checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains historical acceptance evidence.
 
 The former feature branch `v24-execution-board-handoff` was retired and deleted after the verified fast-forward merge. It is not an operating branch.
 
@@ -837,6 +837,14 @@ In the **SOD** workspace, find **Import Candidate JSON** (the Manual Candidate I
 Preview parses and checks the input locally. **It sends no import request, creates no PRETRADE candidate, and does not prove server admission, permission, or risk approval.** Preview is available while PRETRADE is offline; Import is disabled until the service is connected. Canonical validation, identity, validity, conflict, and supersession checks occur on the server when you import.
 
 The control also accepts supported standalone canonical candidates and existing standalone trade-card envelopes. Existing canonical bundles must already carry `MANUAL_AUTHORIZED`; they are not silently converted from another ingress policy.
+
+### Discard an unimported preview
+
+Before clicking Import, click inside **Paste candidate JSON**, select all text (Mac: **⌘A**), and delete it. Editing clears the local preview. Reloading the page also resets it. There is currently no dedicated **Discard preview** button or recorded rejection event.
+
+This applies only to a preview for which Import has not been clicked. Clearing the screen does not undo a completed import or resolve an uncertain request. If Import was clicked, inspect PRETRADE and the canonical receipt before deciding what happened; use supported lifecycle actions for an admitted candidate.
+
+Preview is specific to the current browser tab. A preview shown in Codex's browser is not automatically visible in Chrome. JSON validity and a future `validUntil` do not establish current chart or setup freshness. The September 21 live-card attempt exposed unacceptable delay; the [proposed fast path](docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md) remains a draft, and another supervised live-card test awaits its qualification gates.
 
 ### Explicit Import and results
 
@@ -1795,6 +1803,7 @@ Check:
 
 Current deferred areas include:
 
+- qualified chart-to-card intraday fast path, with source-age checks, server preflight and explicit preview discard; design is drafted, implementation/qualification pending;
 - automated Production SOD: deferred / not production-accepted; manual ChatGPT SOD is the current production-generation workflow;
 - broker order placement/replacement/cancellation/modification/flattening;
 - general broker-write Governor enforcement;
@@ -1817,7 +1826,7 @@ Treat:
 
 - `v2.3.0` as the frozen downstream reference;
 - `main` as the accepted operating branch for the merged V2.4 implementation;
-- `885ee94110e6a91352796c340e6ca40d6d775aff` as the last runtime/code checkpoint and `c23faf5c08f3ba60339197be3687fcad37db0e4b` as the September 15 final integrated main tip;
+- `e49f30f2f7dccc1c544002a0806eab40fd46bb54` as the September 21 audited main code checkpoint; `885ee94` and `c23faf5` retain their historical September 15 runtime/integration meanings;
 - the v0.5 baseline + traceability audit as frozen V2.4 design authority for Decisions 22–97;
 - the approved PRETRADE Quantity Safety Addendum v0.1 as the September 8 quantity-safety policy authority;
 - the September 6 handoff-integration closeout as Slices 1–7 acceptance evidence;

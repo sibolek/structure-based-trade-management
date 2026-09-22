@@ -7,6 +7,7 @@ import { DssInputAssemblyError } from "./dss-input-assembler.mjs";
 import { evaluateDss } from "./dss-evaluator.mjs";
 import { RegNmsEquityPriceIncrementResolver } from "./reg-nms-equity-price-increment.mjs";
 import { SchwabMarketDataProvider } from "./schwab-market-data-provider.mjs";
+import { freshness } from "./clock-freshness.mjs";
 
 const ACCESS_SAFETY_MS = 30_000;
 
@@ -35,8 +36,7 @@ function price(value) {
 }
 
 function ageMs(timestamp, nowMs) {
-  const parsed = Date.parse(String(timestamp || ""));
-  return Number.isFinite(parsed) ? Math.max(0, nowMs - parsed) : null;
+  return freshness(timestamp, { nowMs, maxAgeMs: Number.MAX_SAFE_INTEGER }).ageMs;
 }
 
 function ageLabel(value) {
@@ -194,7 +194,7 @@ function printReport({ args, result, authDir, expiresAt }) {
   const integrity = input.marketSnapshot.sourceIntegrity || {};
   const instrument = input.instrument || {};
   const regulatory = instrument.instrumentValueMetadata || {};
-  const quoteAge = ageMs(quote.asOf, evaluationNowMs);
+  const quoteAge = ageMs(quote.quoteTime ?? quote.asOf, evaluationNowMs);
 
   console.log("\nExecutionOS V2.4 Phase 3 live DSS assembly probe");
   console.log("================================================================================");

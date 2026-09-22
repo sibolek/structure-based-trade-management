@@ -35,19 +35,23 @@ The accepted V2.4 implementation is merged to `main` and includes:
 10. Manual Candidate Import with local Preview and explicit canonical PRETRADE admission;
 11. Manual SOD individual candidate deliverables with top-level `ingressPolicy: "MANUAL_AUTHORIZED"`.
 
-Last runtime/code checkpoint:
+Current audited `main` code checkpoint (September 21):
 
 ```text
-885ee94110e6a91352796c340e6ca40d6d775aff
+e49f30f2f7dccc1c544002a0806eab40fd46bb54
 ```
 
-Final integrated `main` tip after the production-core status documentation:
+Historical September 15 integration tip:
 
 ```text
 c23faf5c08f3ba60339197be3687fcad37db0e4b
 ```
 
-The September 15 fast-forward includes the accepted predecessor history plus Decision 28 integrity, Manual Candidate Import, and Manual SOD individual deliverables. Later documentation-only commits may advance `main` without changing the runtime/code checkpoint. The September 8 handoff checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains historical acceptance evidence.
+The September 15 fast-forward includes the accepted predecessor history plus Decision 28 integrity, Manual Candidate Import, and Manual SOD individual deliverables at runtime checkpoint `885ee94`. Subsequent runtime changes added manual analysis serialization, standalone trade-card packaging, output-path handling, report-shape compatibility (PR #20), and terminal History details (PR #21). See the [September 21 repository audit](docs/ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md). The September 8 handoff checkpoint `26ad8f86d2f0b4af96c186b26f250f4bb10a9dec` remains historical acceptance evidence.
+
+### Live intraday workflow status
+
+The September 21 chart-to-preview exercise took approximately 13 minutes and did not qualify the manual workflow for time-sensitive live trading. A [live fast-path contract](docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md) is now drafted but not approved. The working branch implements only its shared clock-freshness prerequisite; the fast path, server preview/admission and timed shadow qualification remain outstanding. Existing local Preview is not a current-market validation or trade authorization.
 
 The former feature branch:
 

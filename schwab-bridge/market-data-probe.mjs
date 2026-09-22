@@ -130,7 +130,7 @@ async function main() {
   const rthTwoMinuteBars = aggregateMinuteBars(rthMinuteBars, { minutes: 2, nowMs });
   const completeRthTwoMinuteBars = rthTwoMinuteBars.filter((bar) => bar.complete);
   const dailyBars = await provider.getDailyBars(symbol);
-  const quoteFreshness = freshness(quote.asOf, { nowMs, maxAgeMs: QUOTE_MAX_AGE_MS });
+  const quoteFreshness = freshness(quote.quoteTime ?? quote.asOf, { nowMs, maxAgeMs: QUOTE_MAX_AGE_MS });
 
   const expectedClosedMinutes = expectedClosedMinutesForDate(date, nowMs, marketSessionProfile);
   const expectedCompleteTwoMinuteBars = Number.isFinite(expectedClosedMinutes)

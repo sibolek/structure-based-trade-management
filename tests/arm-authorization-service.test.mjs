@@ -276,6 +276,26 @@ test("exact 5-second quote and 15-second account boundaries remain authorizable"
   assert.equal(service.authorize(request()).lifecycleState, "ARMED");
 });
 
+test("future freshness provenance within two-second clock skew remains authorizable", () => {
+  const evaluation = riskEvaluation({
+    entry: { quoteObservedAt: "2026-09-01T18:00:07.000Z" },
+    account: { snapshotObservedAt: "2026-09-01T18:00:07.000Z" },
+  });
+  const { service } = makeService({ evaluation });
+  assert.equal(service.authorize(request()).lifecycleState, "ARMED");
+});
+
+test("future freshness provenance beyond clock skew blocks final authorization", () => {
+  for (const evaluation of [
+    riskEvaluation({ entry: { quoteObservedAt: "2026-09-01T18:00:07.001Z" } }),
+    riskEvaluation({ account: { snapshotObservedAt: "2026-09-01T18:00:07.001Z" } }),
+  ]) {
+    const { service, store } = makeService({ evaluation });
+    assert.throws(() => service.authorize(request()), (error) => error.code === "ARM_RISK_EVALUATION_STALE");
+    assert.equal(store.saveCount, 0);
+  }
+});
+
 test("invalid authorization clock fails before mutation", () => {
   const { service, store } = makeService({ now: () => "bad-time" });
   assert.throws(() => service.authorize(request()), (error) => error.code === "ARM_AUTHORIZATION_CLOCK_INVALID");

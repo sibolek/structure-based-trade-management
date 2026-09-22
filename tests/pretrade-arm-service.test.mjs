@@ -47,7 +47,14 @@ function proposal() {
   };
 }
 
-function risk(candidate, { id, dssId, expectedEntry = 180, quantity = 90 } = {}) {
+function risk(candidate, {
+  id,
+  dssId,
+  expectedEntry = 180,
+  quantity = 90,
+  quoteObservedAt = "2026-09-06T15:00:00.500Z",
+  accountObservedAt = "2026-09-06T15:00:00.000Z",
+} = {}) {
   return {
     riskEvaluationId: id,
     status: "VALID",
@@ -69,7 +76,7 @@ function risk(candidate, { id, dssId, expectedEntry = 180, quantity = 90 } = {})
       currentExpectedEntry: expectedEntry,
       bid: expectedEntry - 0.01,
       ask: expectedEntry,
-      quoteObservedAt: "2026-09-06T15:00:00.500Z",
+      quoteObservedAt,
       quoteAgeMs: 500,
       quoteSource: "SCHWAB",
       expectedEntryRule: "ASK_MARKETABLE_LONG",
@@ -78,7 +85,7 @@ function risk(candidate, { id, dssId, expectedEntry = 180, quantity = 90 } = {})
       accountId: "acct-1",
       accountEquity: 13500,
       accountCurrency: "USD",
-      snapshotObservedAt: "2026-09-06T15:00:00.000Z",
+      snapshotObservedAt: accountObservedAt,
       snapshotAgeMs: 1000,
       snapshotSource: "SCHWAB",
       sourceSnapshotId: `account-${id}`,
@@ -141,7 +148,14 @@ function permissionAttempt(candidate, riskEvaluation, id, stateRevision) {
   });
 }
 
-function harness({ expectedEntryChange = false, quantityChange = false, freshQuantity = null, ownershipStatus = "FREE" } = {}) {
+function harness({
+  expectedEntryChange = false,
+  quantityChange = false,
+  freshQuantity = null,
+  ownershipStatus = "FREE",
+  freshQuoteObservedAt = "2026-09-06T15:00:00.500Z",
+  freshAccountObservedAt = "2026-09-06T15:00:00.000Z",
+} = {}) {
   const clock = () => NOW;
   const store = new PreTradeStore({ filePath: tmp("arm-state"), clock });
   store.load();
@@ -188,6 +202,8 @@ function harness({ expectedEntryChange = false, quantityChange = false, freshQua
         dssId: "dss-2",
         expectedEntry: expectedEntryChange ? 180.01 : 180,
         quantity: freshQuantity ?? (quantityChange ? 24 : 90),
+        quoteObservedAt: freshQuoteObservedAt,
+        accountObservedAt: freshAccountObservedAt,
       });
       riskMap.set("risk-2", risk2);
       const attempt2 = permissionAttempt(candidate, risk2, "permission-2", expectedRevision);
@@ -358,6 +374,21 @@ test("unknown Execution ownership fails closed before permission revalidation", 
   assert.equal(result.operation.reasonCode, "EXECUTION_OWNERSHIP_UNKNOWN");
   assert.equal(h.permissionCalls(), 0);
   assert.equal(h.coordinator.candidateSnapshot("arm-NVDA-1", 1).lifecycleState, "READY");
+});
+
+test("ARM rejects permission evidence dated beyond the allowed future clock skew", async () => {
+  for (const options of [
+    { freshQuoteObservedAt: "2026-09-06T15:00:03.001Z" },
+    { freshAccountObservedAt: "2026-09-06T15:00:03.001Z" },
+  ]) {
+    const h = harness(options);
+    await assert.rejects(
+      h.armService.arm(command(h)),
+      (error) => error.code === "ARM_RISK_EVALUATION_STALE",
+    );
+    assert.equal(h.handoffRepository.snapshot().handoffs.length, 0);
+    assert.equal(h.deliveryRepository.snapshot().deliveries.length, 0);
+  }
 });
 
 test("durable AUTHORIZED proof forward-completes after handoff persistence outage without reevaluating permission", async () => {

@@ -189,6 +189,28 @@ test("stale quote BLOCKS evaluation without producing an effective stop", () => 
   assert.equal(result.effectiveStop, null);
 });
 
+test("quote timestamp beyond future clock skew BLOCKS evaluation", () => {
+  const input = validInput();
+  input.marketSnapshot.quote.asOf = "2026-08-31T14:35:07.001Z";
+
+  const result = evaluate(input);
+  assert.equal(result.status, DSS_STATUS.BLOCKED);
+  assert.ok(result.reasonCodes.includes("STALE_OR_INVALID_QUOTE"));
+  assert.equal(result.quoteAgeMs, null);
+  assert.equal(result.effectiveStop, null);
+});
+
+test("DSS bid and ask freshness prefers quoteTime over a newer trade asOf", () => {
+  const input = validInput();
+  input.marketSnapshot.quote.quoteTime = "2026-08-31T14:34:59.999Z";
+  input.marketSnapshot.quote.asOf = "2026-08-31T14:35:04.500Z";
+
+  const result = evaluate(input);
+  assert.equal(result.status, DSS_STATUS.BLOCKED);
+  assert.ok(result.reasonCodes.includes("STALE_OR_INVALID_QUOTE"));
+  assert.equal(result.quoteTimestamp, "2026-08-31T14:34:59.999Z");
+});
+
 test("previous completed bar remains usable only inside the 10-second publication grace", () => {
   const input = validInput();
   input.marketSnapshot.executionBars = input.marketSnapshot.executionBars

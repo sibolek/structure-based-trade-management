@@ -151,3 +151,22 @@ test("future-dated quote within clock skew is treated as age zero", () => {
   assert.equal(result.status, "VALID");
   assert.equal(result.quoteAgeMs, 0);
 });
+
+test("future-dated quote beyond clock skew blocks", () => {
+  const result = resolve({ quote: quote({ asOf: "2026-09-01T00:00:07.001Z" }) });
+  assert.equal(result.status, "BLOCKED");
+  assert.deepEqual(result.reasonCodes, ["QUOTE_STALE"]);
+  assert.equal(result.quoteAgeMs, null);
+});
+
+test("bid and ask freshness uses quoteTime rather than a newer trade asOf", () => {
+  const result = resolve({
+    quote: quote({
+      quoteTime: "2026-08-31T23:59:59.999Z",
+      asOf: "2026-09-01T00:00:04.500Z",
+    }),
+  });
+  assert.equal(result.status, "BLOCKED");
+  assert.deepEqual(result.reasonCodes, ["QUOTE_STALE"]);
+  assert.equal(result.quoteObservedAt, "2026-08-31T23:59:59.999Z");
+});

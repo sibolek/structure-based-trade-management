@@ -1,5 +1,6 @@
 import { buildArmRiskHandoff } from "./arm-risk-preparation-service.mjs";
 import { authorizeArmState } from "./arm-authorization-state.mjs";
+import { freshness } from "./clock-freshness.mjs";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -47,9 +48,9 @@ function assertRiskEvaluationFreshAtAuthorization(riskEvaluation, nowMs) {
     throw authorizationError("ARM risk evaluation freshness provenance is incomplete", "ARM_RISK_EVALUATION_STALE");
   }
 
-  const quoteAgeMs = Math.max(0, nowMs - quoteObservedAt);
-  const accountAgeMs = Math.max(0, nowMs - accountObservedAt);
-  if (quoteAgeMs > 5_000 || accountAgeMs > 15_000) {
+  const quoteFreshness = freshness(quoteObservedAt, { nowMs, maxAgeMs: 5_000 });
+  const accountFreshness = freshness(accountObservedAt, { nowMs, maxAgeMs: 15_000 });
+  if (quoteFreshness.isStale || accountFreshness.isStale) {
     throw authorizationError("ARM risk evaluation is no longer fresh", "ARM_RISK_EVALUATION_STALE");
   }
 }
