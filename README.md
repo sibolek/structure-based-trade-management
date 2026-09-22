@@ -51,7 +51,7 @@ The September 15 fast-forward includes the accepted predecessor history plus Dec
 
 ### Live intraday workflow status
 
-The September 21 chart-to-preview exercise took approximately 13 minutes and did not qualify the manual workflow for time-sensitive live trading. A [live fast-path contract](docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md) is now drafted but not approved. The working branch implements only its shared clock-freshness prerequisite; the fast path, server preview/admission and timed shadow qualification remain outstanding. Existing local Preview is not a current-market validation or trade authorization.
+The September 21 chart-to-preview exercise took approximately 13 minutes and did not qualify the manual workflow for time-sensitive live trading. A [live fast-path contract](docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md) is drafted but not approved. Initial clock/quote-evidence changes are committed on the working branch; follow-up timestamp and final-ARM evidence fixes remain open. The [implementation handoff](docs/ExecutionOS_Live_Preview_Admission_Implementation_Handoff_2026-09-21.md) defines preview, discard and crash-safe admission work. The fast path and timed qualification remain outstanding; no draft chart/card age threshold is active. Existing local Preview is not a current-market validation or trade authorization.
 
 The former feature branch:
 

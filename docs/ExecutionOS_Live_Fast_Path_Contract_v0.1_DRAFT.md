@@ -1,9 +1,9 @@
 # ExecutionOS live trade-card fast path — contract v0.1
 
-**Status:** DRAFT FOR DESIGN REVIEW; not approved or released. The shared clock-freshness prerequisite is implemented on the working branch; the live fast path is not implemented.  
+**Status:** DRAFT FOR DESIGN REVIEW; not approved or released. Initial clock/quote-evidence changes are committed on the working branch, with follow-up defects recorded in the implementation handoff; the live fast path is not implemented.
 **Date:** 2026-09-21  
 **Base:** `main` at `e49f30f2f7dccc1c544002a0806eab40fd46bb54`  
-**Evidence:** [September 21 audit](ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md)
+**Evidence:** [September 21 audit](ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md) · [Preview/admission implementation handoff](ExecutionOS_Live_Preview_Admission_Implementation_Handoff_2026-09-21.md)
 
 ## 1. Intended operator experience
 
@@ -35,6 +35,8 @@ Quote checks use the timestamp of the actual price fields being used. A recent t
 
 Working-branch implementation note: the common quote/account freshness check now validates the local clock, permits no more than two seconds of future skew, and is applied again at both ARM authorization boundaries. DSS and expected-entry evaluation prefer `quoteTime` for bid/ask freshness instead of a newer aggregate/trade `asOf`. The production PRETRADE live DSS and risk paths also require a valid local quote-receipt timestamp, consistent source/receipt clocks and `realtime: true`. This uses the existing five-second quote policy; it does not activate the draft three-second pilot value and does not apply a chart/trade-card age limit. Backward monotonic-clock detection, chart-source age and the complete fast-path preflight remain unimplemented requirements.
 
+Follow-up review at `283ad90` found Date precision and legacy timestamp-input defects, plus missing persisted receipt/realtime evidence for final ARM revalidation. Final ARM currently rechecks source/account freshness, not the complete quote-evidence policy. These are open B2 prerequisites in the handoff; the initial passing tests do not establish their absence.
+
 Completed bars require the expected session-aligned closed interval and complete source-minute coverage. A completed 5m bar naturally differs in age from a quote; use interval closure/continuity rules rather than a quote-age threshold. Include a calendar capable of identifying holidays and early closes, and reject an unknown session state. Forming or missing bars cannot substitute for completed evidence.
 
 Machine checks establish timestamp, identity, continuity and explicitly encoded price conditions. They do not certify discretionary concepts such as “acceptance,” “higher low” or “failed bear break.” Such fields remain **Operator confirmation required** through the existing PRETRADE workflow.
@@ -42,6 +44,8 @@ Machine checks establish timestamp, identity, continuity and explicitly encoded 
 ## 4. Proposed pilot limits
 
 These are conservative engineering defaults proposed for the shadow pilot, not measured capabilities or accepted trading policy. Version them together as `liveProfilePolicyVersion`; any change invalidates outstanding previews and requires a new trial cohort.
+
+The operator has not selected a chart/trade-card stale-age rule. Continuing implementation does not approve these proposed values. Keep the live feature disabled with an explicit unconfigured-policy status until its policy is resolved; do not apply draft age limits to existing manual cards.
 
 | Control | Proposed pilot value / behavior |
 |---|---|
@@ -71,7 +75,7 @@ Preflight may persist an auditable preview record but must not mutate candidate,
 
 Route preflight outside the existing import handler's mutating validity-reconciliation preamble. Compute effective validity as a read-only projection and test that repeated preflight leaves authoritative candidate/lifecycle stores unchanged. Admission continues to perform its required reconciliation.
 
-The server owns an opaque `previewId` and binds it to the exact proposed bundle/canonical content hash, candidate identity and version, chart hashes and data times, input revision, account scope, quote/bar evidence, policy version, relevant PRETRADE revisions/ownership fingerprint and absolute expiry. Client-supplied PASS flags, hashes or timestamps do not override server evidence. Existing session/origin authorization is required; a preview ID is not a bearer authorization credential. Retain loopback-only access, bounded inputs and secret-safe diagnostics.
+The server owns an opaque `previewId` and binds it to the exact proposed bundle/canonical content hash, candidate identity and version, chart hashes and data times, input revision, account scope, quote/bar evidence, policy version, relevant PRETRADE revisions/ownership fingerprint and absolute expiry. Client-supplied PASS flags, hashes or timestamps do not override server evidence. Add explicit PRETRADE preview session/origin authorization; existing candidate routes do not provide a session-token boundary, and the separate SOD session cannot be assumed to authorize PRETRADE. A preview ID is not a bearer authorization credential. Retain loopback-only access, bounded inputs and secret-safe diagnostics.
 
 Each evidence refresh creates an immutable preview revision and atomically retires the previous revision from new acceptance. Acceptance names the exact revision. Once acceptance begins, refresh cannot replace that revision until its outcome resolves. Renewal preserves the proposal hash and fixed hard expiry. New evidence obtained during acceptance is appended to its record rather than rewriting the reviewed preview. Compatible price updates can be shown without changing the proposal; substantive changes require explicit new review.
 
@@ -81,9 +85,9 @@ The readable card shows symbol/direction/setup; capture and data ages; live quot
 
 ## 6. Acceptance, idempotency and races
 
-On **Accept into PRETRADE**, allocate one durable server-owned acceptance identity for the exact preview revision and candidate hash. Obtain current market/account/ownership evidence, then recheck the preview and canonical state inside the existing serialized admission authority immediately before commit. Do not hold a critical section across provider/network calls. Recheck elapsed time after external work; an expired snapshot cannot be committed because it passed an earlier check.
+Allocate one durable server-owned acceptance identity with each immutable preview revision, bound to that revision and candidate hash. On **Accept into PRETRADE**, reserve that identity before external work. Obtain current market/account/ownership evidence, then recheck the preview and canonical state inside the shared admission transaction immediately before commit. Do not hold a critical section across provider/network calls. Recheck elapsed time after external work; an expired snapshot cannot be committed because it passed an earlier check.
 
-Candidate mutation and its acceptance receipt must commit atomically or through a recoverable journal that unambiguously links the mutation to that acceptance identity. Recovery determines committed versus not committed without repeating admission. While unresolved, block replacement acceptance for that candidate/version and retain `OUTCOME_UNKNOWN`. This requires a documented persistence/crash protocol during implementation, not only an in-process lock.
+Candidate mutation and its acceptance receipt commit in one PRETRADE state transaction, as specified in the implementation handoff. The chosen design adds a writer lock, validated store revisions/metadata, a shared ingress planner and durable commit/recovery classification. Calling current `importBundle()` and saving a receipt afterward is insufficient. Recovery determines committed versus not committed without repeating admission. While unresolved, block replacement acceptance for that candidate/version and show `OUTCOME_UNKNOWN`; an in-process lock alone is insufficient.
 
 Atomicity concerns local state and evidence bounds; it cannot make the external market stop moving. Re-evaluate changed price/bar evidence against the frozen setup bounds. Crossed limits, changed substantive proposal, account mismatch, invalidated review, expired evidence, supersession or unresolved ownership returns an explicit non-admission result. Existing canonical supersession remains a separate informed action.
 
@@ -95,7 +99,7 @@ Preview discard and acceptance must be serialized against the same preview revis
 
 ## 7. Discard and browser behavior
 
-Before acceptance begins, **Discard preview** invalidates that preview server-side, clears the displayed proposal and confirms **Discarded — nothing imported** after the server confirms no acceptance. Preserve a bounded discard event with time, run/preview identity and optional reason. This event is not PRETRADE History and has no trading authority.
+Before acceptance begins, **Discard preview** invalidates that preview server-side, clears the displayed proposal and confirms **Preview discarded — this preview imported nothing** after the server confirms no acceptance. This statement does not deny another earlier import of the same candidate. Preserve a bounded discard event with time, run/preview identity and optional reason. This event is not PRETRADE History and has no trading authority.
 
 During analysis, cancellation invalidates the run's ability to create a preview and discards late output; best-effort transport abort does not imply upstream billing cancellation. A recovered or background response cannot resurrect a discarded preview.
 
@@ -140,10 +144,10 @@ Production qualification requires broader recorded evidence after the pilot, an 
 |---|---|---|
 | A | Repository audit and contract | Existing Astra work completed; ordinary follow-up audit/documentation uses Sol / medium |
 | B | Clock/quote/bar fixes with regression coverage | Sol / high; focused Astra review only for shared safety-policy changes |
-| C | Preview store, idempotency, admission and discard races | Astra / xhigh for critical design/review; Sol / high implements approved, bounded slices |
+| C | Preview store, idempotency, admission and discard races | Bounded Astra / high design review; Sol / high implements the concrete handoff |
 | D | Readable card, readiness and telemetry | Sol / medium; Luna / medium for mechanical copy, links and documentation |
-| E | Provider profile integration and qualification | Sol / high; escalate unresolved authority or recovery questions to Astra / xhigh |
-| Review | Independent review of implemented safety boundaries | Sol / high first; Astra / xhigh only for critical boundaries, max only if a specific unresolved issue warrants it |
+| E | Provider profile integration and qualification | Sol / high; escalate specific unresolved authority or recovery questions to Astra / high |
+| Review | Independent review of implemented safety boundaries | Sol / high first; Astra / high only for unresolved critical questions, higher effort only if demonstrated need warrants it |
 
 These settings govern development tasks and reflect the operator's September 21 preference to conserve Astra usage. Start with the lowest-cost suitable model; escalate for a concrete safety question, failed verification or demonstrated reasoning gap. Do not repeat completed exploration or use maximum effort by default. No assumed “95% of Astra” equivalence or account-usage savings is claimed. Production inference model/effort remains an evaluation decision and must be logged for each cohort. The active parent task's model setting is controlled in the app; a recommendation does not change it. Any delegated review must receive explicit scope, no browser/runtime mutation permission, and a bounded result request.
 
@@ -159,3 +163,5 @@ The setup-specific displacement bound remains a named implementation prerequisit
 ## 12. Independent draft review
 
 A bounded independent Astra/high review read this contract and the repository audit. Six findings were incorporated: path-dependent invalidation, trusted research/profile selection and historical compatibility, immutable quote-refresh revisions, admission/receipt crash recovery, pane-versus-bar timestamp semantics, and separation of production deadline from review lifetime. This is document review evidence; implementation and release review remain pending.
+
+The subsequent repository-grounded design pass produced the September 21 implementation handoff with a concrete single-store commit protocol, session boundary, immutable operation identity, recovery rules and test matrix. A bounded independent Sol/high review of the two freshness commits identified follow-up defects recorded there. This does not activate any draft trading-age rule or certify the live workflow.

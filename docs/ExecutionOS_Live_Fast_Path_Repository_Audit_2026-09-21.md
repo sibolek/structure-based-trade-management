@@ -18,7 +18,7 @@ Remote refs were checked directly with `git ls-remote` on September 21. GitHub i
 | Item | Verified state | Disposition |
 |---|---|---|
 | Local and remote `main` | `e49f30f`, September 17 merge of PR #21 | Base for the new branch |
-| New design branch | Created from `main` in the existing provider worktree | Documentation/design work only in this pass |
+| Live fast-path branch | Created from `main` in the existing provider worktree; freshness changes committed as `82febc3` and `283ad90` | Working-branch implementation, not merged/released; B2 review defects remain open |
 | Deferred provider branch | Local and remote `593f4dd`; 20 commits behind `main`, one unique ahead | Preserve; selectively port reviewed functionality later |
 | Preservation commit | 80 files, 7,027 insertions, 625 deletions; overlaps already-reconstructed integrity/import work | Do not cherry-pick wholesale |
 | Nested `fix/manual-sod-canonicalizer` worktree | `1f5ff2f`; seven commits absent by ancestry, but its complete tracked tree equals squash merge `6d08038` | Code is already merged through PR #20; no pending code integration from this branch |
@@ -88,10 +88,12 @@ The first implementation slice traces and corrects the shared helper plus the ex
 - future source timestamps are accepted only within a fixed two-second clock-skew allowance and otherwise fail closed;
 - bid/ask freshness prefers `quoteTime`, so a newer trade timestamp cannot mask stale bid/ask data;
 - production PRETRADE live DSS/risk evaluation requires a valid local quote-receipt timestamp, source/receipt clock consistency and an explicit real-time entitlement flag;
-- the same policy is rechecked immediately before both current ARM authorization paths;
+- source-quote/account clock freshness is rechecked immediately before both current ARM authorization paths; receipt/realtime evidence is not yet preserved for those final checks;
 - compatibility exports preserve existing `market-data-provider.mjs` imports.
 
 The active live DSS/risk path retains the existing five-second quote threshold; the proposed three-second fast-path pilot limit is not active. No chart or candidate timestamp is rejected by this slice. This remains a cross-cutting prerequisite, not fast-path acceptance. Monotonic/backward-clock detection, chart/pane capture age and server preview/admission remain outstanding.
+
+Follow-up review at `283ad90` identified three defect groups: Date-object precision loss can understate age; supported epoch-string/legacy-alias timestamps can fail after inconsistent reparsing; and receipt/realtime evidence is dropped before final ARM revalidation. Network-free probes confirmed them. The [implementation handoff, section 9](ExecutionOS_Live_Preview_Admission_Implementation_Handoff_2026-09-21.md#9-b2-findings-fix-before-preview-implementation-advances) records the exact fix/test queue. The initial passing suite is not evidence that these later-discovered gaps are fixed.
 
 Existing validity/ARM checks remain relevant safety controls. These findings do not establish that a broker order or ARM bypass occurred.
 
@@ -128,4 +130,4 @@ Fresh verification after the clock-freshness implementation:
 - production build: **passed**;
 - `git diff --check`: **passed**.
 
-These checks are not live-provider certification, fast-path implementation acceptance or release evidence. The branch changes are not committed, pushed or merged. Preview/admission implementation, publication and rollout remain subsequent work.
+These checks are not live-provider certification, fast-path implementation acceptance or release evidence. Initial documentation/freshness work is locally committed as `82febc3` and `283ad90`; it has not been pushed or merged in this work. The subsequent documentation-only review adds a concrete [preview/admission handoff](ExecutionOS_Live_Preview_Admission_Implementation_Handoff_2026-09-21.md), including atomic persistence, auth, races, recovery and the open B2 fixes. No full-suite rerun or live-system verification was performed in that documentation-only review. Preview/admission implementation, publication and rollout remain subsequent work.

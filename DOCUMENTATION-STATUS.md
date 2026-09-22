@@ -50,9 +50,10 @@ The roadmap checkpoint is current product-planning authority. It is not a frozen
 ### September 21 live-workflow checkpoint
 
 - [Repository audit](docs/ExecutionOS_Live_Fast_Path_Repository_Audit_2026-09-21.md): current refs, open issues, incident, evidence correction and next-phase sequencing. It updates the dated roadmap's current-state/sequencing snapshot while preserving its four pillars and Performance Intelligence requirement.
-- [Live fast-path contract v0.1](docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md): **DRAFT / NOT APPROVED / FAST PATH NOT IMPLEMENTED**. Clock, quote-source, local-receipt and real-time-entitlement prerequisites are implemented and regression-tested for production PRETRADE live DSS/risk paths on the working branch; compact analysis, chart-age policy, server preview, race-safe admission, discard and qualification gates remain proposed.
+- [Live fast-path contract v0.1](docs/ExecutionOS_Live_Fast_Path_Contract_v0.1_DRAFT.md): **DRAFT / NOT APPROVED / FAST PATH NOT IMPLEMENTED**. Initial clock/quote-source/receipt/real-time changes are committed and tested on the working branch, but follow-up review found timestamp compatibility/precision defects and incomplete final-ARM receipt/realtime revalidation. Compact analysis, chart-age policy, server preview, race-safe admission, discard and qualification remain outstanding.
+- [Preview/admission implementation handoff](docs/ExecutionOS_Live_Preview_Admission_Implementation_Handoff_2026-09-21.md): concrete transaction, session, discard/recovery and adversarial test design; resume with the B2 quote fixes, then C1 on Sol/high. This is disabled-feature engineering work, not trading-age policy approval or live acceptance.
 - GitHub query: no open PRs; issues #16 and #17 remain open. PR #21 does not complete all their acceptance criteria.
-- Development branch: `codex/live-fast-path-p0-contract`, based on `e49f30f`. It now contains the uncommitted documentation package plus the first clock-freshness implementation slice. Live account state was not changed or revalidated by this work.
+- Development branch: `codex/live-fast-path-p0-contract`, based on `e49f30f`; initial work is locally committed as `82febc3` and `283ad90`, not pushed or merged in this work. The implementation handoff records the follow-up review and open fixes. Live account state was not changed or revalidated by this work.
 
 ### Accepted implementation / closeout records
 
