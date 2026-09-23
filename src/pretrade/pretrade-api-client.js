@@ -126,6 +126,11 @@ export function createPretradeApiClient({
       return request("/api/candidates/manual-import", { method: "POST", body: envelope });
     },
 
+    loadManualSodCandidates(sourceDate) {
+      const value = text(sourceDate);
+      return request(`/api/manual-sod/candidates?sourceDate=${encodeURIComponent(value)}`);
+    },
+
     snapshot() {
       return request("/api/candidates");
     },

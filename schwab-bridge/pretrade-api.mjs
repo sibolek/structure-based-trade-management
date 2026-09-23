@@ -70,6 +70,9 @@ import { createExecutionBoardHandoffApiHandler } from "./execution-board-handoff
 import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from "./clock-freshness.mjs";
 import { PreTradePreviewAuthority } from "./pretrade-preview-authority.mjs";
 import { createPreTradePreviewApiHandler } from "./pretrade-preview-api.mjs";
+import { createManualSodDirectoryApiHandler } from "./manual-sod-directory-api.mjs";
+import { DEFAULT_MANUAL_SOD_ROOT } from "./manual-sod-directory-reader.mjs";
+import { expandManualPath } from "./manual-output-paths.mjs";
 
 const HOST = process.env.EXECUTIONOS_V24_HOST || "127.0.0.1";
 const PORT = Number(process.env.EXECUTIONOS_V24_PORT || 8788);
@@ -83,6 +86,7 @@ const EXECUTION_OWNERSHIP_FILE = process.env.EXECUTIONOS_V24_EXECUTION_OWNERSHIP
 const HANDOFF_FILE = process.env.EXECUTIONOS_V24_HANDOFF_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_FILE;
 const HANDOFF_DELIVERY_FILE = process.env.EXECUTIONOS_V24_HANDOFF_DELIVERY_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_DELIVERY_FILE;
 const PREVIEW_UI_ORIGIN = process.env.EXECUTIONOS_V24_PREVIEW_UI_ORIGIN || "";
+const MANUAL_SOD_ROOT = expandManualPath(process.env.EXECUTIONOS_MANUAL_SOD_ROOT || DEFAULT_MANUAL_SOD_ROOT);
 const MAX_BODY_BYTES = 1024 * 1024;
 
 const store = new PreTradeStore({ filePath: STATE_FILE });
@@ -265,6 +269,7 @@ const handleCandidateApi = createPreTradeCandidateApiHandler({
   lifecycleCoordinator,
   ocoService,
 });
+const handleManualSodDirectoryApi = createManualSodDirectoryApiHandler({ rootPath: MANUAL_SOD_ROOT });
 
 function json(res, statusCode, payload, origin = null) {
   const body = JSON.stringify(payload);
@@ -381,6 +386,8 @@ const server = http.createServer(async (req, res) => {
       candidateManualIngressPolicy: MANUAL_AUTHORIZED,
       candidateManualSupersessionReviewAuthority: true,
       candidateManualSupersessionDecisionApi: true,
+      manualSodDirectoryImport: true,
+      manualSodRoot: MANUAL_SOD_ROOT,
       triggerContractAuthority: true,
       triggerEngineAuthority: true,
       triggerEvidenceApi: true,
@@ -416,6 +423,10 @@ const server = http.createServer(async (req, res) => {
   // Preview routes intentionally run before candidate read reconciliation because
   // preflight/status must not mutate lifecycle or downstream trading state.
   if (await handlePreviewApi(req, res)) return;
+
+  // Local SOD package discovery is read-only and must not trigger PRETRADE
+  // validity reconciliation or any other lifecycle mutation.
+  if (await handleManualSodDirectoryApi(req, res)) return;
 
   if (pathname.startsWith("/api/oco-groups")) {
     try {
@@ -468,6 +479,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[ExecutionOS V2.4] Handoff delivery file: ${HANDOFF_DELIVERY_FILE}`);
   console.log("[ExecutionOS V2.4] Candidate import is routed through authoritative ingress with immutable contract/version provenance.");
   console.log(`[ExecutionOS V2.4] Candidate ingress policies available: ${AUTOMATED_UNTOUCHED_ONLY}, ${MANUAL_AUTHORIZED}; no-policy import fails closed.`);
+  console.log(`[ExecutionOS V2.4] Manual SOD candidate root: ${MANUAL_SOD_ROOT}`);
   console.log("[ExecutionOS V2.4] Exact candidate validity is reconciled before PRETRADE candidate operations.");
   console.log("[ExecutionOS V2.4] Trigger contracts are versioned and evaluated by the authoritative durable trigger engine.");
   console.log("[ExecutionOS V2.4] Trigger persistence is monitored separately from pre-satisfaction trigger progress.");

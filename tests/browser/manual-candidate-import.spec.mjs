@@ -160,6 +160,70 @@ test('generated manual SOD individual file previews and imports intact with SOD 
   expect(requests[0].body.ingressPolicy).toBe('MANUAL_AUTHORIZED');
 });
 
+test('dated SOD package loads locally and imports only explicitly selected candidates', async ({ page }) => {
+  const sourceDate = '2026-09-05';
+  const first = manualCandidateFixture({ source: 'SOD_A_PLUS_TRADES', sourceDate });
+  const second = manualCandidateFixture({ candidateId: 'contract-AMD-1', symbol: 'AMD', source: 'SOD_A_PLUS_TRADES', sourceDate });
+  const bundle = candidate => ({
+    source: 'SOD_A_PLUS_TRADES', sourceDate, bundleId: `directory:${candidate.candidateId}`,
+    ingressPolicy: 'MANUAL_AUTHORIZED', candidates: [candidate],
+  });
+  const loaded = [first, second].map((candidate, index) => {
+    const raw = JSON.stringify(bundle(candidate));
+    return { filename: `0${index + 1}-${candidate.candidateId}.json`, byteLength: Buffer.byteLength(raw), raw };
+  });
+  const imports = [];
+  let loads = 0;
+  await page.route('**/api/manual-sod/candidates*', route => {
+    loads++;
+    expect(new URL(route.request().url()).searchParams.get('sourceDate')).toBe(sourceDate);
+    return route.fulfill({ status: 200, json: {
+      sourceDate,
+      packageDirectory: `/Users/test/Downloads/ExecutionOS/SOD/${sourceDate}`,
+      delivery: { status: 'DELIVERED', reason: 'CURRENT_LOCAL_VALIDATOR_PASSED', message: 'Two candidates are ready for review.' },
+      candidates: loaded,
+    } });
+  });
+  await page.route('**/api/candidates/import', route => {
+    const body = route.request().postDataJSON();
+    imports.push(body);
+    const candidate = body.candidates[0];
+    return route.fulfill({ status: 200, json: { outcomes: [{
+      status: 'ACCEPTED', lifecycleState: 'WAITING', candidateId: candidate.candidateId, contractVersion: candidate.contractVersion,
+    }] } });
+  });
+  await page.goto('/tests/browser/manual-import-harness.html?sodOffline=1');
+  await page.getByLabel('SOD trading date').fill(sourceDate);
+  await page.getByRole('button', { name: 'Load SOD candidates', exact: true }).click();
+  await expect(page.getByText('DELIVERED · 2 candidates')).toBeVisible();
+  await expect(page.getByText('NO AI API CALL')).toBeVisible();
+  expect(loads).toBe(1);
+  expect(imports).toHaveLength(0);
+
+  await page.getByLabel('Select AMD candidate').uncheck();
+  await page.getByRole('button', { name: 'Import selected into PRETRADE (1)', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('ACCEPTED · WAITING');
+  expect(imports).toHaveLength(1);
+  expect(imports[0]).toEqual(bundle(first));
+  await expect(page.getByRole('button', { name: 'Open PRETRADE' })).toBeVisible();
+});
+
+test('dated SOD package response cannot substitute the selected date', async ({ page }) => {
+  let imports = 0;
+  await page.route('**/api/manual-sod/candidates*', route => route.fulfill({ status: 200, json: {
+    sourceDate: '2026-09-04',
+    packageDirectory: '/local/SOD/2026-09-04',
+    delivery: { status: 'NO_CANDIDATES', reason: 'NO_A_PLUS_TRADES', message: 'none' },
+    candidates: [],
+  } }));
+  await page.route('**/api/candidates/import', route => { imports++; return route.fulfill({ status: 500, json: {} }); });
+  await page.goto('/tests/browser/manual-import-harness.html');
+  await page.getByLabel('SOD trading date').fill('2026-09-05');
+  await page.getByRole('button', { name: 'Load SOD candidates', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('does not match the selected date');
+  expect(imports).toBe(0);
+});
+
 
 test('import is visibly disabled in flight and repeated clicks send only one request', async ({ page }) => {
   await open(page);

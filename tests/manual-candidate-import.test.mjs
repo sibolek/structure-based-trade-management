@@ -5,6 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import os from "node:os";
 import { prepareManualCandidateImport, parseCandidateJson, readCandidateJsonFile, MANUAL_IMPORT_MAX_BYTES } from "../src/pretrade/manual-candidate-import.js";
+import { prepareManualSodDirectoryResponse, validateManualSodImportResult } from "../src/pretrade/manual-sod-directory-import.js";
 import { createPretradeApiClient } from "../src/pretrade/pretrade-api-client.js";
 import { PreTradeStore } from "../schwab-bridge/pretrade-state.mjs";
 import { PreTradeCandidateIngress } from "../schwab-bridge/pretrade-candidate-ingress.mjs";
@@ -61,6 +62,63 @@ test("JSON files are size/extension checked before reading; valid files and past
   await assert.rejects(readCandidateJsonFile({ ...file, name: "card.mjs" }), /\.json/);
   await assert.rejects(readCandidateJsonFile({ ...file, size: MANUAL_IMPORT_MAX_BYTES + 1 }), /768 KiB/);
   assert.equal(reads, 1);
+});
+
+test("manual SOD directory responses preserve exact bundles and bind import outcomes to candidate identity", () => {
+  const input = {
+    source: "SOD_A_PLUS_TRADES",
+    sourceDate: "2026-09-05",
+    bundleId: "directory-bundle",
+    ingressPolicy: "MANUAL_AUTHORIZED",
+    candidates: [candidate({ source: "SOD_A_PLUS_TRADES" })],
+  };
+  const raw = JSON.stringify(input);
+  const prepared = prepareManualSodDirectoryResponse({
+    sourceDate: "2026-09-05",
+    packageDirectory: "/local/SOD/2026-09-05",
+    delivery: { status: "DELIVERED", reason: "CURRENT_LOCAL_VALIDATOR_PASSED", message: "ready" },
+    candidates: [{ filename: "01-candidate.json", byteLength: Buffer.byteLength(raw), raw }],
+  }, "2026-09-05");
+  assert.deepEqual(prepared.candidates[0].prepared.body, input);
+  assert.equal(validateManualSodImportResult({ outcomes: [{
+    status: "ACCEPTED",
+    lifecycleState: "WAITING",
+    candidateId: input.candidates[0].candidateId,
+    contractVersion: input.candidates[0].contractVersion,
+  }] }, prepared.candidates[0].prepared).outcomes[0].status, "ACCEPTED");
+  assert.throws(() => validateManualSodImportResult({ outcomes: [{
+    status: "ACCEPTED",
+    candidateId: "substituted",
+    contractVersion: 1,
+  }] }, prepared.candidates[0].prepared), { code: "MANUAL_IMPORT_INVALID_RESULT" });
+});
+
+test("manual SOD directory responses reject date, filename, policy, and identity substitution", () => {
+  const bundle = {
+    source: "SOD_A_PLUS_TRADES",
+    sourceDate: "2026-09-05",
+    bundleId: "directory-bundle",
+    ingressPolicy: "MANUAL_AUTHORIZED",
+    candidates: [candidate({ source: "SOD_A_PLUS_TRADES" })],
+  };
+  const entry = (value, filename = "01-candidate.json") => {
+    const raw = JSON.stringify(value);
+    return { filename, raw, byteLength: Buffer.byteLength(raw) };
+  };
+  const response = (overrides = {}) => ({
+    sourceDate: "2026-09-05",
+    packageDirectory: "/local/SOD/2026-09-05",
+    delivery: { status: "DELIVERED", reason: "CURRENT_LOCAL_VALIDATOR_PASSED", message: "ready" },
+    candidates: [entry(bundle)],
+    ...overrides,
+  });
+  assert.throws(() => prepareManualSodDirectoryResponse(response(), "2026-09-06"), /selected date/);
+  assert.throws(() => prepareManualSodDirectoryResponse(response({ candidates: [entry(bundle, "../candidate.json")] }), "2026-09-05"), /filename/);
+  assert.throws(() => prepareManualSodDirectoryResponse(response({ candidates: [entry({ ...bundle, ingressPolicy: "AUTOMATED_UNTOUCHED_ONLY" }, "01.json")] }), "2026-09-05"), /MANUAL_AUTHORIZED/);
+  assert.throws(() => prepareManualSodDirectoryResponse(response({ candidates: [
+    entry(bundle, "01.json"),
+    entry(bundle, "02.json"),
+  ] }), "2026-09-05"), /duplicate candidate identity/);
 });
 
 test("real HTTP standalone import creates canonical WAITING/Decision 28; no ARM or Execution state", async t => {

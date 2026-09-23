@@ -1,4 +1,5 @@
 import ManualCandidateImport from "./ManualCandidateImport.jsx";
+import ManualSodDirectoryImport from "./ManualSodDirectoryImport.jsx";
 import { useState } from "react";
 import {
   AlertTriangle,
@@ -225,6 +226,12 @@ export default function SodWorkspace({ sod, pretrade, onOpenPretrade }) {
 
   return (
     <div className="space-y-3">
+      <ManualSodDirectoryImport
+        pretrade={pretrade}
+        sourceDate={sourceDate}
+        onSourceDateChange={setSourceDate}
+        onOpenPretrade={onOpenPretrade}
+      />
       <ManualCandidateImport pretrade={pretrade} onOpenPretrade={onOpenPretrade} />
       <section className="rounded border border-white/10 bg-ink-850/95 shadow-terminal">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">

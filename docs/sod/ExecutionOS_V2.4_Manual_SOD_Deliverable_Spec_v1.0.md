@@ -156,6 +156,17 @@ This dedicated manual generator accepts policy-less manual archival bundles or e
 
 Manual SOD → individual `MANUAL_AUTHORIZED` candidate bundle → existing Manual Candidate Import Preview → explicit Import → canonical PRETRADE admission. Valid new candidates return `ACCEPTED` / `WAITING`; an unchanged retry returns `DUPLICATE`. Existing validation, validity, conflict, and supersession rules still apply.
 
+ExecutionOS also provides a local dated-package loader for this same manual boundary. Select the SOD trading date and choose **Load SOD candidates**. The local PRETRADE service reads only:
+
+```text
+~/Downloads/ExecutionOS/SOD/<YYYY-MM-DD>/candidate-delivery-status.json
+~/Downloads/ExecutionOS/SOD/<YYYY-MM-DD>/individual-candidates/*.json
+```
+
+The root may be overridden with an absolute path or `~/` path through `EXECUTIONOS_MANUAL_SOD_ROOT`. The loader validates the date, real directories, delivery manifest, file count and exact manifest filenames; rejects links, stale/unlisted JSON, duplicates, oversized files, source-date substitution and any candidate that fails the current manual SOD delivery gate; and returns an in-memory snapshot for review. `NO_CANDIDATES` and `WITHHELD` remain non-importing outcomes. It never reads the transport JSON as a candidate.
+
+Loading is read-only and performs no PRETRADE lifecycle reconciliation or candidate admission. After review, **Import selected into PRETRADE** submits each selected original one-candidate bundle through the existing canonical manual import endpoint. The UI binds every result to the selected candidate identity and version. No OpenAI/provider call, chart upload, report generation, ARM, handoff, execution or broker write occurs in this flow.
+
 The policy selects the existing manual admission path. It grants no activation, permission, risk approval, ARM authorization, Execution Board trade/handoff, or broker authority. Operator decision, permission/risk evaluation, and manual ARM remain separate existing actions. Do not import through a new repository or alter the manual import adapter to inject missing policies.
 
 ## Combined and automated bundles remain unchanged
@@ -166,4 +177,4 @@ Only the individual manual import files are required to be `MANUAL_AUTHORIZED`. 
 
 ## Offline acceptance
 
-Run `npm run v24:manual-output-test` for default-path sandbox smoke tests, fresh-directory refusal, home expansion, explicit overrides, and unchanged validator withholding. Run `npm run v24:manual-sod-test` for the focused delivery/contract regression suite. Tests cover transport CLI round trips, deterministic/lossless serialization with no runtime or validator, compatibility with direct inputs, transport template rendering, reporting with services offline, absent/unloadable validator code, rejected candidates, a later candidate failing validation/serialization, no partial candidate delivery, full candidate preservation, the existing manual UI adapter, real canonical API admission as `ACCEPTED` / `WAITING`, retry as `DUPLICATE`, no ARM/Execution/broker authority, and unchanged automated publication bytes/policy. Browser tests verify that an emitted file can be Previewed and Imported intact through the existing control. No live analysis request is required.
+Run `npm run v24:manual-output-test` for default-path sandbox smoke tests, fresh-directory refusal, home expansion, explicit overrides, and unchanged validator withholding. Run `npm run v24:manual-sod-test` for the focused delivery/contract regression suite, and `npm run v24:manual-sod-directory-test` for dated-package discovery, manifest/file controls, date and identity binding, and canonical admission. Tests cover transport CLI round trips, deterministic/lossless serialization with no runtime or validator, compatibility with direct inputs, transport template rendering, reporting with services offline, absent/unloadable validator code, rejected candidates, a later candidate failing validation/serialization, no partial candidate delivery, full candidate preservation, the existing manual UI adapter, real canonical API admission as `ACCEPTED` / `WAITING`, retry as `DUPLICATE`, no ARM/Execution/broker authority, and unchanged automated publication bytes/policy. Browser tests verify that generated files can be loaded as a dated package, reviewed, selected, and Imported intact through the existing control. No live analysis request is required.
