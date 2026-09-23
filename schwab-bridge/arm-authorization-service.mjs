@@ -1,6 +1,7 @@
 import { buildArmRiskHandoff } from "./arm-risk-preparation-service.mjs";
 import { authorizeArmState } from "./arm-authorization-state.mjs";
-import { freshness } from "./clock-freshness.mjs";
+import { freshness, timestampMs } from "./clock-freshness.mjs";
+import { assertRiskQuoteEvidenceAtArm } from "./risk-evaluation.mjs";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -8,14 +9,6 @@ function text(value) {
 
 function upper(value) {
   return text(value).toUpperCase();
-}
-
-function finiteTimestamp(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const number = Number(value);
-  if (Number.isFinite(number)) return number;
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function deepFreeze(value) {
@@ -42,8 +35,8 @@ function sameHandoff(left, right) {
 }
 
 function assertRiskEvaluationFreshAtAuthorization(riskEvaluation, nowMs) {
-  const quoteObservedAt = finiteTimestamp(riskEvaluation?.entry?.quoteObservedAt);
-  const accountObservedAt = finiteTimestamp(riskEvaluation?.account?.snapshotObservedAt);
+  const quoteObservedAt = timestampMs(riskEvaluation?.entry?.quoteObservedAt);
+  const accountObservedAt = timestampMs(riskEvaluation?.account?.snapshotObservedAt);
   if (quoteObservedAt === null || accountObservedAt === null) {
     throw authorizationError("ARM risk evaluation freshness provenance is incomplete", "ARM_RISK_EVALUATION_STALE");
   }
@@ -56,7 +49,7 @@ function assertRiskEvaluationFreshAtAuthorization(riskEvaluation, nowMs) {
 }
 
 export class ArmAuthorizationService {
-  constructor({ store, riskEvaluationRepository, now = () => Date.now() } = {}) {
+  constructor({ store, riskEvaluationRepository, now = () => Date.now(), allowLegacyQuoteEvidence = false } = {}) {
     if (!store || typeof store.snapshot !== "function" || typeof store.save !== "function") {
       throw new Error("ArmAuthorizationService requires a compatible pre-trade store");
     }
@@ -67,6 +60,7 @@ export class ArmAuthorizationService {
     this.store = store;
     this.riskEvaluationRepository = riskEvaluationRepository;
     this.now = now;
+    this.allowLegacyQuoteEvidence = allowLegacyQuoteEvidence;
   }
 
   authorize({
@@ -106,10 +100,11 @@ export class ArmAuthorizationService {
       throw authorizationError("risk evaluation candidate identity does not match request", "ARM_AUTHORIZATION_RISK_IDENTITY_MISMATCH");
     }
 
-    const nowMs = finiteTimestamp(this.now());
+    const nowMs = timestampMs(this.now());
     if (nowMs === null) {
       throw authorizationError("ARM authorization clock returned an invalid timestamp", "ARM_AUTHORIZATION_CLOCK_INVALID");
     }
+    assertRiskQuoteEvidenceAtArm(riskEvaluation, nowMs, this);
     assertRiskEvaluationFreshAtAuthorization(riskEvaluation, nowMs);
 
     // Rebuild the handoff from immutable persistence and current pre-trade state.

@@ -255,7 +255,7 @@ export class PreTradeArmLifecycleAuthority {
       this.store.save();
       return clone(result);
     } catch (error) {
-      this.store.state = beforeStore;
+      if (!this.store.fenced) this.store.state = beforeStore;
       throw error;
     } finally {
       this.busy.delete(key);

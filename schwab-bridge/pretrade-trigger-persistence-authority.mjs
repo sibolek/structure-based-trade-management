@@ -144,7 +144,7 @@ export class PreTradeTriggerPersistenceAuthority {
       this.store.save();
       return clone(result);
     } catch (cause) {
-      this.store.state = beforeStore;
+      if (!this.store.fenced) this.store.state = beforeStore;
       throw cause;
     }
   }

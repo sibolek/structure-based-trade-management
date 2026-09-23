@@ -54,6 +54,7 @@ export function createPretradeApiClient({
   if (typeof clock !== "function") throw new Error("pretrade clock must be a function");
 
   const operationId = (action) => `UI:${upper(action)}:${text(idFactory(action))}`;
+  let previewSessionToken = null;
 
   async function request(path, { method = "GET", body = undefined, headers = undefined } = {}) {
     const options = {
@@ -85,6 +86,24 @@ export function createPretradeApiClient({
     return payload;
   }
 
+  async function previewRequest(path, options = {}) {
+    if (!previewSessionToken) {
+      const session = await request("/api/pretrade-previews/session");
+      previewSessionToken = text(session?.sessionToken);
+      if (!previewSessionToken) throw createApiError({ error: "PRETRADE preview session was not issued", code: "PREVIEW_SESSION_INVALID" });
+    }
+    try {
+      return await request(path, {
+        ...options,
+        headers: { ...(options.headers || {}), "x-pretrade-session": previewSessionToken },
+      });
+    } catch (error) {
+      if (error?.code !== "PREVIEW_SESSION_INVALID") throw error;
+      previewSessionToken = null;
+      throw error;
+    }
+  }
+
   function lifecycle(candidate, commandName, body = {}) {
     return request(`${candidatePath(candidate)}/commands/${encodeURIComponent(commandName)}`, {
       method: "POST",
@@ -113,6 +132,57 @@ export function createPretradeApiClient({
 
     health() {
       return request("/health");
+    },
+
+    async previewSession() {
+      previewSessionToken = null;
+      const session = await request("/api/pretrade-previews/session");
+      previewSessionToken = text(session?.sessionToken);
+      if (!previewSessionToken) throw createApiError({ error: "PRETRADE preview session was not issued", code: "PREVIEW_SESSION_INVALID" });
+      return session;
+    },
+
+    listPreviews() {
+      return previewRequest("/api/pretrade-previews");
+    },
+
+    previewStatus(previewId) {
+      return previewRequest(`/api/pretrade-previews/${encodeURIComponent(text(previewId))}`);
+    },
+
+    previewOutcome(operationId) {
+      return previewRequest(`/api/pretrade-previews/operations/${encodeURIComponent(text(operationId))}`);
+    },
+
+    discardPreview(previewId, operationIdValue) {
+      return previewRequest(`/api/pretrade-previews/${encodeURIComponent(text(previewId))}/discard`, {
+        method: "POST",
+        body: { operationId: text(operationIdValue) },
+      });
+    },
+
+    refreshPreview(previewId, operationIdValue) {
+      return previewRequest(`/api/pretrade-previews/${encodeURIComponent(text(previewId))}/refresh`, {
+        method: "POST",
+        body: { operationId: text(operationIdValue) },
+      });
+    },
+
+    async acceptPreview(preview) {
+      const result = await previewRequest(`/api/pretrade-previews/${encodeURIComponent(text(preview?.previewId))}/accept`, {
+        method: "POST",
+        body: {
+          operationId: text(preview?.operationId),
+          proposalHash: text(preview?.proposalHash),
+          accountScope: text(preview?.accountScope),
+        },
+      });
+      if (!result || (result.operationId !== preview?.operationId && result.operation?.operationId !== preview?.operationId)) {
+        const error = new Error("acceptance response is unavailable; check the original operation");
+        error.code = "OUTCOME_UNKNOWN";
+        throw error;
+      }
+      return result;
     },
 
     publishExecutionOwnership(publication) {

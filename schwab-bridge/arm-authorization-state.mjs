@@ -148,7 +148,7 @@ export function authorizeArmState({
   try {
     store.save();
   } catch (error) {
-    store.state = previousState;
+    if (!store.fenced) store.state = previousState;
     throw authorizationError("ARM authorization persistence failed", "ARM_AUTHORIZATION_PERSISTENCE_ERROR", error);
   }
 

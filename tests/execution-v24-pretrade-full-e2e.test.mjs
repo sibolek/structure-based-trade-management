@@ -406,6 +406,7 @@ function buildPretradeHarness({ tempDir, clock }) {
   deliveryRepository.load();
 
   const armService = new PreTradeArmService({
+    allowLegacyQuoteEvidence: true,
     lifecycleCoordinator: coordinator,
     permissionPipeline,
     reviewService,

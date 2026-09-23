@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ArmAuthorizationService } from "../schwab-bridge/arm-authorization-service.mjs";
 import { authorizeArmState } from "../schwab-bridge/arm-authorization-state.mjs";
+import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from "../schwab-bridge/clock-freshness.mjs";
+import { buildRiskEvaluation } from "../schwab-bridge/risk-evaluation.mjs";
 
 const NOW = Date.parse("2026-09-01T18:00:05.000Z");
 
@@ -67,6 +69,83 @@ function riskEvaluation(overrides = {}) {
   };
 }
 
+function strictRiskEvaluation({
+  sourceObservedAt = "2026-09-01T18:00:04.000Z",
+  receivedAt = "2026-09-01T18:00:04.100Z",
+  realtime = true,
+} = {}) {
+  const candidateValue = candidate();
+  return buildRiskEvaluation({
+    riskEvaluationId: "risk-eval-001",
+    evaluatedAt: "2026-09-01T18:00:04.500Z",
+    candidate: candidateValue,
+    dssHandoff: {
+      dssEvaluationId: "dss-eval-001",
+      evaluation: {
+        ...dss(),
+        resolvedStructuralInvalidationPrice: 219.5,
+      },
+    },
+    entryResult: {
+      status: "VALID",
+      reasonCodes: [],
+      entryMode: "MARKETABLE_NOW",
+      currentExpectedEntry: 220.25,
+      bid: 220.24,
+      ask: 220.25,
+      quoteObservedAt: sourceObservedAt,
+      quoteAgeMs: 500,
+      quoteSource: "SCHWAB",
+      quoteEvidence: {
+        sourceObservedAt,
+        receivedAt,
+        realtime,
+        policy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+      },
+      expectedEntryRule: "ASK_MARKETABLE_LONG",
+    },
+    accountResult: {
+      status: "VALID",
+      reasonCodes: [],
+      snapshot: {
+        accountId: "acct-1",
+        accountEquity: 20_000,
+        currency: "USD",
+        observedAt: "2026-09-01T18:00:04.000Z",
+        ageMs: 500,
+        source: "SCHWAB",
+        sourceSnapshotId: "account-snapshot-1",
+      },
+    },
+    instrumentResult: {
+      status: "VALID",
+      reasonCodes: [],
+      assetType: "EQUITY",
+      symbol: "NVDA",
+      currency: "USD",
+      minimumQuantity: 1,
+      quantityIncrement: 1,
+      metadataSource: "SCHWAB_QUOTE",
+      metadataVersion: "meta-1",
+    },
+    calculationResult: {
+      status: "VALID",
+      reasonCodes: [],
+      riskFraction: 0.005,
+      rawMaxDollarRisk: 100,
+      maxDollarRisk: 100,
+      budgetRoundingRule: "FLOOR_TO_CENT",
+      riskDistance: 1,
+      riskPerUnit: 1,
+      rawQuantity: 100,
+      finalQuantity: 90,
+      quantityRoundingRule: "FLOOR_TO_VALID_INCREMENT",
+      plannedDollarRisk: 90,
+      plannedRiskFraction: 0.0045,
+    },
+  });
+}
+
 function handoff(overrides = {}) {
   return {
     candidateVersion: 1,
@@ -102,6 +181,7 @@ function makeService({
   store = makeStore(),
   evaluation = riskEvaluation(),
   now = () => NOW,
+  allowLegacyQuoteEvidence = true,
 } = {}) {
   const repository = {
     getById(id) {
@@ -113,8 +193,61 @@ function makeService({
       return structuredClone(evaluation);
     },
   };
-  return { service: new ArmAuthorizationService({ store, riskEvaluationRepository: repository, now }), store };
+  return { service: new ArmAuthorizationService({
+    store,
+    riskEvaluationRepository: repository,
+    now,
+    allowLegacyQuoteEvidence,
+  }), store };
 }
+
+test("live ARM authorization rejects legacy evaluations without quote receipt/realtime evidence", () => {
+  const { service } = makeService({ allowLegacyQuoteEvidence: false });
+  assert.throws(
+    () => service.authorize(request()),
+    (error) => error.code === "ARM_RISK_EVALUATION_STALE",
+  );
+});
+
+test("strict schema-2 authorization succeeds at the receipt boundary and rejects receipt-only expiry", () => {
+  const evaluation = strictRiskEvaluation({
+    sourceObservedAt: "2026-09-01T18:00:01.999Z",
+    receivedAt: "2026-09-01T17:59:59.999Z",
+  });
+  const early = makeService({
+    evaluation,
+    allowLegacyQuoteEvidence: false,
+    now: () => Date.parse("2026-09-01T18:00:04.999Z"),
+  });
+  assert.equal(early.service.authorize(request()).lifecycleState, "ARMED");
+
+  const expired = makeService({
+    evaluation,
+    allowLegacyQuoteEvidence: false,
+    now: () => Date.parse("2026-09-01T18:00:05.000Z"),
+  });
+  assert.throws(
+    () => expired.service.authorize(request()),
+    (error) => error.code === "ARM_RISK_EVALUATION_STALE",
+  );
+  assert.equal(expired.store.saveCount, 0);
+});
+
+test("strict final authorization rejects missing receipt and revoked realtime evidence", () => {
+  for (const mutate of [
+    evaluation => { evaluation.entry.quoteEvidence.receivedAt = null; },
+    evaluation => { evaluation.entry.quoteEvidence.realtime = false; },
+  ]) {
+    const evaluation = structuredClone(strictRiskEvaluation());
+    mutate(evaluation);
+    const { service, store } = makeService({ evaluation, allowLegacyQuoteEvidence: false });
+    assert.throws(
+      () => service.authorize(request()),
+      (error) => error.code === "ARM_RISK_EVALUATION_STALE",
+    );
+    assert.equal(store.saveCount, 0);
+  }
+});
 
 function request(overrides = {}) {
   return {

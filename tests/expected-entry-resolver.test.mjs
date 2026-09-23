@@ -147,6 +147,36 @@ test("resolver preserves normalized quote provenance", () => {
   assert.equal(result.ask, 100.1);
 });
 
+test("resolver accepts ISO, epoch number/string, Date and legacy alias timestamps consistently", () => {
+  const epoch = Date.parse(FRESH);
+  for (const quoteValue of [
+    quote({ asOf: FRESH }),
+    quote({ asOf: epoch }),
+    quote({ asOf: String(epoch) }),
+    quote({ asOf: new Date(epoch) }),
+    { ...quote(), asOf: undefined, quoteObservedAt: FRESH },
+  ]) {
+    if (quoteValue.asOf === undefined) delete quoteValue.asOf;
+    const result = resolve({ quote: quoteValue });
+    assert.equal(result.status, "VALID");
+    assert.equal(result.quoteObservedAt, FRESH);
+    assert.equal(result.quoteAgeMs, 4_000);
+  }
+});
+
+test("explicit invalid bid/ask timestamp is not replaced by trade or alias time", () => {
+  const result = resolve({
+    quote: quote({
+      quoteTime: "invalid",
+      asOf: "2026-09-01T00:00:04.500Z",
+      quoteObservedAt: "2026-09-01T00:00:04.500Z",
+      tradeTime: "2026-09-01T00:00:04.500Z",
+    }),
+  });
+  assert.equal(result.status, "BLOCKED");
+  assert.deepEqual(result.reasonCodes, ["QUOTE_UNAVAILABLE"]);
+});
+
 test("future-dated quote within clock skew is treated as age zero", () => {
   const result = resolve({ quote: quote({ asOf: "2026-09-01T00:00:06.000Z" }) });
   assert.equal(result.status, "VALID");

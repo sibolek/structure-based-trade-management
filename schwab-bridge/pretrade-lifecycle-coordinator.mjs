@@ -114,6 +114,22 @@ export class PreTradeLifecycleCoordinator {
     return snapshot;
   }
 
+  publicSnapshot() {
+    const snapshot = this.snapshot();
+    return {
+      schemaVersion: snapshot.schemaVersion,
+      updatedAt: snapshot.updatedAt,
+      candidates: snapshot.candidates,
+      dssEvaluations: snapshot.dssEvaluations,
+      manualSupersessionReviews: snapshot.manualSupersessionReviews,
+      manualSupersessionAuthorizations: snapshot.manualSupersessionAuthorizations,
+      manualSupersessionDeclines: snapshot.manualSupersessionDeclines,
+      importLog: snapshot.importLog,
+      lifecycleEvents: snapshot.lifecycleEvents,
+      lifecycleOperations: snapshot.lifecycleOperations,
+    };
+  }
+
   candidateSnapshot(candidateId, contractVersion) {
     const candidate = this.#findCandidate(candidateId, contractVersion);
     this.#prepareCandidate(candidate);
@@ -580,7 +596,7 @@ export class PreTradeLifecycleCoordinator {
       this.store.save();
       return clone(result);
     } catch (cause) {
-      this.store.state = beforeStore;
+      if (!this.store.fenced) this.store.state = beforeStore;
       throw cause;
     } finally {
       this.busy.delete(entityKey);

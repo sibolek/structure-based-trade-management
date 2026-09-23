@@ -138,7 +138,7 @@ test("generated manual file uses real canonical HTTP admission: ACCEPTED/WAITING
   assert.deepEqual(store.snapshot().candidates, beforeRetry);
   assert.deepEqual(requests, [["POST", "/api/candidates/import"], ["POST", "/api/candidates/import"]]);
   // This harness has only PRETRADE storage/ingress/lifecycle; no execution or broker provider is instantiated.
-  assert.deepEqual(fs.readdirSync(dir).sort(), ["individual", "state.json"]);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ["individual", "state.json", "state.json.generation.json"]);
 });
 
 test("combined exports and automated publication bytes retain their existing policy and payload", async t => {

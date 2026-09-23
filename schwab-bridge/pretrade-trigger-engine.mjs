@@ -347,7 +347,7 @@ export class PreTradeTriggerEngine {
       this.store.state.updatedAt = at;
       this.store.save();
     } catch (cause) {
-      this.store.state = beforeStore;
+      if (!this.store.fenced) this.store.state = beforeStore;
       throw cause;
     }
 

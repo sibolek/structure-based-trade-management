@@ -18,6 +18,8 @@ import { PreTradeArmLifecycleAuthority } from "../schwab-bridge/pretrade-arm-lif
 import { PreTradeArmService } from "../schwab-bridge/pretrade-arm-service.mjs";
 import { ExecutionBoardHandoffRepository } from "../schwab-bridge/execution-board-handoff-repository.mjs";
 import { ExecutionBoardHandoffDeliveryRepository } from "../schwab-bridge/execution-board-handoff-delivery-repository.mjs";
+import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from "../schwab-bridge/clock-freshness.mjs";
+import { buildRiskEvaluation } from "../schwab-bridge/risk-evaluation.mjs";
 
 const NOW = "2026-09-06T15:00:01.000Z";
 
@@ -107,6 +109,92 @@ function risk(candidate, {
   };
 }
 
+function strictRisk(candidate, {
+  id,
+  dssId,
+  expectedEntry = 180,
+  quantity = 90,
+  quoteObservedAt = "2026-09-06T15:00:00.500Z",
+  quoteReceivedAt = "2026-09-06T15:00:00.600Z",
+  quoteRealtime = true,
+  accountObservedAt = "2026-09-06T15:00:00.000Z",
+} = {}) {
+  return buildRiskEvaluation({
+    riskEvaluationId: id,
+    evaluatedAt: "2026-09-06T15:00:00.750Z",
+    candidate,
+    dssHandoff: {
+      dssEvaluationId: dssId,
+      evaluation: {
+        dssEvaluationId: dssId,
+        status: "VALID",
+        candidateId: candidate.candidateId,
+        candidateContractVersion: candidate.contractVersion,
+        candidateContentHash: candidate.contentHash,
+        resolvedStructuralInvalidationPrice: 179.5,
+        effectiveStop: 179.25,
+      },
+    },
+    entryResult: {
+      status: "VALID",
+      reasonCodes: [],
+      entryMode: "MARKETABLE_NOW",
+      currentExpectedEntry: expectedEntry,
+      bid: expectedEntry - 0.01,
+      ask: expectedEntry,
+      quoteObservedAt,
+      quoteAgeMs: 250,
+      quoteSource: "SCHWAB",
+      quoteEvidence: {
+        sourceObservedAt: quoteObservedAt,
+        receivedAt: quoteReceivedAt,
+        realtime: quoteRealtime,
+        policy: CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+      },
+      expectedEntryRule: "ASK_MARKETABLE_LONG",
+    },
+    accountResult: {
+      status: "VALID",
+      reasonCodes: [],
+      snapshot: {
+        accountId: "acct-1",
+        accountEquity: 13_500,
+        currency: "USD",
+        observedAt: accountObservedAt,
+        ageMs: 750,
+        source: "SCHWAB",
+        sourceSnapshotId: `account-${id}`,
+      },
+    },
+    instrumentResult: {
+      status: "VALID",
+      reasonCodes: [],
+      assetType: "EQUITY",
+      symbol: "NVDA",
+      currency: "USD",
+      minimumQuantity: 1,
+      quantityIncrement: 1,
+      metadataSource: "SCHWAB_QUOTE",
+      metadataVersion: "meta-1",
+    },
+    calculationResult: {
+      status: "VALID",
+      reasonCodes: [],
+      riskFraction: 0.005,
+      rawMaxDollarRisk: 67.5,
+      maxDollarRisk: 67.5,
+      budgetRoundingRule: "FLOOR_TO_CENT",
+      riskDistance: 0.75,
+      riskPerUnit: 0.75,
+      rawQuantity: 90,
+      finalQuantity: quantity,
+      quantityRoundingRule: "FLOOR_TO_VALID_INCREMENT",
+      plannedDollarRisk: quantity * 0.75,
+      plannedRiskFraction: (quantity * 0.75) / 13_500,
+    },
+  });
+}
+
 function decision(candidate, id, outcome = "READY") {
   return {
     authority: "PRETRADE_PERMISSION_DECISION",
@@ -154,9 +242,14 @@ function harness({
   freshQuantity = null,
   ownershipStatus = "FREE",
   freshQuoteObservedAt = "2026-09-06T15:00:00.500Z",
+  freshQuoteReceivedAt = "2026-09-06T15:00:00.600Z",
+  freshQuoteEvidenceMutation = null,
   freshAccountObservedAt = "2026-09-06T15:00:00.000Z",
+  strictQuoteEvidence = false,
+  allowLegacyQuoteEvidence = true,
 } = {}) {
   const clock = () => NOW;
+  const riskFactory = strictQuoteEvidence ? strictRisk : risk;
   const store = new PreTradeStore({ filePath: tmp("arm-state"), clock });
   store.load();
   const ingress = new PreTradeCandidateIngress({ store, clock, idFactory: () => "ingress-1" });
@@ -176,7 +269,7 @@ function harness({
   attemptRepository.load();
   const riskMap = new Map();
   const initialCandidate = coordinator.candidateSnapshot("arm-NVDA-1", 1);
-  const risk1 = risk(initialCandidate, { id: "risk-1", dssId: "dss-1" });
+  const risk1 = riskFactory(initialCandidate, { id: "risk-1", dssId: "dss-1" });
   riskMap.set("risk-1", risk1);
   attemptRepository.record(permissionAttempt(initialCandidate, risk1, "permission-1", 2));
 
@@ -197,14 +290,19 @@ function harness({
       const candidate = coordinator.candidateSnapshot(candidateId, contractVersion);
       assert.equal(candidate.lifecycleState, "PERMISSION_EVALUATING");
       assert.equal(candidate.stateRevision, expectedRevision);
-      const risk2 = risk(candidate, {
+      let risk2 = riskFactory(candidate, {
         id: "risk-2",
         dssId: "dss-2",
         expectedEntry: expectedEntryChange ? 180.01 : 180,
         quantity: freshQuantity ?? (quantityChange ? 24 : 90),
         quoteObservedAt: freshQuoteObservedAt,
+        quoteReceivedAt: freshQuoteReceivedAt,
         accountObservedAt: freshAccountObservedAt,
       });
+      if (typeof freshQuoteEvidenceMutation === "function") {
+        risk2 = structuredClone(risk2);
+        freshQuoteEvidenceMutation(risk2.entry.quoteEvidence);
+      }
       riskMap.set("risk-2", risk2);
       const attempt2 = permissionAttempt(candidate, risk2, "permission-2", expectedRevision);
       attemptRepository.record(attempt2);
@@ -244,6 +342,7 @@ function harness({
   const deliveryRepository = new ExecutionBoardHandoffDeliveryRepository({ handoffRepository, filePath: tmp("deliveries"), clock });
   deliveryRepository.load();
   const armService = new PreTradeArmService({
+    allowLegacyQuoteEvidence,
     lifecycleCoordinator: coordinator,
     permissionPipeline,
     reviewService,
@@ -271,6 +370,56 @@ function harness({
     lastPermissionCommand: () => structuredClone(lastPermissionCommand),
   };
 }
+
+test("live PRETRADE ARM rejects legacy evaluations without quote receipt/realtime evidence", async () => {
+  const h = harness({ allowLegacyQuoteEvidence: false });
+  await assert.rejects(
+    h.armService.arm(command(h)),
+    (error) => error.code === "ARM_RISK_EVALUATION_STALE",
+  );
+});
+
+test("strict PRETRADE ARM succeeds at the receipt boundary and rejects receipt-only expiry", async () => {
+  const atBoundary = harness({
+    allowLegacyQuoteEvidence: false,
+    strictQuoteEvidence: true,
+    freshQuoteObservedAt: "2026-09-06T14:59:58.000Z",
+    freshQuoteReceivedAt: "2026-09-06T14:59:56.000Z",
+  });
+  assert.equal((await atBoundary.armService.arm(command(atBoundary))).status, "COMPLETED");
+
+  const expired = harness({
+    allowLegacyQuoteEvidence: false,
+    strictQuoteEvidence: true,
+    freshQuoteObservedAt: "2026-09-06T14:59:57.999Z",
+    freshQuoteReceivedAt: "2026-09-06T14:59:55.999Z",
+  });
+  await assert.rejects(
+    expired.armService.arm(command(expired)),
+    (error) => error.code === "ARM_RISK_EVALUATION_STALE",
+  );
+  assert.equal(expired.handoffRepository.snapshot().handoffs.length, 0);
+  assert.equal(expired.deliveryRepository.snapshot().deliveries.length, 0);
+});
+
+test("strict PRETRADE ARM rejects missing receipt and revoked realtime evidence", async () => {
+  for (const freshQuoteEvidenceMutation of [
+    evidence => { evidence.receivedAt = null; },
+    evidence => { evidence.realtime = false; },
+  ]) {
+    const h = harness({
+      allowLegacyQuoteEvidence: false,
+      strictQuoteEvidence: true,
+      freshQuoteEvidenceMutation,
+    });
+    await assert.rejects(
+      h.armService.arm(command(h)),
+      (error) => error.code === "ARM_RISK_EVALUATION_STALE",
+    );
+    assert.equal(h.handoffRepository.snapshot().handoffs.length, 0);
+    assert.equal(h.deliveryRepository.snapshot().deliveries.length, 0);
+  }
+});
 
 function command(h) {
   return {

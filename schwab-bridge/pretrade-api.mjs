@@ -68,6 +68,8 @@ import {
 } from "./execution-board-handoff-delivery-repository.mjs";
 import { createExecutionBoardHandoffApiHandler } from "./execution-board-handoff-api.mjs";
 import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from "./clock-freshness.mjs";
+import { PreTradePreviewAuthority } from "./pretrade-preview-authority.mjs";
+import { createPreTradePreviewApiHandler } from "./pretrade-preview-api.mjs";
 
 const HOST = process.env.EXECUTIONOS_V24_HOST || "127.0.0.1";
 const PORT = Number(process.env.EXECUTIONOS_V24_PORT || 8788);
@@ -80,11 +82,31 @@ const OCO_FILE = process.env.EXECUTIONOS_V24_OCO_FILE || DEFAULT_PRETRADE_OCO_FI
 const EXECUTION_OWNERSHIP_FILE = process.env.EXECUTIONOS_V24_EXECUTION_OWNERSHIP_FILE || DEFAULT_EXECUTION_OWNERSHIP_FILE;
 const HANDOFF_FILE = process.env.EXECUTIONOS_V24_HANDOFF_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_FILE;
 const HANDOFF_DELIVERY_FILE = process.env.EXECUTIONOS_V24_HANDOFF_DELIVERY_FILE || DEFAULT_EXECUTION_BOARD_HANDOFF_DELIVERY_FILE;
+const PREVIEW_UI_ORIGIN = process.env.EXECUTIONOS_V24_PREVIEW_UI_ORIGIN || "";
 const MAX_BODY_BYTES = 1024 * 1024;
 
 const store = new PreTradeStore({ filePath: STATE_FILE });
+store.acquireWriterLock();
 store.load();
+process.once("exit", () => store.close());
 const candidateIngress = new PreTradeCandidateIngress({ store });
+const previewAuthority = new PreTradePreviewAuthority({
+  store,
+  candidateIngress,
+  enabled: false,
+  policy: null,
+  evidenceProvider: null,
+  requireAuthenticatedRegistration: true,
+});
+if (store.state.pretradePreviewOperations.length || store.state.pretradeProviderRuns.length) {
+  previewAuthority.recoverAfterRestart();
+}
+const handlePreviewApi = createPreTradePreviewApiHandler({
+  authority: previewAuthority,
+  expectedOrigin: PREVIEW_UI_ORIGIN,
+  allowedHosts: [`${HOST}:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`],
+  maxBodyBytes: MAX_BODY_BYTES,
+});
 const lifecycleCoordinator = new PreTradeLifecycleCoordinator({ store });
 lifecycleCoordinator.reconcileAllValidity({ source: "STARTUP_VALIDITY_RECONCILIATION" });
 
@@ -315,6 +337,11 @@ const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
   const pathname = requestUrl.pathname;
 
+  if (req.method === "OPTIONS" && pathname.startsWith("/api/pretrade-previews")) {
+    await handlePreviewApi(req, res);
+    return;
+  }
+
   if (req.method === "OPTIONS") {
     if (!origin || !isAllowedLocalOrigin(origin)) {
       res.writeHead(403);
@@ -324,7 +351,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       "access-control-allow-origin": origin,
       "access-control-allow-methods": "GET,POST,OPTIONS",
-      "access-control-allow-headers": "content-type,x-executionos-source",
+      "access-control-allow-headers": "content-type,x-executionos-source,x-pretrade-session",
       "access-control-max-age": "600",
       vary: "Origin",
     });
@@ -381,9 +408,14 @@ const server = http.createServer(async (req, res) => {
       lifecycleCommandApi: true,
       handoffTransportApi: true,
       brokerWriteAuthority: false,
+      pretradePreview: previewAuthority.readiness(),
     }, origin);
     return;
   }
+
+  // Preview routes intentionally run before candidate read reconciliation because
+  // preflight/status must not mutate lifecycle or downstream trading state.
+  if (await handlePreviewApi(req, res)) return;
 
   if (pathname.startsWith("/api/oco-groups")) {
     try {
@@ -408,7 +440,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && pathname === "/api/candidates") {
     try {
       json(res, 200, {
-        ...lifecycleCoordinator.snapshot(),
+        ...lifecycleCoordinator.publicSnapshot(),
         permissionAttempts: permissionAttemptRepository.snapshot().attempts,
         reviews: reviewRepository.snapshot().reviews,
         ocoGroups: ocoRepository.snapshot().groups,

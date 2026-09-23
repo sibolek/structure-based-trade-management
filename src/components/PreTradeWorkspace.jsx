@@ -122,6 +122,46 @@ function targetLabel(targets) {
   }).join(" · ");
 }
 
+export function LivePreviewCard({ previewState, pretrade, busyKey, runFor }) {
+  const preview = previewState?.preview || previewState;
+  if (!preview?.previewId) return null;
+  const proposal = preview.proposal || {};
+  const operation = previewState?.operation || null;
+  const receipt = previewState?.receipt || null;
+  const accepting = operation?.state === "ACCEPTING";
+  const terminal = Boolean(receipt);
+  const eligible = preview.state === "PREVIEW_READY" && !preview.revalidationRequired && !accepting && !previewState?.outcomeUnknown;
+  const proposalHash = previewState?.proposalHash || preview.proposalHash;
+  const boundPreview = { ...preview, proposalHash };
+  return (
+    <section className="rounded border border-violet-400/25 bg-violet-950/10 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="section-label">Trade-card preview</p>
+          <h3 className="text-base font-semibold">{proposal.symbol || "—"} · {proposal.direction || "—"} · {proposal.setup || "Review required"}</h3>
+          <p className="mt-1 text-xs text-zinc-400">Trigger {proposal.trigger?.prompt || proposal.trigger?.type || "Calculated in PRETRADE"} · invalidation {price(proposal.structuralInvalidation?.price)} · targets {targetLabel(proposal.targets)}</p>
+          <p className="mt-1 text-[11px] text-zinc-500">Contract valid until {dateTime(proposal.validUntil)} · final quantity and effective stop are calculated in PRETRADE.</p>
+          {preview.reviewScope?.tradingReviewRequired && <p className="mt-2 text-xs text-amber-200">For your review. Importing this card does not verify the setup or authorize a trade.</p>}
+        </div>
+        <span className={`rounded border px-2 py-1 text-xs font-bold ${statusTone(receipt?.result || operation?.state || preview.state)}`}>{readableCode(receipt?.result || operation?.state || preview.state)}</span>
+      </div>
+      {receipt?.reason && <p className="mt-3 text-xs text-amber-200">{readableCode(receipt.reason)}</p>}
+      {receipt?.reviewScope?.tradingReviewRequired && receipt.result === "ADMITTED" && <p className="mt-3 text-xs text-emerald-100">Imported into PRETRADE — trading review required.</p>}
+      {receipt?.reviewScope?.tradingReviewRequired && receipt.result === "ALREADY_PRESENT" && <p className="mt-3 text-xs text-zinc-400">Already in PRETRADE — see its current state below.</p>}
+      <div className="mt-4 flex flex-wrap gap-2">
+        {!terminal && eligible && <button type="button" disabled={Boolean(busyKey)} onClick={() => runFor(`preview:${preview.previewId}:accept`, () => pretrade.acceptPreview(boundPreview))} className="rounded border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100 disabled:opacity-35">ACCEPT INTO PRETRADE</button>}
+        {!terminal && eligible && <button type="button" disabled={Boolean(busyKey)} onClick={() => runFor(`preview:${preview.previewId}:discard`, () => pretrade.discardPreview(preview.previewId, preview.operationId))} className="rounded border border-red-400/25 px-3 py-2 text-xs font-bold text-red-200 disabled:opacity-35">DISCARD PREVIEW</button>}
+        {(accepting || previewState?.outcomeUnknown || (terminal && !previewState?.lifecycle)) && <button type="button" disabled={Boolean(busyKey)} onClick={() => runFor(`preview:${preview.previewId}:outcome`, () => pretrade.previewOutcome(preview.operationId))} className="rounded border border-violet-400/30 px-3 py-2 text-xs font-bold text-violet-100 disabled:opacity-35">CHECK OUTCOME</button>}
+        {preview.state === "PREVIEW_READY" && !terminal && !accepting && !previewState?.outcomeUnknown && <button type="button" disabled={Boolean(busyKey)} onClick={() => runFor(`preview:${preview.previewId}:refresh`, () => pretrade.refreshPreview(preview.previewId, preview.operationId))} className="rounded border border-amber-400/30 px-3 py-2 text-xs font-bold text-amber-100 disabled:opacity-35">REFRESH EVIDENCE</button>}
+      </div>
+      {preview.state === "DISCARDED" && <p className="mt-3 text-xs text-zinc-400">Preview discarded — this preview imported nothing.</p>}
+      {previewState?.outcomeUnknown && <p className="mt-3 text-xs text-amber-200">Outcome unknown — check the original operation before any further action.</p>}
+      {receipt && <p className="mt-3 text-xs text-zinc-400">Admission receipt: {receipt.result}. Current PRETRADE state: {previewState?.lifecycle?.lifecycleState || "awaiting reconciliation"}. Admission grants no permission, ARM, order or broker authority.</p>}
+      {accepting && <p className="mt-3 text-xs text-amber-200">Acceptance in progress — check outcome.</p>}
+    </section>
+  );
+}
+
 function triggerNodeLabel(node) {
   if (!node || typeof node !== "object") return "";
 
@@ -909,6 +949,7 @@ export default function PreTradeWorkspace({ pretrade, broker }) {
       {execution.error && <div className="rounded border border-amber-400/20 bg-amber-950/15 px-4 py-3 text-xs text-amber-100"><AlertTriangle size={14} className="mr-2 inline" />Execution projection unavailable: {execution.error}. ARMED records remain ARMED and are not guessed into History.</div>}
       {error && <div className="rounded border border-red-400/25 bg-red-950/15 px-4 py-3 text-xs font-mono text-red-200"><ShieldAlert size={14} className="mr-2 inline" />{error}</div>}
       {notice && <div className="rounded border border-emerald-400/20 bg-emerald-950/10 px-4 py-2 text-xs text-emerald-100"><CheckCircle2 size={14} className="mr-2 inline" />{notice}</div>}
+      <LivePreviewCard previewState={pretrade?.previewState} pretrade={pretrade} busyKey={busyKey} runFor={runFor} />
 
       <div className="flex flex-wrap gap-2 rounded border border-white/10 bg-ink-850 p-2">
         {tabs.map(({ id, label, count, icon: Icon }) => <button key={id} type="button" onClick={() => setTab(id)} className={`flex items-center gap-2 rounded px-3 py-2 text-xs font-bold ${tab === id ? "bg-violet-400/15 text-violet-100" : "text-zinc-500 hover:text-zinc-300"}`}><Icon size={14} /> {label} <span className="rounded bg-black/20 px-1.5 py-0.5 font-mono text-[10px]">{count}</span></button>)}

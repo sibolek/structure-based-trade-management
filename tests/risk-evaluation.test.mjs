@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRiskEvaluation, validateRiskEvaluationContract } from "../schwab-bridge/risk-evaluation.mjs";
+import {
+  assertRiskQuoteEvidenceAtArm,
+  buildRiskEvaluation,
+  validateRiskEvaluationContract,
+} from "../schwab-bridge/risk-evaluation.mjs";
+import { CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from "../schwab-bridge/clock-freshness.mjs";
 
 function candidate(overrides = {}) {
   return {
@@ -120,6 +125,54 @@ test("builds immutable VALID evaluation with full provenance", () => {
   assert.equal(result.calculation.finalQuantity, 61);
   assert.equal(Object.isFrozen(result), true);
   assert.equal(Object.isFrozen(result.account), true);
+});
+
+test("strict risk evaluation persists bound quote receipt/realtime evidence and rechecks it at ARM", () => {
+  const sourceObservedAt = "2026-09-01T17:00:01.500Z";
+  const result = build({
+    evaluatedAt: sourceObservedAt,
+    entryResult: entry({
+      quoteObservedAt: sourceObservedAt,
+      quoteAgeMs: 0,
+      quoteEvidence: {
+        sourceObservedAt,
+        receivedAt: "2026-09-01T17:00:00.000Z",
+        realtime: true,
+        policy: { ...CURRENT_LIVE_QUOTE_EVIDENCE_POLICY, maxFutureSkewMs: 2_000 },
+      },
+    }),
+  });
+  assert.equal(result.schemaVersion, 2);
+  assert.equal(result.entry.quoteEvidence.realtime, true);
+  assert.equal(validateRiskEvaluationContract(result).valid, true);
+  assert.doesNotThrow(() => assertRiskQuoteEvidenceAtArm(result, "2026-09-01T17:00:05.000Z"));
+  assert.throws(
+    () => assertRiskQuoteEvidenceAtArm(result, "2026-09-01T17:00:05.001Z"),
+    (error) => error.code === "ARM_RISK_EVALUATION_STALE",
+  );
+});
+
+test("strict risk evaluation integrity rejects modified quote evidence", () => {
+  const sourceObservedAt = "2026-09-01T17:00:01.500Z";
+  const result = build({
+    evaluatedAt: sourceObservedAt,
+    entryResult: entry({
+      quoteObservedAt: sourceObservedAt,
+      quoteAgeMs: 0,
+      quoteEvidence: {
+        sourceObservedAt,
+        receivedAt: "2026-09-01T17:00:00.000Z",
+        realtime: true,
+        policy: { ...CURRENT_LIVE_QUOTE_EVIDENCE_POLICY, maxFutureSkewMs: 2_000 },
+      },
+    }),
+  });
+  const modified = structuredClone(result);
+  modified.entry.quoteEvidence.realtime = false;
+  assert.equal(validateRiskEvaluationContract(modified).valid, false);
+  const weakened = structuredClone(result);
+  weakened.entry.quoteEvidence.policy.requireRealtime = false;
+  assert.equal(validateRiskEvaluationContract(weakened).valid, false);
 });
 
 test("input fingerprint ignores riskEvaluationId and evaluatedAt", () => {

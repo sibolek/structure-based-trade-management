@@ -96,6 +96,23 @@ test("candidate lifecycle mutation creates revision, event, operation, and survi
   assert.equal(recovered.snapshot().lifecycleEvents[0].operationId, "op-activate-1");
 });
 
+test("public candidate snapshot excludes preview authority and store transaction roots", () => {
+  const h = harness();
+  h.store.state.pretradePreviews = [{ previewId: "private-preview", bundle: { raw: "private" } }];
+  h.store.state.pretradePreviewOperations = [{ operationId: "private-operation" }];
+  h.store.state.pretradePreviewReceipts = [{ receiptId: "private-receipt", evidence: { raw: "private" } }];
+  h.store.state.transactionId = "private-transaction";
+  const projected = h.coordinator.publicSnapshot();
+  assert.equal(projected.candidates.length, 1);
+  assert.equal(projected.lifecycleEvents.length, 0);
+  assert.equal(Object.prototype.hasOwnProperty.call(projected, "pretradePreviews"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(projected, "pretradePreviewOperations"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(projected, "pretradePreviewReceipts"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(projected, "storeEpoch"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(projected, "storeRevision"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(projected, "transactionId"), false);
+});
+
 test("duplicate operation is idempotent and operationId is bound to immutable command payload", () => {
   const h = harness();
   const command = identity({

@@ -187,6 +187,36 @@ test("client exposes exact review and OCO intents only", async () => {
   assert.equal(client.commitOcoWinner, undefined);
 });
 
+test("preview client keeps the session token in headers and preserves the original acceptance operation", async () => {
+  const requests = [];
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({ url, options });
+    const payload = url.endsWith("/session")
+      ? { sessionToken: "preview-session" }
+      : { brokerWriteAuthority: false, operationId: "operation-1", result: "ADMITTED" };
+    return { ok: true, status: 200, async json() { return payload; } };
+  };
+  const client = createPretradeApiClient({ baseUrl: "http://127.0.0.1:8788", fetchImpl });
+  const preview = {
+    previewId: "preview-1",
+    operationId: "operation-1",
+    proposalHash: "proposal-hash-1",
+    accountScope: "account-hash-1",
+  };
+  await client.acceptPreview(preview);
+  await client.previewOutcome(preview.operationId);
+  assert.equal(requests[0].url, "http://127.0.0.1:8788/api/pretrade-previews/session");
+  assert.equal(requests[1].options.headers["x-pretrade-session"], "preview-session");
+  assert.equal(requests[1].url.includes("preview-session"), false);
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    operationId: "operation-1",
+    proposalHash: "proposal-hash-1",
+    accountScope: "account-hash-1",
+  });
+  assert.match(requests[2].url, /\/operations\/operation-1$/);
+  assert.equal(requests[2].options.headers["x-pretrade-session"], "preview-session");
+});
+
 test("client preserves structured server errors and fails closed on broker-write authority", async () => {
   const failing = createPretradeApiClient({
     baseUrl: "http://127.0.0.1:8788",
@@ -237,6 +267,10 @@ test("React PRETRADE workspace is intent-only and renders all three frozen proje
   assert.match(workspace, /USE MAX ALLOWED QTY/);
   assert.match(workspace, /maxAllowedQuantity/);
   assert.match(workspace, /Reviewed non-expanding ceiling/);
+  assert.match(workspace, /Trade-card preview/);
+  assert.match(workspace, /ACCEPT INTO PRETRADE/);
+  assert.match(workspace, /DISCARD PREVIEW/);
+  assert.match(workspace, /CHECK OUTCOME/);
   assert.doesNotMatch(workspace, /USE MAX RISK-SIZED QTY/);
   assert.doesNotMatch(workspace, /operatorContextAssessment/);
   assert.doesNotMatch(workspace, /localStorage\.setItem/);

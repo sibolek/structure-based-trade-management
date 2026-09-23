@@ -364,9 +364,9 @@ test("L: failure after temporary file write cannot commit partial admission on r
   });
   assert.throws(() => h.ingress.importBundle(bundle(baseCandidate({ candidateId: "second" }))), /injected rename failure/);
   assert.deepEqual(h.store.snapshot(), before);
-  const uncommitted = JSON.parse(fs.readFileSync(`${h.filePath}.tmp`));
-  assert.equal(uncommitted.candidates.length, 2);
-  for (const candidate of uncommitted.candidates) verify(candidate);
+  const temporaryFiles = fs.readdirSync(path.dirname(h.filePath))
+    .filter((name) => name.startsWith(`${path.basename(h.filePath)}.`) && name.endsWith(".tmp"));
+  assert.deepEqual(temporaryFiles, []);
   const restarted = new PreTradeStore({ filePath: h.filePath }); restarted.load();
   assert.deepEqual(restarted.snapshot(), before);
 });

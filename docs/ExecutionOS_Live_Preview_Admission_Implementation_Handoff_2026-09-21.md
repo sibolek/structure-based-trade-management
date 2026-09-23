@@ -2,6 +2,10 @@
 
 **Date:** 2026-09-21
 
+**2026-09-22 scope amendment:** The operator approved [operator-reviewed candidate import and combined automated timing](ExecutionOS_Operator_Reviewed_Import_Approval_2026-09-22.md). Its initial profile adds no automatic displacement cutoff and makes no qualified-live setup claim. Preserve all technical admission/recovery and downstream safeguards below. Setup-specific automated qualification remains deferred for the stronger profile. Production remains disabled.
+
+**2026-09-22 implementation continuation:** The disabled offline implementation now includes the strict Ed25519 provider-envelope verifier and PRETRADE-owned run/challenge/message replay ledger specified in the readiness review. Registration binds independently rehashed chart bytes and canonical candidate output, and commits message consumption with preview creation in one store transaction. Cancellation and restart invalidate late continuations. No service socket, production key, live adapter or enablement was added.
+
 **Review base:** `283ad90`, on `codex/live-fast-path-p0-contract`
 
 **Status:** Engineering handoff for disabled, offline-tested implementation. Not implementation acceptance, trading-policy approval or permission to place orders.

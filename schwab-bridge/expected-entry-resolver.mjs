@@ -1,5 +1,5 @@
 import { RISK_SIZING_POLICY_VERSION, riskSizingPolicyForVersion } from "./risk-sizing-policy.mjs";
-import { assessQuoteEvidence } from "./clock-freshness.mjs";
+import { assessQuoteEvidence, quoteSourceTimestamp, timestampMs } from "./clock-freshness.mjs";
 
 function upper(value) {
   return String(value ?? "").trim().toUpperCase();
@@ -19,15 +19,6 @@ function finiteNumber(value) {
 function positiveNumber(value) {
   const number = finiteNumber(value);
   return number !== null && number > 0 ? number : null;
-}
-
-function timestampMs(value) {
-  if (value === null || value === undefined || typeof value === "boolean") return null;
-  if (typeof value === "string" && !value.trim()) return null;
-  const number = Number(value);
-  if (Number.isFinite(number)) return number;
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function blocked(reasonCode, partial = {}) {
@@ -87,7 +78,7 @@ export function resolveExpectedEntry({
     });
   }
 
-  const evaluatedAtMs = finiteNumber(nowMs);
+  const evaluatedAtMs = timestampMs(nowMs);
   if (evaluatedAtMs === null) {
     throw new Error("nowMs must be epoch milliseconds");
   }
@@ -106,7 +97,7 @@ export function resolveExpectedEntry({
     });
   }
 
-  const quoteTimeMs = timestampMs(quote?.quoteTime ?? quote?.asOf ?? quote?.quoteObservedAt);
+  const quoteTimeMs = timestampMs(quoteSourceTimestamp(quote));
   if (quoteTimeMs === null) {
     return blocked("QUOTE_UNAVAILABLE", {
       direction: normalizedDirection,
@@ -128,7 +119,22 @@ export function resolveExpectedEntry({
   const quoteObservedAt = quoteFreshness.asOf;
   const quoteAgeMs = quoteFreshness.ageMs;
   const quoteSource = text(quote?.source) || null;
-  const provenance = quoteProvenance({ bid, ask, quoteObservedAt, quoteAgeMs, quoteSource });
+  const provenance = {
+    ...quoteProvenance({ bid, ask, quoteObservedAt, quoteAgeMs, quoteSource }),
+    ...(quoteEvidencePolicy ? { quoteEvidence: {
+      sourceObservedAt: quoteObservedAt,
+      receivedAt: quoteEvidence.receiptFreshness?.asOf ?? null,
+      realtime: quoteEvidence.realtime,
+      policy: {
+        sourceMaxAgeMs: policy.quoteMaxAgeMs,
+        receiptMaxAgeMs: quoteEvidencePolicy?.receiptMaxAgeMs ?? policy.quoteMaxAgeMs,
+        validateReceivedAt: quoteEvidencePolicy?.validateReceivedAt === true,
+        requireReceivedAt: quoteEvidencePolicy?.requireReceivedAt === true,
+        requireRealtime: quoteEvidencePolicy?.requireRealtime === true,
+        maxFutureSkewMs: quoteEvidencePolicy?.maxFutureSkewMs ?? quoteEvidence.sourceFreshness.maxFutureSkewMs,
+      },
+    } } : {}),
+  };
 
   if (bid > ask) {
     return blocked("CROSSED_MARKET", {

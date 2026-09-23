@@ -134,3 +134,20 @@ test("malformed bundle fails closed", () => {
   assert.throws(() => store.importBundle({ nope: [] }), (error) => error.code === "INVALID_BUNDLE");
   assert.equal(store.snapshot().candidates.length, 0);
 });
+
+test("legacy store import rolls back memory when persistence fails before replacement", () => {
+  let fail = false;
+  const store = new PreTradeStore({
+    filePath: tempStatePath(),
+    clock: () => "2026-08-28T12:05:00.000Z",
+    failpoint: (point) => {
+      if (fail && point === "BEFORE_RENAME") throw new Error("simulated persistence failure");
+    },
+  });
+  store.load();
+  const before = store.snapshot();
+  fail = true;
+  assert.throws(() => store.importBundle({ source: "SOD", bundleId: "failed", candidates: [candidate()] }));
+  assert.equal(store.fenced, false);
+  assert.deepEqual(store.snapshot(), before);
+});

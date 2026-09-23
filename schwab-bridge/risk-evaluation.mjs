@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
+import {
+  assessQuoteEvidence,
+  CURRENT_LIVE_QUOTE_EVIDENCE_POLICY,
+  timestampIso,
+} from "./clock-freshness.mjs";
 
-export const RISK_EVALUATION_SCHEMA_VERSION = 1;
+export const RISK_EVALUATION_SCHEMA_VERSION = 2;
+export const LEGACY_RISK_EVALUATION_SCHEMA_VERSION = 1;
 export const RISK_EVALUATION_STATUSES = Object.freeze([
   "VALID",
   "NO_AFFORDABLE_SIZE",
@@ -28,14 +34,6 @@ function finiteNumber(value) {
 function positiveNumber(value) {
   const number = finiteNumber(value);
   return number !== null && number > 0 ? number : null;
-}
-
-function timestampIso(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const number = Number(value);
-  if (Number.isFinite(number)) return new Date(number).toISOString();
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
 function canonicalize(value) {
@@ -116,8 +114,33 @@ function entrySnapshot(entryResult) {
     quoteObservedAt: timestampIso(entryResult.quoteObservedAt),
     quoteAgeMs: finiteNumber(entryResult.quoteAgeMs),
     quoteSource: upper(entryResult.quoteSource) || null,
+    ...(entryResult.quoteEvidence ? { quoteEvidence: structuredClone(entryResult.quoteEvidence) } : {}),
     expectedEntryRule: upper(entryResult.expectedEntryRule) || null,
   };
+}
+
+function quoteEvidenceAssessment(entry, nowMs) {
+  const evidence = entry?.quoteEvidence;
+  const policy = evidence?.policy;
+  if (
+    !evidence
+    || !policy
+    || evidence.sourceObservedAt !== entry?.quoteObservedAt
+    || hash(policy) !== hash(CURRENT_LIVE_QUOTE_EVIDENCE_POLICY)
+  ) return null;
+  return assessQuoteEvidence({
+    asOf: evidence.sourceObservedAt,
+    receivedAt: evidence.receivedAt,
+    realtime: evidence.realtime,
+  }, {
+    nowMs,
+    sourceMaxAgeMs: policy.sourceMaxAgeMs,
+    receiptMaxAgeMs: policy.receiptMaxAgeMs,
+    validateReceivedAt: policy.validateReceivedAt,
+    requireReceivedAt: policy.requireReceivedAt,
+    requireRealtime: policy.requireRealtime,
+    maxFutureSkewMs: policy.maxFutureSkewMs,
+  });
 }
 
 function accountSnapshot(accountResult) {
@@ -226,7 +249,9 @@ export function validateRiskEvaluationContract(evaluation) {
   const errors = [];
   const status = upper(value.status);
 
-  if (Number(value.schemaVersion) !== RISK_EVALUATION_SCHEMA_VERSION) errors.push("unsupported schemaVersion");
+  if (![LEGACY_RISK_EVALUATION_SCHEMA_VERSION, RISK_EVALUATION_SCHEMA_VERSION].includes(Number(value.schemaVersion))) {
+    errors.push("unsupported schemaVersion");
+  }
   if (!Number.isInteger(Number(value.riskPolicyVersion)) || Number(value.riskPolicyVersion) < 1) errors.push("riskPolicyVersion is invalid");
   if (!text(value.riskEvaluationId)) errors.push("riskEvaluationId is required");
   if (!timestampIso(value.evaluatedAt)) errors.push("evaluatedAt is invalid");
@@ -239,6 +264,20 @@ export function validateRiskEvaluationContract(evaluation) {
   if (finiteNumber(value.dss?.effectiveStop) === null) errors.push("effectiveStop is required");
 
   const reasonCodes = unique(value.reasonCodes);
+  if (Number(value.schemaVersion) === RISK_EVALUATION_SCHEMA_VERSION) {
+    const evidence = quoteEvidenceAssessment(value.entry, value.evaluatedAt);
+    if (!evidence) errors.push("quote evidence binding and policy are required");
+    if (status === "VALID" && evidence && !evidence.valid) errors.push("VALID quote evidence must be complete and fresh");
+    const expectedFingerprint = hash({
+      policyVersion: Number(value.riskPolicyVersion),
+      candidate: value.candidate,
+      dss: value.dss,
+      entry: value.entry,
+      account: value.account,
+      instrument: value.instrument,
+    });
+    if (text(value.inputFingerprint) !== expectedFingerprint) errors.push("inputFingerprint does not match immutable inputs");
+  }
   if (status === "VALID") {
     if (reasonCodes.length) errors.push("VALID reasonCodes must be empty");
     if (positiveNumber(value.entry?.currentExpectedEntry) === null) errors.push("VALID currentExpectedEntry is required");
@@ -327,7 +366,9 @@ export function buildRiskEvaluation({
   };
 
   const evaluation = {
-    schemaVersion: RISK_EVALUATION_SCHEMA_VERSION,
+    schemaVersion: entry?.quoteEvidence
+      ? RISK_EVALUATION_SCHEMA_VERSION
+      : LEGACY_RISK_EVALUATION_SCHEMA_VERSION,
     riskPolicyVersion: Number(policyVersion),
     riskEvaluationId: normalizedId,
     evaluatedAt: normalizedEvaluatedAt,
@@ -347,4 +388,20 @@ export function buildRiskEvaluation({
     throw new Error(`risk evaluation contract invalid: ${contract.errors.join("; ")}`);
   }
   return immutable(evaluation);
+}
+
+export function assertRiskQuoteEvidenceAtArm(evaluation, nowMs, { allowLegacyQuoteEvidence = false } = {}) {
+  const schemaVersion = Number(evaluation?.schemaVersion ?? LEGACY_RISK_EVALUATION_SCHEMA_VERSION);
+  if (schemaVersion === LEGACY_RISK_EVALUATION_SCHEMA_VERSION && allowLegacyQuoteEvidence) return;
+  const contract = validateRiskEvaluationContract(evaluation);
+  const evidence = quoteEvidenceAssessment(evaluation?.entry, nowMs);
+  if (
+    schemaVersion !== RISK_EVALUATION_SCHEMA_VERSION
+    || !contract.valid
+    || !evidence?.valid
+  ) {
+    const error = new Error("ARM requires complete, fresh quote source, receipt and realtime evidence");
+    error.code = "ARM_RISK_EVALUATION_STALE";
+    throw error;
+  }
 }

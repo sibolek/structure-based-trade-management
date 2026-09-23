@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import { canonicalLifecycleState } from "./pretrade-state.mjs";
 import { buildExecutionBoardHandoff } from "./execution-board-handoff.mjs";
 import { armAuthorizationProof } from "./pretrade-arm-operation-repository.mjs";
-import { freshness } from "./clock-freshness.mjs";
+import { freshness, timestampMs } from "./clock-freshness.mjs";
+import { assertRiskQuoteEvidenceAtArm } from "./risk-evaluation.mjs";
 
 export const PRETRADE_ARM_SERVICE_AUTHORITY = "PRETRADE_ARM_SERVICE";
 
@@ -34,11 +35,6 @@ function armError(message, code, details = null) {
   error.code = code;
   if (details) error.details = details;
   return error;
-}
-
-function timestampMs(value) {
-  const parsed = Date.parse(String(value ?? ""));
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function deepEqual(left, right) {
@@ -130,6 +126,7 @@ export class PreTradeArmService {
     deliveryRepository,
     ocoService,
     clock = () => new Date().toISOString(),
+    allowLegacyQuoteEvidence = false,
   } = {}) {
     if (!lifecycleCoordinator || typeof lifecycleCoordinator.revalidatePermission !== "function") throw new Error("ARM service requires lifecycleCoordinator");
     if (!permissionPipeline || typeof permissionPipeline.evaluate !== "function") throw new Error("ARM service requires permissionPipeline");
@@ -155,6 +152,7 @@ export class PreTradeArmService {
     this.deliveryRepository = deliveryRepository;
     this.ocoService = ocoService;
     this.clock = clock;
+    this.allowLegacyQuoteEvidence = allowLegacyQuoteEvidence;
     this.busy = new Set();
   }
 
@@ -487,6 +485,7 @@ export class PreTradeArmService {
   #assertFreshRisk(riskEvaluation) {
     if (upper(riskEvaluation?.status) !== "VALID") throw armError("ARM requires VALID fresh risk evaluation", "ARM_RISK_EVALUATION_NOT_VALID");
     const nowMs = timestampMs(this.#time());
+    assertRiskQuoteEvidenceAtArm(riskEvaluation, nowMs, this);
     const quoteMs = timestampMs(riskEvaluation.entry?.quoteObservedAt);
     const accountMs = timestampMs(riskEvaluation.account?.snapshotObservedAt);
     if (nowMs === null || quoteMs === null || accountMs === null) throw armError("ARM risk freshness provenance is incomplete", "ARM_RISK_EVALUATION_STALE");
@@ -496,8 +495,8 @@ export class PreTradeArmService {
   }
 
   #time() {
-    const parsed = Date.parse(String(this.clock() ?? ""));
-    if (!Number.isFinite(parsed)) throw armError("ARM service clock returned invalid timestamp", "ARM_CLOCK_INVALID");
+    const parsed = timestampMs(this.clock());
+    if (parsed === null) throw armError("ARM service clock returned invalid timestamp", "ARM_CLOCK_INVALID");
     return new Date(parsed).toISOString();
   }
 }

@@ -129,6 +129,22 @@ test("accepted canonical candidate starts WAITING with exact validity and immuta
   assert.equal(persisted.lifecycleJournal.events[0].eventType, "CANDIDATE_ACCEPTED");
 });
 
+test("detached ingress planning uses explicit time and deterministic authority identities", () => {
+  const store = new PreTradeStore({ filePath: tempStatePath() });
+  store.load();
+  const ingress = new PreTradeCandidateIngress({
+    store,
+    clock: () => { throw new Error("planner must use explicit time"); },
+  });
+  const input = bundle([candidate()]);
+  const context = { state: store.snapshot(), importedAt: "2026-09-05T13:01:00.000Z" };
+  const first = ingress.planBundle(input, { ingressPolicy: AUTOMATED_UNTOUCHED_ONLY }, context);
+  const second = ingress.planBundle(input, { ingressPolicy: AUTOMATED_UNTOUCHED_ONLY }, context);
+  assert.deepEqual(second, first);
+  assert.match(first.result.outcomes[0].acceptanceEventId, /^INGRESS_EVENT:[0-9a-f]{64}$/);
+  assert.equal(store.snapshot().candidates.length, 0);
+});
+
 test("canonical ingress requires authoritative bundle source and bundleId", () => {
   const { ingress } = createIngress();
   assert.throws(
@@ -677,12 +693,12 @@ test("manual supersession decision observation attests exact authorization and f
   corrupt.proposedContentHash = "0".repeat(64);
   corrupt.declineIntegrityHash = manualSupersessionDeclineIntegrityHash(corrupt);
   declineCase.store.state.manualSupersessionDeclines[0] = corrupt;
-  declineCase.store.save();
-  const reloaded = new PreTradeStore({ filePath: declineCase.filePath });
   assert.throws(
-    () => reloaded.load(),
+    () => declineCase.store.save(),
     (error) => error.code === "CORRUPT_MANUAL_SUPERSESSION_DECLINE_STATE",
   );
+  const reloaded = new PreTradeStore({ filePath: declineCase.filePath });
+  assert.doesNotThrow(() => reloaded.load());
 
   assert.ok(fs.existsSync(filePath));
 });

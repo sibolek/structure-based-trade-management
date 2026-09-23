@@ -6,14 +6,33 @@ export const CURRENT_LIVE_QUOTE_EVIDENCE_POLICY = Object.freeze({
   validateReceivedAt: true,
   requireReceivedAt: true,
   requireRealtime: true,
+  maxFutureSkewMs: MAX_FUTURE_CLOCK_SKEW_MS,
 });
 
-function timestampMs(value) {
+export function timestampMs(value) {
+  if (value instanceof Date) {
+    const milliseconds = value.getTime();
+    return Number.isFinite(milliseconds) ? milliseconds : null;
+  }
   if (value === null || value === undefined || typeof value === "boolean") return null;
   if (typeof value === "string" && !value.trim()) return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) ? parsed : null;
+  const numeric = typeof value === "number" || typeof value === "string" ? Number(value) : NaN;
+  const parsed = Number.isFinite(numeric) ? numeric : Date.parse(String(value));
+  if (!Number.isFinite(parsed)) return null;
+  const clipped = new Date(parsed).getTime();
+  return Number.isFinite(clipped) ? clipped : null;
+}
+
+export function timestampIso(value) {
+  const milliseconds = timestampMs(value);
+  return milliseconds === null ? null : new Date(milliseconds).toISOString();
+}
+
+export function quoteSourceTimestamp(quote) {
+  if (Object.prototype.hasOwnProperty.call(quote ?? {}, "quoteTime")) return quote.quoteTime;
+  if (Object.prototype.hasOwnProperty.call(quote ?? {}, "asOf")) return quote.asOf;
+  if (Object.prototype.hasOwnProperty.call(quote ?? {}, "quoteObservedAt")) return quote.quoteObservedAt;
+  return quote?.tradeTime;
 }
 
 function nonNegativeNumber(value) {
@@ -71,7 +90,7 @@ export function assessQuoteEvidence(quote, {
   requireRealtime = false,
   maxFutureSkewMs = MAX_FUTURE_CLOCK_SKEW_MS,
 } = {}) {
-  const sourceTimestamp = quote?.quoteTime ?? quote?.asOf ?? quote?.tradeTime;
+  const sourceTimestamp = quoteSourceTimestamp(quote);
   const sourceFreshness = freshness(sourceTimestamp, {
     nowMs,
     maxAgeMs: sourceMaxAgeMs,

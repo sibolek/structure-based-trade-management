@@ -50,6 +50,7 @@ function serviceHarness() {
   const sentinel = new Error("stop-after-capture");
 
   const service = new PreTradeArmService({
+    allowLegacyQuoteEvidence: true,
     lifecycleCoordinator: {
       revalidatePermission() { return { stateRevision: 4 }; },
       candidateSnapshot() { return structuredClone(candidate); },

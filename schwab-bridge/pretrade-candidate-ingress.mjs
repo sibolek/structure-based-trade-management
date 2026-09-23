@@ -18,6 +18,7 @@ import {
   manualSupersessionDeclineIntegrityHash,
   manualSupersessionReviewId,
   manualSupersessionReviewIntegrityHash,
+  pretradePreviewProposalHash,
 } from "./pretrade-state.mjs";
 import {
   assertCanonicalCandidateIntegrity,
@@ -47,6 +48,7 @@ export const MANUAL_SUPERSESSION_OBSERVATION_REQUEST_INVALID =
   "MANUAL_SUPERSESSION_OBSERVATION_REQUEST_INVALID";
 export const FORBIDDEN_SUPERSESSION_AUTHORITY_MATERIAL =
   "FORBIDDEN_SUPERSESSION_AUTHORITY_MATERIAL";
+export const PREVIEW_ACCEPTANCE_REQUIRED = "PREVIEW_ACCEPTANCE_REQUIRED";
 
 const ACTIVE_PRETRADE_STATES = new Set([
   "INGESTED",
@@ -275,6 +277,10 @@ function operationHash(value) {
     .createHash("sha256")
     .update(JSON.stringify(value))
     .digest("hex");
+}
+
+function ingressEventId(operationId) {
+  return `INGRESS_EVENT:${crypto.createHash("sha256").update(text(operationId)).digest("hex")}`;
 }
 
 const NON_SUBSTANTIVE_REVIEW_FIELDS = new Set([
@@ -512,13 +518,12 @@ function buildManualSupersessionReviewRecord({ prior, proposed, createdAt }) {
 }
 
 export class PreTradeCandidateIngress {
-  constructor({ store, clock = nowIso, idFactory = () => crypto.randomUUID() } = {}) {
+  constructor({ store, clock = nowIso } = {}) {
     if (!store || typeof store !== "object" || typeof store.save !== "function" || typeof store.snapshot !== "function") {
       throw ingressError("store with snapshot() and save() is required", "INVALID_INGRESS_STORE");
     }
     this.store = store;
     this.clock = clock;
-    this.idFactory = idFactory;
   }
 
   createManualSupersessionReview(bundle, { ingressPolicy = MANUAL_AUTHORIZED } = {}) {
@@ -606,7 +611,7 @@ export class PreTradeCandidateIngress {
         reviews,
       };
     } catch (error) {
-      this.store.state = stateBeforeMutation;
+      if (!this.store.fenced) this.store.state = stateBeforeMutation;
       throw error;
     }
   }
@@ -690,7 +695,7 @@ export class PreTradeCandidateIngress {
       this.store.save();
       return clone(record);
     } catch (error) {
-      this.store.state = stateBeforeMutation;
+      if (!this.store.fenced) this.store.state = stateBeforeMutation;
       throw error;
     }
   }
@@ -758,7 +763,7 @@ export class PreTradeCandidateIngress {
       this.store.save();
       return clone(record);
     } catch (error) {
-      this.store.state = stateBeforeMutation;
+      if (!this.store.fenced) this.store.state = stateBeforeMutation;
       throw error;
     }
   }
@@ -881,14 +886,52 @@ export class PreTradeCandidateIngress {
   }
 
   importBundle(bundle, options = {}) {
+    if (!this.store.state || !Array.isArray(this.store.state.candidates)) {
+      throw ingressError("store state is unavailable; call store.load() first", "INGRESS_STORE_NOT_LOADED");
+    }
+    const stateBeforeMutation = clone(this.store.state);
+    try {
+      const planned = this.planBundle(bundle, options, {
+        state: stateBeforeMutation,
+      });
+      this.store.state = planned.state;
+      this.store.save();
+      return planned.result;
+    } catch (error) {
+      if (!this.store.fenced) this.store.state = stateBeforeMutation;
+      throw error;
+    }
+  }
+
+  planBundle(bundle, options = {}, { state, importedAt = null } = {}) {
+    return this.#planBundle(bundle, options, { state, importedAt });
+  }
+
+  planBundleForPreviewRegistration(bundle, options = {}, context = {}) {
+    return this.#planBundle(bundle, options, context, { previewRegistration: true });
+  }
+
+  planBundleForPreviewAcceptance(bundle, options = {}, {
+    state,
+    importedAt = null,
+    previewOperationId,
+  } = {}) {
+    if (!text(previewOperationId)) {
+      throw ingressError("preview acceptance operationId is required", PREVIEW_ACCEPTANCE_REQUIRED);
+    }
+    return this.#planBundle(bundle, options, { state, importedAt }, { previewOperationId: text(previewOperationId) });
+  }
+
+  #planBundle(bundle, options = {}, { state, importedAt = null } = {}, { previewOperationId = null, previewRegistration = false } = {}) {
     if (!bundle || typeof bundle !== "object" || !Array.isArray(bundle.candidates)) {
       throw ingressError("Import bundle must be an object with a candidates array", "INVALID_BUNDLE");
     }
     if (!options || typeof options !== "object" || Array.isArray(options)) {
       throw ingressError("Candidate import options must be an object", "INVALID_INGRESS_OPTIONS");
     }
-    if (!this.store.state || !Array.isArray(this.store.state.candidates)) {
-      throw ingressError("store state is unavailable; call store.load() first", "INGRESS_STORE_NOT_LOADED");
+    const draft = clone(state);
+    if (!draft || !Array.isArray(draft.candidates)) {
+      throw ingressError("detached store state is required", "INGRESS_STORE_NOT_LOADED");
     }
 
     assertNoInboundSupersessionAuthority(bundle, options);
@@ -899,30 +942,76 @@ export class PreTradeCandidateIngress {
         "INVALID_INGRESS_OPTIONS",
       );
     }
-    const authorityState = assertManualSupersessionAuthorityState(this.store.state);
+    const authorityState = assertManualSupersessionAuthorityState(draft);
     const { ingressPolicy = null } = options;
     const normalizedIngressPolicy = resolveIngressPolicy(bundle.ingressPolicy, ingressPolicy);
-    const stateBeforeMutation = clone(this.store.state);
-    const importedAt = this.clock();
+    const effectiveImportedAt = importedAt ?? this.clock();
     const bundleSource = upper(bundle.source);
     const bundleId = text(bundle.bundleId);
     if (!bundleSource) throw ingressError("canonical candidate bundle source is required", "INVALID_BUNDLE_SOURCE");
     if (!bundleId) throw ingressError("canonical candidate bundleId is required", "INVALID_BUNDLE_ID");
 
-    try {
-      const outcomes = bundle.candidates.map((candidate) => this.#importCandidate({
+    const proposalHash = pretradePreviewProposalHash(bundle);
+    const registered = (draft.pretradePreviewOperations || []).flatMap((operation) => {
+      const preview = (draft.pretradePreviews || []).find((item) => item.previewId === operation.previewId);
+      if (!preview) return [];
+      const input = bundle.candidates.find((item) => (
+        text(item?.candidateId) === text(preview.candidateIdentity?.candidateId)
+        && Number(item?.contractVersion) === Number(preview.candidateIdentity?.contractVersion)
+      ));
+      return input ? [{ operation, preview, input }] : [];
+    });
+    if (registered.length) {
+      for (const { preview, input } of registered) {
+        if (candidateContractHash(input) !== preview.candidateIdentity.contentHash) {
+          throw ingressError("registered preview candidate identity has different content", "PREVIEW_REGISTERED_IDENTITY_CONFLICT");
+        }
+      }
+      const active = registered.filter(({ operation }) => ["UNSTARTED", "ACCEPTING"].includes(operation.state));
+      if (active.length !== 1 && !(previewRegistration && active.length === 0)) {
+        throw ingressError("registered proposal requires explicit preview review", PREVIEW_ACCEPTANCE_REQUIRED);
+      }
+      if (active.length) {
+        const [{ operation: registeredOperation, preview, input }] = active;
+        let inputHash = null;
+        try { inputHash = candidateContractHash(input); } catch { /* canonical validation reports the payload error */ }
+        if (inputHash !== preview.candidateIdentity.contentHash || proposalHash !== preview.proposalHash) {
+          throw ingressError("registered preview candidate identity has different content", "PREVIEW_REGISTERED_IDENTITY_CONFLICT");
+        }
+        const authorizedOperation = registeredOperation.operationId === previewOperationId
+          && registeredOperation.state === "ACCEPTING"
+          ? registeredOperation
+          : null;
+        if (
+          !authorizedOperation
+          || preview.operationId !== authorizedOperation.operationId
+          || preview.proposalHash !== proposalHash
+          || preview.state !== "ACCEPTING"
+        ) {
+          throw ingressError(
+            "registered proposal requires its exact unresolved preview acceptance operation",
+            PREVIEW_ACCEPTANCE_REQUIRED,
+          );
+        }
+      }
+    } else if (previewOperationId) {
+      throw ingressError("preview acceptance operation is no longer unresolved", PREVIEW_ACCEPTANCE_REQUIRED);
+    }
+
+    const outcomes = bundle.candidates.map((candidate) => this.#importCandidate({
+        state: draft,
         input: candidate,
-        importedAt,
+        importedAt: effectiveImportedAt,
         bundleSource,
         bundleId,
         ingressPolicy: normalizedIngressPolicy,
         authorityState,
       }));
 
-      this.store.state.updatedAt = importedAt;
-      if (!Array.isArray(this.store.state.importLog)) this.store.state.importLog = [];
-      this.store.state.importLog.push({
-        importedAt,
+      draft.updatedAt = effectiveImportedAt;
+      if (!Array.isArray(draft.importLog)) draft.importLog = [];
+      draft.importLog.push({
+        importedAt: effectiveImportedAt,
         source: bundleSource,
         bundleId,
         ...(normalizedIngressPolicy ? { ingressPolicy: normalizedIngressPolicy } : {}),
@@ -933,19 +1022,18 @@ export class PreTradeCandidateIngress {
         stale: outcomes.filter((item) => item.status === "STALE").length,
       });
 
-      this.store.save();
       return {
-        importedAt,
+        state: draft,
+        result: {
+        importedAt: effectiveImportedAt,
         ...(normalizedIngressPolicy ? { ingressPolicy: normalizedIngressPolicy } : {}),
         outcomes,
+        },
       };
-    } catch (error) {
-      this.store.state = stateBeforeMutation;
-      throw error;
-    }
   }
 
   #importCandidate({
+    state,
     input,
     importedAt,
     bundleSource,
@@ -964,7 +1052,7 @@ export class PreTradeCandidateIngress {
     }
 
     const hash = candidateContractHash(normalized);
-    const versions = this.store.state.candidates.filter((item) => item.candidateId === normalized.candidateId);
+    const versions = state.candidates.filter((item) => item.candidateId === normalized.candidateId);
     const sameVersionRaw = versions.find((item) => Number(item.contractVersion) === normalized.contractVersion);
 
     if (sameVersionRaw) {
@@ -975,6 +1063,7 @@ export class PreTradeCandidateIngress {
           candidateId: normalized.candidateId,
           contractVersion: normalized.contractVersion,
           status: "DUPLICATE",
+          contentHash: sameVersion.contentHash,
           reasons: ["same candidateId, contractVersion, and canonical content already imported"],
         };
       }
@@ -1045,7 +1134,7 @@ export class PreTradeCandidateIngress {
         return rejectedPolicyOutcome(normalized, MANUAL_SUPERSESSION_AUTHORIZATION_INVALID);
       }
       manualSupersessionAuthorization = findManualSupersessionAuthorization({
-        authorizations: this.store.state.manualSupersessionAuthorizations,
+        authorizations: state.manualSupersessionAuthorizations,
         reviewsById: authorityState.reviewsById,
         prior: newestRaw,
         proposed: normalized,
@@ -1087,7 +1176,7 @@ export class PreTradeCandidateIngress {
       contentHash: hash, bundleSource, bundleId, acceptedAt: importedAt, admittedContent: normalized,
     });
     const acceptanceOperationId = `INGRESS_ACCEPT:${normalized.candidateId}:v${normalized.contractVersion}:${hash}`;
-    const acceptanceEventId = this.idFactory();
+    const acceptanceEventId = ingressEventId(acceptanceOperationId);
     const acceptanceEvent = {
       eventId: acceptanceEventId,
       eventType: "CANDIDATE_ACCEPTED",
@@ -1162,7 +1251,7 @@ export class PreTradeCandidateIngress {
       arm: null,
     };
     assertCanonicalCandidateIntegrity(admittedCandidate);
-    this.store.state.candidates.push(admittedCandidate);
+    state.candidates.push(admittedCandidate);
 
     return {
       candidateId: normalized.candidateId,
@@ -1171,6 +1260,8 @@ export class PreTradeCandidateIngress {
       lifecycleState: "WAITING",
       stateRevision: 0,
       contentHash: hash,
+      acceptanceOperationId,
+      acceptanceEventId,
       reasons: [],
     };
   }
@@ -1221,7 +1312,7 @@ export class PreTradeCandidateIngress {
     existing.supersededByVersion = supersededByVersion;
     existing.lastLifecycleMutationAt = importedAt;
 
-    const eventId = this.idFactory();
+    const eventId = ingressEventId(operationId);
     const event = {
       eventId,
       eventType: "CANDIDATE_SUPERSEDED",
