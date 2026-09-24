@@ -26,12 +26,27 @@ function statusForError(error) {
   return 500;
 }
 
+function isAllowedLoopbackHost(host) {
+  if (typeof host !== "string" || !host.trim()) return false;
+  try {
+    const url = new URL(`http://${host}`);
+    return !url.username && !url.password && url.pathname === "/"
+      && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function createManualSodDirectoryApiHandler({ rootPath = DEFAULT_MANUAL_SOD_ROOT } = {}) {
   return async function handleManualSodDirectoryApi(req, res) {
     const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
     if (requestUrl.pathname !== "/api/manual-sod/candidates") return false;
 
     const origin = req.headers.origin || null;
+    if (!isAllowedLoopbackHost(req.headers.host)) {
+      json(res, 403, { error: "host not allowed", code: "HOST_NOT_ALLOWED" });
+      return true;
+    }
     if (origin && !isAllowedLocalOrigin(origin)) {
       json(res, 403, { error: "origin not allowed", code: "ORIGIN_NOT_ALLOWED" });
       return true;

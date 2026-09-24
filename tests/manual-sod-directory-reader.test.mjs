@@ -228,6 +228,22 @@ test("directory API is read-only, date-bounded, origin-restricted, and reports m
   });
   assert.equal(nonLocal.status, 403);
 
+  const foreignHost = await new Promise((resolve, reject) => {
+    const request = http.get(`${base}/api/manual-sod/candidates?sourceDate=${DATE}`, {
+      headers: { host: "example.com" },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({
+        status: response.statusCode,
+        payload: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+      }));
+    });
+    request.on("error", reject);
+  });
+  assert.equal(foreignHost.status, 403);
+  assert.equal(foreignHost.payload.code, "HOST_NOT_ALLOWED");
+
   const mutation = await fetch(`${base}/api/manual-sod/candidates?sourceDate=${DATE}`, { method: "POST" });
   assert.equal(mutation.status, 405);
 });
