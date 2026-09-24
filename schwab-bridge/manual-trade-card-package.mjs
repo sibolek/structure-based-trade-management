@@ -35,12 +35,15 @@ async function deliverCandidate(input, output) {
   try {
     staging = fs.mkdtempSync(path.join(path.dirname(output), ".manual-trade-card-candidate-"));
     phase = "validate";
-    const files = writeCandidates({ ...input.bundleMetadata, candidates: input.candidateProposals }, path.join(staging, "individual-candidates"));
+    const stagedDirectory = path.join(staging, "individual-candidates");
+    const files = writeCandidates({ ...input.bundleMetadata, candidates: input.candidateProposals }, stagedDirectory);
     if (files.length !== 1) throw new Error("Current manual delivery gate must produce exactly one candidate file.");
     phase = "write";
-    const candidatePath = path.join(output, path.basename(files[0]));
-    // Only a complete file that passed the existing exact-serialization gate is public.
-    fs.renameSync(files[0], candidatePath);
+    const candidateDirectory = path.join(output, "individual-candidates");
+    // Only a complete directory that passed the existing exact-serialization
+    // gate is public. The PENDING status remains the package commit barrier.
+    fs.renameSync(stagedDirectory, candidateDirectory);
+    const candidatePath = path.join(candidateDirectory, path.basename(files[0]));
     result = {
       status: "DELIVERED", reason: "CURRENT_LOCAL_VALIDATOR_PASSED",
       message: "ExecutionOS candidate JSON delivered: one file passed the current local canonical validator. Preview and explicit Import remain required.",
@@ -77,7 +80,9 @@ export async function writeManualTradeCardPackage(input = {}, outputDirectory) {
     fs.writeFileSync(candidateDeliveryStatusPath, `${JSON.stringify(candidateDelivery, null, 2)}\n`);
   } catch (error) {
     // A package cannot claim successful delivery without its status artifact.
-    for (const file of candidateDelivery.files) fs.rmSync(file, { force: true });
+    if (candidateDelivery.files.length) {
+      fs.rmSync(path.join(output, "individual-candidates"), { recursive: true, force: true });
+    }
     throw error;
   }
   return { htmlPath, candidateDelivery, candidateDeliveryStatusPath };
@@ -91,8 +96,10 @@ async function cli() {
     return;
   }
   try {
-    const output = outputDirectory === undefined ? defaultManualPackageDirectory("trade-card", inputPath) : expandManualPath(outputDirectory);
-    const input = JSON.parse(fs.readFileSync(path.resolve(expandManualPath(inputPath)), "utf8"));
+    const inputFile = path.resolve(expandManualPath(inputPath));
+    const serialized = fs.readFileSync(inputFile, "utf8");
+    const output = outputDirectory === undefined ? defaultManualPackageDirectory("trade-card", inputPath, serialized) : expandManualPath(outputDirectory);
+    const input = JSON.parse(serialized);
     console.log(JSON.stringify(await writeManualTradeCardPackage(input, output), null, 2));
   } catch (error) {
     console.error(error.message);

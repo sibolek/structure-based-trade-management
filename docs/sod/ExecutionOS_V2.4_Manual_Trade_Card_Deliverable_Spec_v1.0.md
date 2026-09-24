@@ -15,18 +15,21 @@ chart screenshot → ChatGPT/manual trade-card analysis + authored HTML
 ## Standard default destinations
 
 ```text
-~/Downloads/ExecutionOS/TradeCards/YYYY-MM-DD/
-├── SYMBOL/
-│   ├── trade-card.html
-│   ├── candidate-delivery-status.json
-│   └── 01-<safe-candidateId>.json       # only when DELIVERED
-└── SYMBOL-transport/
-    └── manual-trade-card-analysis-YYYY-MM-DD-SYMBOL.json
+~/Downloads/ExecutionOS/SOD/YYYY-MM-DD/
+├── sod-package/                         # optional; independent of ad-hoc
+├── ad-hoc/
+│   └── SYMBOL-<content-key>/
+│       ├── trade-card.html
+│       ├── candidate-delivery-status.json
+│       └── individual-candidates/       # exactly one file when DELIVERED
+└── ad-hoc-transport/
+    └── SYMBOL-<content-key>/
+        └── manual-trade-card-analysis-YYYY-MM-DD-SYMBOL.json
 ```
 
-The final output-directory argument is optional on both manual serializers and both manual packagers. Package defaults come only from the standard transport **filename** (valid calendar date and, for trade cards, a safe uppercase symbol label), never the clock or candidate fields. Labels do not rewrite or validate authored dates/symbols; authors must keep them consistent. An undated or renamed input still works with an explicit output directory. The `-TRANSPORT` suffix (case-insensitive) is reserved for transport-directory naming only in default trade-card path derivation; labels such as `NVDA-TRANSPORT` require explicit output directories for transport and package destinations.
+The final output-directory argument is optional on both manual serializers and both manual packagers. Default ad-hoc paths use the standard transport filename's valid date/safe uppercase symbol plus a content key derived from the exact serialized transport bytes—never the clock or candidate fields. This lets ad-hoc generation create the date container before SOD exists and lets later SOD packaging create `sod-package/` without collision. Different same-symbol transports receive different package directories; identical bytes are never overwritten. Labels do not rewrite or validate authored dates/symbols. An undated or renamed input still works with an explicit output directory. The `-TRANSPORT` suffix remains reserved for transport-directory naming.
 
-Transport defaults use a fresh sibling directory so the transport never occupies an existing or future package directory. Both default transport directories and package directories must be absent, including empty directories and symlinks. A repeated run fails; there is no overwrite, auto-suffix, automatic retry, or silent fallback. For a new version or write-only recovery, supply an explicit fresh output directory as the last argument; preserve and verify the existing serialized analysis. Explicit transport destinations retain their existing exclusive-file behavior. Never choose an existing package as a transport destination.
+Transport defaults use a fresh dedicated directory inside the trading-date container so transport never occupies a completed package. Both default transport directories and package directories must be absent, including empty directories and symlinks. Repeating identical bytes fails instead of overwriting; changed bytes receive a different content key. There is no automatic retry or silent fallback. For write-only recovery, supply an explicit fresh output directory as the last argument; preserve and verify the existing serialized analysis. Explicit transport destinations retain their existing exclusive-file behavior. Never choose an existing package as a transport destination.
 
 CLI input and output paths expand `~` or `~/` using the current user's home directory, including when quoted; `~otheruser` is rejected. Default mode requires an existing writable `~/Downloads` directory. Missing/unavailable Downloads fails clearly and allows an explicit destination override. Other filesystem errors name the failing path; partial or interrupted output must be retried at a new path. Programmatic writer APIs still require explicit output paths. No changes to automated Production SOD, analysis, validator gating, Manual Import, PRETRADE, permission checks, ARM, execution, or broker authority.
 
@@ -54,7 +57,7 @@ npm run v24:manual-trade-card-analysis -- /path/to/authored-trade-card.json 2026
 
 ### Required durable write and recovery procedure
 
-1. Preserve the completed analysis and serialize once. Deliver the transport as a **standalone top-level artifact in a fresh writable location**, separate from the package and outside any existing SOD output directory. Use an unused path at the root of a new transport directory.
+1. Preserve the completed analysis and serialize once. Deliver the transport as a **standalone top-level artifact in a fresh writable directory**, separate from every completed package. The local default uses a unique directory under the date container's `ad-hoc-transport/` subtree.
 2. Before reporting success or offering a download, the caller must verify that the exact file exists, is readable, and parses back to the same analysis. Verify content, not just a filename or successful write return. Link the verified transport and authored HTML.
 3. On a filesystem permission/write failure, retain the serialized bytes and retry **only the write** to a fresh writable path, using exclusive creation. Read back and compare again. Do not regenerate analysis, repair candidate values, rerun chart interpretation, or overwrite an existing transport.
 4. If no verified writable destination is available, report delivery failure; do not claim a downloadable transport exists. Neither CLI performs automatic retries. Recovery and verification are caller responsibilities, consistent with the [manual SOD procedure](ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md#required-transport-write-and-recovery-procedure).
@@ -62,18 +65,18 @@ npm run v24:manual-trade-card-analysis -- /path/to/authored-trade-card.json 2026
 ## Local packaging and candidate delivery
 
 ```sh
-npm run v24:manual-trade-card-package -- ~/Downloads/ExecutionOS/TradeCards/2026-09-16/NVDA-transport/manual-trade-card-analysis-2026-09-16-NVDA.json
+npm run v24:manual-trade-card-package -- <analysisPath printed by the preceding command>
 ```
 
 Use the actual date/symbol and a fresh output directory; even an existing empty package directory is refused. `writeManualTradeCardPackage(input, outputDirectory)` returns `htmlPath`, `candidateDeliveryStatusPath`, and `candidateDelivery`. The package contains:
 
 - `trade-card.html`: the exact authored HTML, written before loading candidate validation.
 - `candidate-delivery-status.json`: delivery status, reason, message, candidate file paths, and diagnostic when relevant.
-- One individual candidate `.json`, only on `DELIVERED`, named by the existing manual delivery writer. It is a canonical one-candidate bundle with top-level `ingressPolicy: MANUAL_AUTHORIZED`, matching manual SOD individual files.
+- `individual-candidates/` containing exactly one candidate `.json` only on `DELIVERED`, named by the existing manual delivery writer. It is a canonical one-candidate bundle with top-level `ingressPolicy: MANUAL_AUTHORIZED`, matching manual SOD individual files.
 
 The optional candidate step dynamically loads `writeManualSodIndividualCandidateFiles` from the **current local** `manual-sod-deliverables.mjs`. That path validates the candidate contract and exact serialized Preview/Import file. There is no copied candidate schema, alternate validator, envelope conversion, or new admission path. The supplied candidate is unchanged. A supplied automated/unsupported policy is rejected, never relabeled. The existing manual writer supplies `MANUAL_AUTHORIZED` when manual authoring omitted the bundle policy.
 
-Candidate output is staged privately and published as one complete file only after validation. Zero or multiple proposals withhold candidate output; the packager still preserves valid authored HTML. The serializer rejects those transport shapes before writing. Missing metadata likewise permits HTML-only delivery. No partial candidate file is published on handled candidate-write failures. A final status-write failure removes the candidate and fails the command. Read only candidates listed by a completed `DELIVERED` status; `PENDING` means an interrupted/incomplete package and must not be imported.
+Candidate output is staged privately and published as one complete `individual-candidates/` directory only after validation. Zero or multiple proposals withhold candidate output; the packager still preserves valid authored HTML. The serializer rejects those transport shapes before writing. Missing metadata likewise permits HTML-only delivery. No partial candidate file is published on handled candidate-write failures. A final status-write failure removes the candidate directory and fails the command. Read only candidates listed by a completed `DELIVERED` status; `PENDING` means an interrupted/incomplete package and must not be imported.
 
 | Status / reason | Meaning |
 |---|---|
@@ -88,7 +91,7 @@ Both CLIs exit 2 for usage errors and 1 for input/filesystem failures. The packa
 
 ## Preview and explicit Import
 
-PRETRADE, Schwab, Execution Board, and broker services may all remain offline during serialization and packaging. In the SOD workspace's existing **Import Candidate JSON** control, load only the delivered individual candidate file, inspect Preview, then explicitly choose **Import into PRETRADE** when PRETRADE is connected. Do not import the transport or status file.
+PRETRADE, Schwab, Execution Board, and broker services may all remain offline during serialization and packaging. The dated SOD workspace loader discovers completed ad-hoc packages even when no SOD package exists. Candidates begin unchecked and can be imported individually, as a subset, or through **Select all**. The existing **Import Candidate JSON** control remains available for direct one-file Preview. Do not import the transport or status file.
 
 Local validation does not guarantee live admission; the existing authority still checks validity, identity, conflicts, and supersession. A valid new candidate is `ACCEPTED / WAITING`; an unchanged retry is `DUPLICATE`. Existing standalone envelopes continue through the unchanged narrow manual adapter. Packaging never calls that adapter or any import endpoint.
 

@@ -77,9 +77,24 @@ test("manual SOD directory responses preserve exact bundles and bind import outc
     sourceDate: "2026-09-05",
     packageDirectory: "/local/SOD/2026-09-05",
     delivery: { status: "DELIVERED", reason: "CURRENT_LOCAL_VALIDATOR_PASSED", message: "ready" },
-    candidates: [{ filename: "01-candidate.json", byteLength: Buffer.byteLength(raw), raw }],
+    packages: [{
+      sourceKind: "AD_HOC",
+      packageId: "NVDA-card",
+      packageDirectory: "/local/SOD/2026-09-05/ad-hoc/NVDA-card",
+      delivery: { status: "DELIVERED", reason: "CURRENT_LOCAL_VALIDATOR_PASSED", message: "ready" },
+    }],
+    candidates: [{
+      filename: "01-candidate.json",
+      byteLength: Buffer.byteLength(raw),
+      raw,
+      sourceKind: "AD_HOC",
+      packageId: "NVDA-card",
+      packageDirectory: "/local/SOD/2026-09-05/ad-hoc/NVDA-card",
+    }],
   }, "2026-09-05");
   assert.deepEqual(prepared.candidates[0].prepared.body, input);
+  assert.equal(prepared.candidates[0].sourceKind, "AD_HOC");
+  assert.equal(prepared.candidates[0].packageId, "NVDA-card");
   assert.equal(validateManualSodImportResult({ outcomes: [{
     status: "ACCEPTED",
     lifecycleState: "WAITING",
@@ -109,6 +124,12 @@ test("manual SOD directory responses reject date, filename, policy, and identity
     sourceDate: "2026-09-05",
     packageDirectory: "/local/SOD/2026-09-05",
     delivery: { status: "DELIVERED", reason: "CURRENT_LOCAL_VALIDATOR_PASSED", message: "ready" },
+    packages: [{
+      sourceKind: "SOD",
+      packageId: "legacy-sod-package",
+      packageDirectory: "/local/SOD/2026-09-05",
+      delivery: { status: "DELIVERED", reason: "CURRENT_LOCAL_VALIDATOR_PASSED", message: "ready" },
+    }],
     candidates: [entry(bundle)],
     ...overrides,
   });
@@ -119,6 +140,35 @@ test("manual SOD directory responses reject date, filename, policy, and identity
     entry(bundle, "01.json"),
     entry(bundle, "02.json"),
   ] }), "2026-09-05"), /duplicate candidate identity/);
+  assert.throws(() => prepareManualSodDirectoryResponse(response({ candidates: [{
+    ...entry(bundle),
+    sourceKind: "AD_HOC",
+    packageId: "../../substituted",
+    packageDirectory: "/elsewhere/2026-09-04/substituted",
+  }] }), "2026-09-05"), /package provenance/);
+  assert.throws(() => prepareManualSodDirectoryResponse(response({
+    packages: [{
+      sourceKind: "AD_HOC",
+      packageId: "NVDA-card",
+      packageDirectory: "/local/SOD/2026-09-04/ad-hoc/NVDA-card",
+      delivery: { status: "DELIVERED" },
+    }],
+  }), "2026-09-05"), /package provenance/);
+  assert.throws(() => prepareManualSodDirectoryResponse(response({
+    packageDirectory: "/local/SOD/2026-09-04",
+    packages: [{
+      sourceKind: "SOD",
+      packageId: "legacy-sod-package",
+      packageDirectory: "/local/SOD/2026-09-04",
+      delivery: { status: "DELIVERED", reason: "CURRENT_LOCAL_VALIDATOR_PASSED", message: "ready" },
+    }],
+    candidates: [{
+      ...entry(bundle),
+      sourceKind: "SOD",
+      packageId: "legacy-sod-package",
+      packageDirectory: "/local/SOD/2026-09-04",
+    }],
+  }), "2026-09-05"), /selected date/);
 });
 
 test("real HTTP standalone import creates canonical WAITING/Decision 28; no ARM or Execution state", async t => {

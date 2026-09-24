@@ -87,12 +87,12 @@ Governing invariant:
 
 Manual ChatGPT SOD is the current production-generation workflow: **charts/screenshots → ChatGPT/manual analysis → `manual-sod-analysis-YYYY-MM-DD.json` → `v24:manual-sod-package` → reports/dashboard, plus individual candidate JSON only if the current local validator passes**. Every ordinary SOD request automatically includes the dated transport JSON as a standard deliverable; it contains `artifactContent`, `candidateProposals`, and `bundleMetadata`. The [transport template](examples/manual-sod-analysis.template.json) guides authoring without copying the candidate schema.
 
-Emit the transport as a standalone top-level artifact in a fresh writable location, never inside an existing SOD output directory. Verify that the exact file exists, is readable, and parses back to the same analysis before reporting success. On a filesystem permission/write failure, retry only the write of the preserved serialized analysis to a fresh writable path; never regenerate or change analysis. Follow the [required transport write and recovery procedure](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md#required-transport-write-and-recovery-procedure).
+Emit the transport as a standalone top-level artifact in a fresh writable directory, separate from the completed SOD package. The local default uses the date container's dedicated `sod-package-transport/` directory. Verify that the exact file exists, is readable, and parses back to the same analysis before reporting success. On a filesystem permission/write failure, retry only the write of the preserved serialized analysis to a fresh writable path; never regenerate or change analysis. Follow the [required transport write and recovery procedure](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md#required-transport-write-and-recovery-procedure).
 
 ```sh
 npm run v24:manual-sod-analysis -- authored-sod.json 2026-09-16
 # Verify the transport exists, is readable, and matches the authored analysis.
-npm run v24:manual-sod-package -- ~/Downloads/ExecutionOS/SOD/2026-09-16-transport/manual-sod-analysis-2026-09-16.json
+npm run v24:manual-sod-package -- ~/Downloads/ExecutionOS/SOD/2026-09-16/sod-package-transport/manual-sod-analysis-2026-09-16.json
 ```
 
 Use the actual session date and a fresh package directory. If needed, `npm run v24:manual-sod-analysis -- <authored-sod.json> <YYYY-MM-DD> [output-directory]` serializes already-authored data to the standard filename without services or candidate validation. There is no local manual chart-analysis generator; neither CLI analyzes images. Reporting remains independent of ExecutionOS services, and candidate validation failures withhold candidate files while reports succeed. Delivered candidate bundles have top-level `"ingressPolicy": "MANUAL_AUTHORIZED"` and unchanged candidate values. See the [Manual SOD Deliverable Specification](docs/sod/ExecutionOS_V2.4_Manual_SOD_Deliverable_Spec_v1.0.md) for authoring, commands, statuses, and limitations.
@@ -105,14 +105,15 @@ Standard SOD output layout (use the actual session date):
 
 ```text
 ~/Downloads/ExecutionOS/SOD/
-├── YYYY-MM-DD/
-│   ├── report.md
-│   ├── report.html
-│   ├── dashboard.html
-│   ├── candidate-delivery-status.json
-│   └── individual-candidates/          # only when DELIVERED
-└── YYYY-MM-DD-transport/
-    └── manual-sod-analysis-YYYY-MM-DD.json
+└── YYYY-MM-DD/
+    ├── sod-package/
+    │   ├── report.md
+    │   ├── report.html
+    │   ├── dashboard.html
+    │   ├── candidate-delivery-status.json
+    │   └── individual-candidates/      # only when DELIVERED
+    └── sod-package-transport/
+        └── manual-sod-analysis-YYYY-MM-DD.json
 ```
 
 ## Ad-hoc standalone trade cards
@@ -122,30 +123,35 @@ An ordinary **“create a trade card for this chart”** request produces the au
 ```sh
 npm run v24:manual-trade-card-analysis -- authored-trade-card.json 2026-09-16 NVDA
 # Verify the transport exists, is readable, and matches the authored analysis.
-npm run v24:manual-trade-card-package -- ~/Downloads/ExecutionOS/TradeCards/2026-09-16/NVDA-transport/manual-trade-card-analysis-2026-09-16-NVDA.json
+npm run v24:manual-trade-card-package -- <analysisPath printed by the preceding command>
 ```
 
 The package preserves the authored HTML and its styling verbatim and writes `candidate-delivery-status.json`. Its optional candidate file uses the existing authoritative manual delivery gate and canonical one-candidate `MANUAL_AUTHORIZED` bundle. Services may remain offline; unavailable/failed validation withholds candidate JSON while valid HTML still writes. Packaging never imports, ARMs, hands off, executes, or grants broker authority.
 
-Use the [transport-shape example](examples/manual-trade-card-analysis.template.json), not a copied candidate schema. The optional `v24:manual-trade-card-analysis` serializer accepts `<authored-trade-card.json> <YYYY-MM-DD> <SYMBOL> [fresh-transport-directory]`. Deliver transport at a standalone top-level path in a fresh writable location, outside existing SOD output directories; verify existence, readability, and unchanged content before success. On write failure, the caller retries only the preserved serialized bytes at a fresh path. Neither CLI automatically retries. See the [standalone trade-card deliverable specification](docs/sod/ExecutionOS_V2.4_Manual_Trade_Card_Deliverable_Spec_v1.0.md).
+Use the [transport-shape example](examples/manual-trade-card-analysis.template.json), not a copied candidate schema. The optional `v24:manual-trade-card-analysis` serializer accepts `<authored-trade-card.json> <YYYY-MM-DD> <SYMBOL> [fresh-transport-directory]`. Keep transport in a fresh directory separate from every completed package; the default uses the date container's dedicated `ad-hoc-transport/` subtree. Verify existence, readability, and unchanged content before success. On write failure, the caller retries only the preserved serialized bytes at a fresh path. Neither CLI automatically retries. See the [standalone trade-card deliverable specification](docs/sod/ExecutionOS_V2.4_Manual_Trade_Card_Deliverable_Spec_v1.0.md).
 
-Standard standalone trade-card output layout:
+Ad-hoc packages share the applicable SOD trading-date container. They can be generated before the SOD report; doing so creates only the date/ad-hoc hierarchy and does not reserve or create `sod-package/`. Distinct transport bytes receive distinct content-addressed package directories, including repeated same-symbol requests.
+
+Standard combined output layout:
 
 ```text
-~/Downloads/ExecutionOS/TradeCards/YYYY-MM-DD/
-├── SYMBOL/
-│   ├── trade-card.html
-│   ├── candidate-delivery-status.json
-│   └── 01-<safe-candidateId>.json       # only when DELIVERED
-└── SYMBOL-transport/
-    └── manual-trade-card-analysis-YYYY-MM-DD-SYMBOL.json
+~/Downloads/ExecutionOS/SOD/YYYY-MM-DD/
+├── sod-package/                         # may be created before or after ad-hoc
+├── ad-hoc/
+│   └── SYMBOL-<content-key>/
+│       ├── trade-card.html
+│       ├── candidate-delivery-status.json
+│       └── individual-candidates/       # exactly one file when DELIVERED
+└── ad-hoc-transport/
+    └── SYMBOL-<content-key>/
+        └── manual-trade-card-analysis-YYYY-MM-DD-SYMBOL.json
 ```
 
 ### Manual output path rules
 
-The final output-directory argument is optional on both manual serializers and both manual packagers. Package defaults come only from the standard transport **filename** (valid calendar date and, for trade cards, a safe uppercase symbol label), never the clock or candidate fields. Labels do not rewrite or validate authored dates/symbols; authors must keep them consistent. An undated or renamed input still works with an explicit output directory. The `-TRANSPORT` suffix (case-insensitive) is reserved for transport-directory naming only in default trade-card path derivation; labels such as `NVDA-TRANSPORT` require explicit output directories for transport and package destinations.
+The final output-directory argument is optional on both manual serializers and both manual packagers. SOD defaults use the standard transport filename. Ad-hoc defaults use that filename's valid date/safe uppercase symbol plus a content key derived from the exact serialized transport bytes—never the clock or candidate fields. Labels do not rewrite or validate authored dates/symbols; authors must keep them consistent. An undated or renamed input still works with an explicit output directory. The `-TRANSPORT` suffix (case-insensitive) is reserved for transport-directory naming only in default trade-card path derivation; labels such as `NVDA-TRANSPORT` require explicit output directories for transport and package destinations.
 
-Transport defaults use a fresh sibling directory so the transport never occupies an existing or future package directory. Both default transport directories and package directories must be absent, including empty directories and symlinks. A repeated run fails; there is no overwrite, auto-suffix, automatic retry, or silent fallback. For a new version or write-only recovery, supply an explicit fresh output directory as the last argument; preserve and verify the existing serialized analysis. Explicit transport destinations retain their existing exclusive-file behavior. Never choose an existing package as a transport destination.
+Transport defaults use a fresh dedicated directory inside the trading-date container so transport never occupies a completed package. Both default transport directories and package directories must be absent, including empty directories and symlinks. Repeating identical bytes fails instead of overwriting; changed bytes receive a different ad-hoc content key. There is no automatic retry or silent fallback. For write-only recovery, supply an explicit fresh output directory as the last argument; preserve and verify the existing serialized analysis. Explicit transport destinations retain their existing exclusive-file behavior. Never choose an existing package as a transport destination.
 
 CLI input and output paths expand `~` or `~/` using the current user's home directory, including when quoted; `~otheruser` is rejected. Default mode requires an existing writable `~/Downloads` directory. Missing/unavailable Downloads fails clearly and allows an explicit destination override. Other filesystem errors name the failing path; partial or interrupted output must be retried at a new path. Programmatic writer APIs still require explicit output paths. No changes to automated Production SOD, analysis, validator gating, Manual Import, PRETRADE, permission checks, ARM, execution, or broker authority.
 

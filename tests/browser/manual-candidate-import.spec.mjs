@@ -170,7 +170,14 @@ test('dated SOD package loads locally and imports only explicitly selected candi
   });
   const loaded = [first, second].map((candidate, index) => {
     const raw = JSON.stringify(bundle(candidate));
-    return { filename: `0${index + 1}-${candidate.candidateId}.json`, byteLength: Buffer.byteLength(raw), raw };
+    return {
+      filename: `0${index + 1}-${candidate.candidateId}.json`,
+      byteLength: Buffer.byteLength(raw),
+      raw,
+      sourceKind: index === 0 ? 'SOD' : 'AD_HOC',
+      packageId: index === 0 ? 'sod-package' : 'AMD-card',
+      packageDirectory: `/Users/test/Downloads/ExecutionOS/SOD/${sourceDate}/${index === 0 ? 'sod-package' : 'ad-hoc/AMD-card'}`,
+    };
   });
   const imports = [];
   let loads = 0;
@@ -181,13 +188,26 @@ test('dated SOD package loads locally and imports only explicitly selected candi
       sourceDate,
       packageDirectory: `/Users/test/Downloads/ExecutionOS/SOD/${sourceDate}`,
       delivery: { status: 'DELIVERED', reason: 'CURRENT_LOCAL_VALIDATOR_PASSED', message: 'Two candidates are ready for review.' },
+      packages: [
+        {
+          sourceKind: 'SOD', packageId: 'sod-package',
+          packageDirectory: `/Users/test/Downloads/ExecutionOS/SOD/${sourceDate}/sod-package`,
+          delivery: { status: 'DELIVERED', reason: 'CURRENT_LOCAL_VALIDATOR_PASSED', message: 'ready' },
+        },
+        {
+          sourceKind: 'AD_HOC', packageId: 'AMD-card',
+          packageDirectory: `/Users/test/Downloads/ExecutionOS/SOD/${sourceDate}/ad-hoc/AMD-card`,
+          delivery: { status: 'DELIVERED', reason: 'CURRENT_LOCAL_VALIDATOR_PASSED', message: 'ready' },
+        },
+      ],
       candidates: loaded,
     } });
   });
-  await page.route('**/api/candidates/import', route => {
+  await page.route('**/api/candidates/import', async route => {
     const body = route.request().postDataJSON();
     imports.push(body);
     const candidate = body.candidates[0];
+    await page.evaluate((value) => { window.__pretradeCandidates = [{ ...value, lifecycleState: 'EXPIRED' }]; }, candidate);
     return route.fulfill({ status: 200, json: { outcomes: [{
       status: 'ACCEPTED', lifecycleState: 'WAITING', candidateId: candidate.candidateId, contractVersion: candidate.contractVersion,
     }] } });
@@ -197,14 +217,26 @@ test('dated SOD package loads locally and imports only explicitly selected candi
   await page.getByRole('button', { name: 'Load SOD candidates', exact: true }).click();
   await expect(page.getByText('DELIVERED · 2 candidates')).toBeVisible();
   await expect(page.getByText('NO AI API CALL')).toBeVisible();
+  await expect(page.getByText('SOD', { exact: true })).toBeVisible();
+  await expect(page.getByText('AD-HOC', { exact: true })).toBeVisible();
   expect(loads).toBe(1);
   expect(imports).toHaveLength(0);
 
-  await page.getByLabel('Select AMD candidate').uncheck();
+  await expect(page.getByRole('button', { name: 'Import selected into PRETRADE (0)', exact: true })).toBeDisabled();
+  await page.getByLabel('Select NVDA candidate').check();
   await page.getByRole('button', { name: 'Import selected into PRETRADE (1)', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('ACCEPTED · WAITING');
+  await expect(page.getByRole('status')).toContainText('Admission: ACCEPTED');
+  await expect(page.getByRole('status')).toContainText('Receipt lifecycle: WAITING');
+  await expect(page.getByRole('status')).toContainText('Current PRETRADE lifecycle: EXPIRED');
   expect(imports).toHaveLength(1);
   expect(imports[0]).toEqual(bundle(first));
+  await expect(page.getByLabel('Select AMD candidate')).not.toBeChecked();
+  const generatedIntake = page.getByLabel('Generated SOD candidate intake');
+  await generatedIntake.getByRole('button', { name: 'Select all', exact: true }).click();
+  await expect(page.getByLabel('Select AMD candidate')).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Import selected into PRETRADE (1)', exact: true })).toBeEnabled();
+  await generatedIntake.getByRole('button', { name: 'Clear selection', exact: true }).click();
+  await expect(page.getByLabel('Select AMD candidate')).not.toBeChecked();
   await expect(page.getByRole('button', { name: 'Open PRETRADE' })).toBeVisible();
 });
 

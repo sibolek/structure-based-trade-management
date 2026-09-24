@@ -29,19 +29,21 @@ ChatGPT/manual SOD authoring **must emit `manual-sod-analysis-YYYY-MM-DD.json` a
 
 ```text
 ~/Downloads/ExecutionOS/SOD/
-├── YYYY-MM-DD/
-│   ├── report.md
-│   ├── report.html
-│   ├── dashboard.html
-│   ├── candidate-delivery-status.json
-│   └── individual-candidates/          # only when DELIVERED
-└── YYYY-MM-DD-transport/
-    └── manual-sod-analysis-YYYY-MM-DD.json
+└── YYYY-MM-DD/
+    ├── sod-package/
+    │   ├── report.md
+    │   ├── report.html
+    │   ├── dashboard.html
+    │   ├── candidate-delivery-status.json
+    │   └── individual-candidates/      # only when DELIVERED
+    ├── sod-package-transport/
+    │   └── manual-sod-analysis-YYYY-MM-DD.json
+    └── ad-hoc/                         # optional standalone cards for the same date
 ```
 
-The final output-directory argument is optional on both manual serializers and both manual packagers. Package defaults come only from the standard transport **filename** (valid calendar date and, for trade cards, a safe uppercase symbol label), never the clock or candidate fields. Labels do not rewrite or validate authored dates/symbols; authors must keep them consistent. An undated or renamed input still works with an explicit output directory. The `-TRANSPORT` suffix (case-insensitive) is reserved for transport-directory naming only in default trade-card path derivation; labels such as `NVDA-TRANSPORT` require explicit output directories for transport and package destinations.
+The final output-directory argument is optional on both manual serializers and both manual packagers. SOD defaults use the standard transport filename. Ad-hoc defaults use that filename's valid date/safe uppercase symbol plus a content key derived from the exact serialized transport bytes—never the clock or candidate fields. Labels do not rewrite or validate authored dates/symbols; authors must keep them consistent. An undated or renamed input still works with an explicit output directory. The `-TRANSPORT` suffix remains reserved for transport-directory naming in default trade-card paths.
 
-Transport defaults use a fresh sibling directory so the transport never occupies an existing or future package directory. Both default transport directories and package directories must be absent, including empty directories and symlinks. A repeated run fails; there is no overwrite, auto-suffix, automatic retry, or silent fallback. For a new version or write-only recovery, supply an explicit fresh output directory as the last argument; preserve and verify the existing serialized analysis. Explicit transport destinations retain their existing exclusive-file behavior. Never choose an existing package as a transport destination.
+Transport defaults use a fresh dedicated directory inside the trading-date container so transport never occupies a completed package. Both default transport directories and package directories must be absent, including empty directories and symlinks. Repeating identical bytes fails instead of overwriting; changed ad-hoc bytes receive a different content key. There is no automatic retry or silent fallback. For write-only recovery, supply an explicit fresh output directory as the last argument; preserve and verify the existing serialized analysis. Explicit transport destinations retain their existing exclusive-file behavior. Never choose an existing package as a transport destination.
 
 CLI input and output paths expand `~` or `~/` using the current user's home directory, including when quoted; `~otheruser` is rejected. Default mode requires an existing writable `~/Downloads` directory. Missing/unavailable Downloads fails clearly and allows an explicit destination override. Other filesystem errors name the failing path; partial or interrupted output must be retried at a new path. Programmatic writer APIs still require explicit output paths. No changes to automated Production SOD, analysis, validator gating, Manual Import, PRETRADE, permission checks, ARM, execution, or broker authority.
 
@@ -49,7 +51,7 @@ CLI input and output paths expand `~` or `~/` using the current user's home dire
 
 This is a standing requirement for every ordinary “Create today's Start of Day report” request; the user must not need to request the transport separately.
 
-1. Preserve the completed analysis and serialize its transport once. Emit `manual-sod-analysis-YYYY-MM-DD.json` as a **standalone top-level downloadable artifact in a fresh writable location**, separate from the report package. Never put it inside an existing SOD output directory. For example, use `/mnt/data/manual-sod-analysis-2026-09-16.json` when that path is unused and writable, or the root of a newly created unique transport staging directory. Locally, use a fresh transport directory and a separate fresh report-package directory.
+1. Preserve the completed analysis and serialize its transport once. Emit `manual-sod-analysis-YYYY-MM-DD.json` as a **standalone top-level downloadable artifact in a fresh writable directory**, separate from the report package. For example, use `/mnt/data/manual-sod-analysis-2026-09-16.json` when that path is unused and writable, or the root of a newly created unique transport staging directory. Locally, the default uses `sod-package-transport/` beside the separate `sod-package/` directory within the selected date container.
 2. Before reporting transport success, verify that the exact returned path exists as a regular file, reopen it for reading, and parse its JSON. Check that the read-back transport matches the preserved analysis (`artifactContent`, `candidateProposals`, and `bundleMetadata`). Provide the verified downloadable path alongside the normal report deliverables. A planned path or serializer success message alone is not verification.
 3. On a filesystem permission or write failure, retain the same serialized transport and **retry only the write** in a new writable top-level location or newly created unique transport directory. Keep the standard dated filename there. Do not regenerate analysis, re-fetch data, alter trade/report content, dates, or metadata, rerun candidate authoring, or overwrite an existing artifact to work around a filesystem error. Verify the retry by the same read-back checks. Input/serialization errors are separate from filesystem recovery; do not hide them by changing paths.
 4. If no writable location succeeds, report transport delivery as incomplete with the actual filesystem error; do not claim a completed SOD package or provide an unverified download. Preserve the authored analysis for a later write-only retry. Once the transport is verified, run the existing packager into its own fresh directory and report its actual candidate-delivery status separately.
@@ -67,7 +69,7 @@ For already-authored data saved under another filename, the optional local seria
 ```sh
 npm run v24:manual-sod-analysis -- authored-sod.json 2026-09-16
 # Perform the required existence/read-back/content checks above before packaging.
-npm run v24:manual-sod-package -- ~/Downloads/ExecutionOS/SOD/2026-09-16-transport/manual-sod-analysis-2026-09-16.json
+npm run v24:manual-sod-package -- ~/Downloads/ExecutionOS/SOD/2026-09-16/sod-package-transport/manual-sod-analysis-2026-09-16.json
 ```
 
 If ChatGPT already supplied the correctly named transport file, only the packager command is needed, with that file's actual location. These dates are examples; choose the actual analysis session date and a fresh package directory each morning.
@@ -159,13 +161,15 @@ Manual SOD → individual `MANUAL_AUTHORIZED` candidate bundle → existing Manu
 ExecutionOS also provides a local dated-package loader for this same manual boundary. Select the SOD trading date and choose **Load SOD candidates**. The local PRETRADE service reads only:
 
 ```text
-~/Downloads/ExecutionOS/SOD/<YYYY-MM-DD>/candidate-delivery-status.json
-~/Downloads/ExecutionOS/SOD/<YYYY-MM-DD>/individual-candidates/*.json
+~/Downloads/ExecutionOS/SOD/<YYYY-MM-DD>/sod-package/candidate-delivery-status.json
+~/Downloads/ExecutionOS/SOD/<YYYY-MM-DD>/sod-package/individual-candidates/*.json
+~/Downloads/ExecutionOS/SOD/<YYYY-MM-DD>/ad-hoc/<package>/candidate-delivery-status.json
+~/Downloads/ExecutionOS/SOD/<YYYY-MM-DD>/ad-hoc/<package>/individual-candidates/*.json
 ```
 
-The root may be overridden with an absolute path or `~/` path through `EXECUTIONOS_MANUAL_SOD_ROOT`. The loader validates the date, real directories, delivery manifest, file count and exact manifest filenames; rejects links, stale/unlisted JSON, duplicates, oversized files, source-date substitution and any candidate that fails the current manual SOD delivery gate; and returns an in-memory snapshot for review. `NO_CANDIDATES` and `WITHHELD` remain non-importing outcomes. It never reads the transport JSON as a candidate.
+The root may be overridden with an absolute path or `~/` path through `EXECUTIONOS_MANUAL_SOD_ROOT`. The loader aggregates the sealed SOD package and independently sealed ad-hoc packages for the selected date. It validates real directories, each delivery manifest, file count and exact manifest filenames; rejects links, stale/unlisted JSON, duplicate identities, oversized files, source-date substitution and any candidate that fails the current manual SOD delivery gate; and returns an in-memory snapshot for review. Incomplete, `NO_CANDIDATES`, and `WITHHELD` packages never contribute importable candidates. It never reads transport JSON as a candidate. Existing legacy date-root SOD packages remain readable when no current `sod-package/` exists.
 
-Loading is read-only and performs no PRETRADE lifecycle reconciliation or candidate admission. After review, **Import selected into PRETRADE** submits each selected original one-candidate bundle through the existing canonical manual import endpoint. The UI binds every result to the selected candidate identity and version. No OpenAI/provider call, chart upload, report generation, ARM, handoff, execution or broker write occurs in this flow.
+Loading is read-only and performs no PRETRADE lifecycle reconciliation or candidate admission. Candidates start unchecked; the operator may select one, a subset, or **Select all**, then **Import selected into PRETRADE** submits each selected original one-candidate bundle through the existing canonical manual import endpoint. The UI identifies SOD versus ad-hoc packages, binds every admission result to the exact candidate identity/version, and displays refreshed canonical lifecycle separately from the original receipt. No OpenAI/provider call, chart upload, report generation, ARM, handoff, execution or broker write occurs in this flow.
 
 The policy selects the existing manual admission path. It grants no activation, permission, risk approval, ARM authorization, Execution Board trade/handoff, or broker authority. Operator decision, permission/risk evaluation, and manual ARM remain separate existing actions. Do not import through a new repository or alter the manual import adapter to inject missing policies.
 

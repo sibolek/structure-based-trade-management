@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { CheckCircle2, FolderSearch, LoaderCircle, ShieldCheck } from "lucide-react";
+import { CheckCircle2, FolderSearch, ListChecks, LoaderCircle, ShieldCheck, Square } from "lucide-react";
 
 import { manualImportError, manualImportOutcomeLabel } from "../pretrade/manual-candidate-import.js";
 import {
@@ -62,9 +62,11 @@ export default function ManualSodDirectoryImport({
         items: prepared.candidates.map((candidate) => ({
           ...candidate,
           key: `${candidate.prepared.candidate.candidateId}:${candidate.prepared.candidate.contractVersion}`,
-          selected: true,
+          selected: false,
           busy: false,
           result: null,
+          currentLifecycleState: null,
+          lifecycleRefreshError: "",
           error: "",
         })),
       });
@@ -76,6 +78,13 @@ export default function ManualSodDirectoryImport({
     } finally {
       if (generation.current === requestGeneration) setLoading(false);
     }
+  }
+
+  function selectPending(selected) {
+    setLoaded((value) => value ? {
+      ...value,
+      items: value.items.map((item) => item.result || item.busy ? item : { ...item, selected }),
+    } : value);
   }
 
   async function importSelected() {
@@ -96,7 +105,36 @@ export default function ManualSodDirectoryImport({
           updateItem(item.key, { busy: false, error: manualImportError(importError) });
         }
       }
-      await pretrade.refreshNow?.().catch(() => {});
+      try {
+        const refreshed = await pretrade.refreshNow?.();
+        const canonical = Array.isArray(refreshed?.state?.candidates) ? refreshed.state.candidates : [];
+        setLoaded((value) => value ? {
+          ...value,
+          items: value.items.map((item) => {
+            const outcome = item.result?.outcomes?.[0];
+            if (!outcome) return item;
+            if (!["ACCEPTED", "DUPLICATE"].includes(outcome.status)) {
+              return { ...item, currentLifecycleState: "NOT_ADMITTED", lifecycleRefreshError: "" };
+            }
+            const current = canonical.find((candidate) => (
+              candidate?.candidateId === item.prepared.candidate.candidateId
+              && Number(candidate?.contractVersion) === Number(item.prepared.candidate.contractVersion)
+            ));
+            return current
+              ? { ...item, currentLifecycleState: current.lifecycleState || "UNKNOWN", lifecycleRefreshError: "" }
+              : { ...item, currentLifecycleState: "UNKNOWN", lifecycleRefreshError: "Canonical PRETRADE state did not return this admitted candidate." };
+          }),
+        } : value);
+      } catch (refreshError) {
+        setLoaded((value) => value ? {
+          ...value,
+          items: value.items.map((item) => item.result ? {
+            ...item,
+            currentLifecycleState: "UNKNOWN",
+            lifecycleRefreshError: manualImportError(refreshError),
+          } : item),
+        } : value);
+      }
     } finally {
       submitting.current = false;
       setImporting(false);
@@ -136,7 +174,7 @@ export default function ManualSodDirectoryImport({
           {loading ? <LoaderCircle size={15} className="animate-spin" /> : <FolderSearch size={15} />}
           {loading ? "Loading…" : "Load SOD candidates"}
         </button>
-        <p className="max-w-xl text-xs text-zinc-500">Expected folder: ~/Downloads/ExecutionOS/SOD/{sourceDate || "YYYY-MM-DD"}/individual-candidates</p>
+        <p className="max-w-xl text-xs text-zinc-500">Expected folder: ~/Downloads/ExecutionOS/SOD/{sourceDate || "YYYY-MM-DD"}/ with optional sod-package and ad-hoc packages</p>
       </div>
 
       {error ? <p role="alert" className="mx-4 mb-4 rounded border border-amber-400/30 p-3 text-sm text-amber-200">{error}</p> : null}
@@ -150,15 +188,33 @@ export default function ManualSodDirectoryImport({
               <p className="mt-1 break-all font-mono text-[11px] text-zinc-600">{currentPackage.packageDirectory}</p>
             </div>
             {items.length ? (
-              <button
-                type="button"
-                disabled={importing || !pretrade?.connected || pendingSelected.length === 0}
-                onClick={importSelected}
-                className="inline-flex items-center gap-2 rounded border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-sm font-semibold text-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {importing ? <LoaderCircle size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
-                {importing ? "Importing…" : `Import selected into PRETRADE (${pendingSelected.length})`}
-              </button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={importing || items.every((item) => item.result || item.busy)}
+                  onClick={() => selectPending(true)}
+                  className="inline-flex items-center gap-1.5 rounded border border-white/15 bg-white/[0.03] px-2.5 py-2 text-xs text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ListChecks size={14} /> Select all
+                </button>
+                <button
+                  type="button"
+                  disabled={importing || !items.some((item) => item.selected && !item.result)}
+                  onClick={() => selectPending(false)}
+                  className="inline-flex items-center gap-1.5 rounded border border-white/15 bg-white/[0.03] px-2.5 py-2 text-xs text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Square size={14} /> Clear selection
+                </button>
+                <button
+                  type="button"
+                  disabled={importing || !pretrade?.connected || pendingSelected.length === 0}
+                  onClick={importSelected}
+                  className="inline-flex items-center gap-2 rounded border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-sm font-semibold text-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {importing ? <LoaderCircle size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                  {importing ? "Importing…" : `Import selected into PRETRADE (${pendingSelected.length})`}
+                </button>
+              </div>
             ) : null}
           </div>
 
@@ -183,11 +239,14 @@ export default function ManualSodDirectoryImport({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <h3 className="font-semibold text-zinc-100">{candidate.symbol} · {candidate.direction}</h3>
-                          <span className="font-mono text-[11px] text-zinc-500">v{candidate.contractVersion}</span>
+                          <span className="flex items-center gap-2">
+                            <span className="rounded border border-sky-400/20 bg-sky-400/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-100">{item.sourceKind === "AD_HOC" ? "AD-HOC" : "SOD"}</span>
+                            <span className="font-mono text-[11px] text-zinc-500">v{candidate.contractVersion}</span>
+                          </span>
                         </div>
                         <p className="mt-1 text-sm text-zinc-300">{field(candidate.setup)}</p>
                         <p className="mt-1 break-all text-[11px] text-zinc-500">{candidate.candidateId}</p>
-                        <p className="mt-1 truncate font-mono text-[10px] text-zinc-600">{item.filename} · {item.byteLength} bytes</p>
+                        <p className="mt-1 truncate font-mono text-[10px] text-zinc-600">{item.packageId}/{item.filename} · {item.byteLength} bytes</p>
                         <details className="mt-2 text-xs text-zinc-400">
                           <summary className="cursor-pointer text-zinc-300">Review trade structure</summary>
                           <dl className="mt-2 grid gap-2">
@@ -200,8 +259,11 @@ export default function ManualSodDirectoryImport({
                     </div>
                     {outcome ? (
                       <div role="status" className={`mt-3 rounded border p-2 text-xs ${resultTone(outcome.status)}`}>
-                        {manualImportOutcomeLabel(outcome.status)} · {outcome.status}{outcome.lifecycleState ? ` · ${outcome.lifecycleState}` : ""}
+                        <p>{manualImportOutcomeLabel(outcome.status)} · Admission: {outcome.status}</p>
+                        {outcome.lifecycleState ? <p className="mt-1">Receipt lifecycle: {outcome.lifecycleState}</p> : null}
+                        <p className="mt-1">Current PRETRADE lifecycle: {item.currentLifecycleState || "REFRESHING"}</p>
                         {(outcome.reasons || []).slice(0, 10).map((reason, index) => <p key={index} className="mt-1">{String(reason).slice(0, 500)}</p>)}
+                        {item.lifecycleRefreshError ? <p className="mt-1 text-amber-200">{item.lifecycleRefreshError}</p> : null}
                       </div>
                     ) : null}
                     {item.error ? <p role="alert" className="mt-3 rounded border border-amber-400/30 p-2 text-xs text-amber-200">{item.error}</p> : null}

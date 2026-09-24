@@ -66,26 +66,161 @@ async function requireDirectory(directoryPath, { missingCode, invalidCode, label
   }
 }
 
-function parseStatus(raw) {
+function parseStatus(raw, label = "candidate delivery status") {
   let status;
   try {
     status = parseCandidateJson(raw);
   } catch (error) {
-    throw directoryError("The SOD candidate delivery status is not valid JSON.", "MANUAL_SOD_STATUS_INVALID", error);
+    throw directoryError(`The ${label} is not valid JSON.`, "MANUAL_SOD_STATUS_INVALID", error);
   }
   if (!plainObject(status)
-    || !["DELIVERED", "NO_CANDIDATES", "WITHHELD"].includes(status.status)
-    || typeof status.reason !== "string"
+    || !["PENDING", "DELIVERED", "NO_CANDIDATES", "WITHHELD"].includes(status.status)
+    || (status.status !== "PENDING" && typeof status.reason !== "string")
     || typeof status.message !== "string"
     || !Array.isArray(status.files)
     || status.files.some((value) => typeof value !== "string" || !value.trim())) {
-    throw directoryError("The SOD candidate delivery status is invalid.", "MANUAL_SOD_STATUS_INVALID");
+    throw directoryError(`The ${label} is invalid.`, "MANUAL_SOD_STATUS_INVALID");
   }
   return status;
 }
 
 function sorted(values) {
   return [...values].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+}
+
+async function directoryKind(directoryPath) {
+  try {
+    const stat = await fs.lstat(directoryPath);
+    if (stat.isSymbolicLink()) return "link";
+    return stat.isDirectory() ? "directory" : "other";
+  } catch (error) {
+    if (error?.code === "ENOENT") return "missing";
+    throw error;
+  }
+}
+
+async function fileKind(filePath) {
+  try {
+    const stat = await fs.lstat(filePath);
+    if (stat.isSymbolicLink()) return "link";
+    return stat.isFile() ? "file" : "other";
+  } catch (error) {
+    if (error?.code === "ENOENT") return "missing";
+    throw error;
+  }
+}
+
+async function readCandidatePackage({ packageDirectory, sourceDate, sourceKind, packageId, allowIncomplete = false }) {
+  const candidateDirectory = path.join(packageDirectory, "individual-candidates");
+  const statusPath = path.join(packageDirectory, "candidate-delivery-status.json");
+  await requireDirectory(packageDirectory, {
+    missingCode: "MANUAL_SOD_PACKAGE_NOT_FOUND",
+    invalidCode: "MANUAL_SOD_PACKAGE_INVALID",
+    label: `The ${sourceKind.toLowerCase()} candidate package ${packageId}`,
+  });
+
+  if (await fileKind(statusPath) === "missing") {
+    if (allowIncomplete) {
+      return {
+        sourceKind, packageId, packageDirectory,
+        delivery: { status: "PENDING", reason: "DELIVERY_PENDING", message: "Candidate delivery is incomplete; no candidate is ready for Import." },
+        candidates: [], totalBytes: 0,
+      };
+    }
+    throw directoryError("The candidate delivery status was not found.", "MANUAL_SOD_STATUS_INVALID");
+  }
+
+  const status = parseStatus(await readRegularFile(statusPath, {
+    maxBytes: MAX_MANUAL_SOD_STATUS_BYTES,
+    invalidCode: "MANUAL_SOD_STATUS_INVALID",
+    label: `The ${sourceKind.toLowerCase()} candidate delivery status`,
+  }), `${sourceKind.toLowerCase()} candidate delivery status`);
+
+  if (status.status === "PENDING") {
+    if (!allowIncomplete || status.files.length) {
+      throw directoryError("An incomplete candidate package is inconsistent.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+    }
+    return {
+      sourceKind, packageId, packageDirectory,
+      delivery: { status: "PENDING", reason: "DELIVERY_PENDING", message: status.message },
+      candidates: [], totalBytes: 0,
+    };
+  }
+
+  if (status.status !== "DELIVERED") {
+    if (status.files.length) {
+      throw directoryError("A non-delivered candidate package may not name candidate files.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+    }
+    const kind = await directoryKind(candidateDirectory);
+    if (["link", "other"].includes(kind)) {
+      throw directoryError("The individual-candidates path must be a real directory.", "MANUAL_SOD_CANDIDATE_DIRECTORY_INVALID");
+    }
+    if (kind === "directory") {
+      const staleEntries = await fs.readdir(candidateDirectory);
+      if (staleEntries.some((name) => name.toLowerCase().endsWith(".json"))) {
+        throw directoryError("A non-delivered candidate package contains unexpected candidate JSON.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+      }
+    }
+    return {
+      sourceKind, packageId, packageDirectory,
+      delivery: { status: status.status, reason: status.reason, message: status.message },
+      candidates: [], totalBytes: 0,
+    };
+  }
+
+  await requireDirectory(candidateDirectory, {
+    missingCode: "MANUAL_SOD_CANDIDATE_DIRECTORY_NOT_FOUND",
+    invalidCode: "MANUAL_SOD_CANDIDATE_DIRECTORY_INVALID",
+    label: `The ${sourceKind.toLowerCase()} individual-candidates directory`,
+  });
+  const entries = await fs.readdir(candidateDirectory, { withFileTypes: true });
+  const jsonEntries = entries.filter((entry) => entry.name.toLowerCase().endsWith(".json"));
+  if (!jsonEntries.length || jsonEntries.length > MAX_MANUAL_SOD_CANDIDATES) {
+    throw directoryError("The delivered candidate package has an invalid candidate-file count.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+  }
+  if (sourceKind === "AD_HOC" && jsonEntries.length !== 1) {
+    throw directoryError("An ad-hoc trade-card package must contain exactly one candidate.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+  }
+  if (jsonEntries.some((entry) => !entry.isFile() || entry.isSymbolicLink())) {
+    throw directoryError("Candidate entries must be regular JSON files.", "MANUAL_SOD_CANDIDATE_FILE_INVALID");
+  }
+
+  const actualNames = sorted(jsonEntries.map((entry) => entry.name));
+  const expectedNames = sorted(status.files.map((file) => path.basename(file)));
+  if (new Set(expectedNames).size !== expectedNames.length
+    || actualNames.length !== expectedNames.length
+    || actualNames.some((name, index) => name !== expectedNames[index])) {
+    throw directoryError("The candidate files do not match candidate-delivery-status.json.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+  }
+
+  let totalBytes = 0;
+  const candidates = [];
+  for (const filename of actualNames) {
+    const raw = await readRegularFile(path.join(candidateDirectory, filename), {
+      maxBytes: MAX_MANUAL_SOD_CANDIDATE_BYTES,
+      invalidCode: "MANUAL_SOD_CANDIDATE_FILE_INVALID",
+      label: `${sourceKind} candidate file ${filename}`,
+    });
+    const byteLength = Buffer.byteLength(raw);
+    totalBytes += byteLength;
+    let bundle;
+    try {
+      bundle = validateManualSodIndividualCandidateJson(raw);
+    } catch (error) {
+      throw directoryError(`${sourceKind} candidate file ${filename} failed current validation.`, "MANUAL_SOD_CANDIDATE_INVALID", error);
+    }
+    const candidate = bundle.candidates[0];
+    if (bundle.sourceDate !== sourceDate || candidate.sourceDate !== sourceDate) {
+      throw directoryError(`${sourceKind} candidate file ${filename} does not match the selected source date.`, "MANUAL_SOD_SOURCE_DATE_MISMATCH");
+    }
+    candidates.push({ filename, byteLength, raw, sourceKind, packageId, packageDirectory });
+  }
+
+  return {
+    sourceKind, packageId, packageDirectory,
+    delivery: { status: status.status, reason: status.reason, message: status.message },
+    candidates, totalBytes,
+  };
 }
 
 export async function readManualSodCandidatePackage({
@@ -101,8 +236,6 @@ export async function readManualSodCandidatePackage({
 
   const root = path.resolve(rootPath);
   const packageDirectory = path.join(root, sourceDate);
-  const candidateDirectory = path.join(packageDirectory, "individual-candidates");
-  const statusPath = path.join(packageDirectory, "candidate-delivery-status.json");
 
   await requireDirectory(root, {
     missingCode: "MANUAL_SOD_ROOT_NOT_FOUND",
@@ -115,95 +248,103 @@ export async function readManualSodCandidatePackage({
     label: `The ${sourceDate} SOD package`,
   });
 
-  const status = parseStatus(await readRegularFile(statusPath, {
-    maxBytes: MAX_MANUAL_SOD_STATUS_BYTES,
-    invalidCode: "MANUAL_SOD_STATUS_INVALID",
-    label: "The SOD candidate delivery status",
-  }));
-
-  if (status.status !== "DELIVERED") {
-    if (status.files.length) {
-      throw directoryError("A non-delivered SOD package may not name candidate files.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
-    }
-    try {
-      await requireDirectory(candidateDirectory, {
-        missingCode: "MANUAL_SOD_CANDIDATE_DIRECTORY_NOT_FOUND",
-        invalidCode: "MANUAL_SOD_CANDIDATE_DIRECTORY_INVALID",
-        label: "The SOD individual-candidates directory",
-      });
-      const staleEntries = await fs.readdir(candidateDirectory);
-      if (staleEntries.some((name) => name.toLowerCase().endsWith(".json"))) {
-        throw directoryError("A non-delivered SOD package contains unexpected candidate JSON.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
-      }
-    } catch (error) {
-      if (error?.code !== "MANUAL_SOD_CANDIDATE_DIRECTORY_NOT_FOUND") throw error;
-    }
-    return {
+  const packages = [];
+  const legacyStatusPath = path.join(packageDirectory, "candidate-delivery-status.json");
+  const sodPackageDirectory = path.join(packageDirectory, "sod-package");
+  const hasLegacyPackage = await fileKind(legacyStatusPath) !== "missing";
+  const sodKind = await directoryKind(sodPackageDirectory);
+  if (["link", "other"].includes(sodKind)) {
+    throw directoryError("The SOD package path must be a real directory.", "MANUAL_SOD_PACKAGE_INVALID");
+  }
+  if (hasLegacyPackage && sodKind === "directory") {
+    throw directoryError("Both legacy and current SOD packages exist for the selected date.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+  }
+  if (sodKind === "directory") {
+    packages.push(await readCandidatePackage({
+      packageDirectory: sodPackageDirectory,
       sourceDate,
+      sourceKind: "SOD",
+      packageId: "sod-package",
+      // The SOD packager creates the directory before publishing its final
+      // status. Keep already-complete ad-hoc cards visible during that window.
+      allowIncomplete: true,
+    }));
+  } else if (hasLegacyPackage) {
+    packages.push(await readCandidatePackage({
       packageDirectory,
-      delivery: { status: status.status, reason: status.reason, message: status.message },
-      candidates: [],
-    };
+      sourceDate,
+      sourceKind: "SOD",
+      packageId: "legacy-sod-package",
+    }));
   }
 
-  await requireDirectory(candidateDirectory, {
-    missingCode: "MANUAL_SOD_CANDIDATE_DIRECTORY_NOT_FOUND",
-    invalidCode: "MANUAL_SOD_CANDIDATE_DIRECTORY_INVALID",
-    label: "The SOD individual-candidates directory",
-  });
-  const entries = await fs.readdir(candidateDirectory, { withFileTypes: true });
-  const jsonEntries = entries.filter((entry) => entry.name.toLowerCase().endsWith(".json"));
-  if (!jsonEntries.length || jsonEntries.length > MAX_MANUAL_SOD_CANDIDATES) {
-    throw directoryError("The delivered SOD package has an invalid candidate-file count.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+  const adHocDirectory = path.join(packageDirectory, "ad-hoc");
+  const adHocKind = await directoryKind(adHocDirectory);
+  if (["link", "other"].includes(adHocKind)) {
+    throw directoryError("The ad-hoc package path must be a real directory.", "MANUAL_SOD_PACKAGE_INVALID");
   }
-  if (jsonEntries.some((entry) => !entry.isFile() || entry.isSymbolicLink())) {
-    throw directoryError("SOD candidate entries must be regular JSON files.", "MANUAL_SOD_CANDIDATE_FILE_INVALID");
+  if (adHocKind === "directory") {
+    const entries = await fs.readdir(adHocDirectory, { withFileTypes: true });
+    const stagingEntries = entries.filter((entry) => entry.name.startsWith(".manual-trade-card-candidate-"));
+    if (stagingEntries.some((entry) => !entry.isDirectory() || entry.isSymbolicLink())) {
+      throw directoryError("Private ad-hoc staging entries must be real directories.", "MANUAL_SOD_PACKAGE_INVALID");
+    }
+    const publishedEntries = entries.filter((entry) => !entry.name.startsWith(".manual-trade-card-candidate-"));
+    if (publishedEntries.length > MAX_MANUAL_SOD_CANDIDATES) {
+      throw directoryError("The selected date contains too many ad-hoc packages.", "MANUAL_SOD_PACKAGE_TOO_LARGE");
+    }
+    for (const entry of sorted(publishedEntries.map((value) => value.name)).map((name) => publishedEntries.find((value) => value.name === name))) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(entry.name)) {
+        throw directoryError("Ad-hoc package entries must be real, safely named directories.", "MANUAL_SOD_PACKAGE_INVALID");
+      }
+      packages.push(await readCandidatePackage({
+        packageDirectory: path.join(adHocDirectory, entry.name),
+        sourceDate,
+        sourceKind: "AD_HOC",
+        packageId: entry.name,
+        allowIncomplete: true,
+      }));
+    }
   }
 
-  const actualNames = sorted(jsonEntries.map((entry) => entry.name));
-  const expectedNames = sorted(status.files.map((file) => path.basename(file)));
-  if (new Set(expectedNames).size !== expectedNames.length
-    || actualNames.length !== expectedNames.length
-    || actualNames.some((name, index) => name !== expectedNames[index])) {
-    throw directoryError("The candidate files do not match candidate-delivery-status.json.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+  if (!packages.length) {
+    throw directoryError(`No completed SOD or ad-hoc candidate package was found for ${sourceDate}.`, "MANUAL_SOD_PACKAGE_NOT_FOUND");
   }
 
-  let totalBytes = 0;
+  const candidates = packages.flatMap((item) => item.candidates);
+  const totalBytes = packages.reduce((sum, item) => sum + item.totalBytes, 0);
+  if (candidates.length > MAX_MANUAL_SOD_CANDIDATES || totalBytes > MAX_MANUAL_SOD_TOTAL_BYTES) {
+    throw directoryError("The selected date exceeds the aggregate candidate read limit.", "MANUAL_SOD_PACKAGE_TOO_LARGE");
+  }
   const identities = new Set();
-  const candidates = [];
-  for (const filename of actualNames) {
-    const raw = await readRegularFile(path.join(candidateDirectory, filename), {
-      maxBytes: MAX_MANUAL_SOD_CANDIDATE_BYTES,
-      invalidCode: "MANUAL_SOD_CANDIDATE_FILE_INVALID",
-      label: `SOD candidate file ${filename}`,
-    });
-    totalBytes += Buffer.byteLength(raw);
-    if (totalBytes > MAX_MANUAL_SOD_TOTAL_BYTES) {
-      throw directoryError("The SOD candidate package exceeds the total read limit.", "MANUAL_SOD_PACKAGE_TOO_LARGE");
-    }
-
-    let bundle;
-    try {
-      bundle = validateManualSodIndividualCandidateJson(raw);
-    } catch (error) {
-      throw directoryError(`SOD candidate file ${filename} failed current validation.`, "MANUAL_SOD_CANDIDATE_INVALID", error);
-    }
+  for (const item of candidates) {
+    const bundle = validateManualSodIndividualCandidateJson(item.raw);
     const candidate = bundle.candidates[0];
-    if (bundle.sourceDate !== sourceDate || candidate.sourceDate !== sourceDate) {
-      throw directoryError(`SOD candidate file ${filename} does not match the selected source date.`, "MANUAL_SOD_SOURCE_DATE_MISMATCH");
-    }
     const identity = `${candidate.candidateId}\u0000${candidate.contractVersion}`;
     if (identities.has(identity)) {
-      throw directoryError("The SOD package contains a duplicate candidate identity.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
+      throw directoryError("The selected date contains a duplicate candidate identity.", "MANUAL_SOD_PACKAGE_INCONSISTENT");
     }
     identities.add(identity);
-    candidates.push({ filename, byteLength: Buffer.byteLength(raw), raw });
   }
+
+  const incomplete = packages.filter((item) => item.delivery.status === "PENDING").length;
+  const withheld = packages.filter((item) => item.delivery.status === "WITHHELD").length;
+  const deliveredPackages = packages.filter((item) => item.delivery.status === "DELIVERED").length;
+  const delivery = candidates.length
+    ? {
+        status: "DELIVERED",
+        reason: "VALIDATED_LOCAL_PACKAGES",
+        message: `${candidates.length} validated candidate${candidates.length === 1 ? "" : "s"} loaded from ${deliveredPackages} local package${deliveredPackages === 1 ? "" : "s"}.${incomplete || withheld ? ` ${incomplete + withheld} incomplete or withheld package${incomplete + withheld === 1 ? " was" : "s were"} excluded.` : ""}`,
+      }
+    : packages.some((item) => ["PENDING", "WITHHELD"].includes(item.delivery.status))
+      ? { status: "WITHHELD", reason: "NO_DELIVERED_LOCAL_CANDIDATES", message: "No candidate is ready for Import; local packages are incomplete or withheld." }
+      : { status: "NO_CANDIDATES", reason: "NO_LOCAL_CANDIDATES", message: "No SOD or ad-hoc candidates were delivered for the selected date." };
 
   return {
     sourceDate,
     packageDirectory,
-    delivery: { status: status.status, reason: status.reason, message: status.message },
+    delivery,
+    packages: packages.map(({ totalBytes: _totalBytes, candidates: _candidates, ...item }) => item),
     candidates,
   };
 }

@@ -4,7 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { manualOutputPaths, defaultManualPackageDirectory, expandManualPath } from "../schwab-bridge/manual-output-paths.mjs";
+import { manualArtifactKey, manualOutputPaths, defaultManualPackageDirectory, expandManualPath } from "../schwab-bridge/manual-output-paths.mjs";
+import { serializeManualSodAnalysis } from "../schwab-bridge/manual-sod-analysis.mjs";
+import { serializeManualTradeCardAnalysis } from "../schwab-bridge/manual-trade-card-analysis.mjs";
 import { validateManualSodIndividualCandidateJson } from "../schwab-bridge/manual-sod-deliverables.mjs";
 import { prepareManualCandidateImport } from "../src/pretrade/manual-candidate-import.js";
 import { sodArtifactContentFixture } from "./helpers/sod-artifact-content-fixture.mjs";
@@ -29,9 +31,12 @@ function run(home, kind, stage, ...args) {
 function ok(result) { assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout); }
 function source(home, data) { const file = path.join(home, "authored.json"); fs.writeFileSync(file, JSON.stringify(data)); return file; }
 function labels(kind) { return kind === "sod" ? [date] : [date, symbol]; }
-function expected(home, kind) {
-  const directory = kind === "sod" ? path.join(home, "Downloads/ExecutionOS/SOD", date) : path.join(home, "Downloads/ExecutionOS/TradeCards", date, symbol);
-  return { directory, transport: `${directory}-transport`, filename: `manual-${kind}-analysis-${date}${kind === "sod" ? "" : `-${symbol}`}.json` };
+function expected(home, kind, data = authored(kind)) {
+  const container = path.join(home, "Downloads/ExecutionOS/SOD", date);
+  const artifactKey = kind === "trade-card" ? manualArtifactKey(serializeManualTradeCardAnalysis(data)) : null;
+  const directory = kind === "sod" ? path.join(container, "sod-package") : path.join(container, "ad-hoc", `${symbol}-${artifactKey}`);
+  const transport = kind === "sod" ? path.join(container, "sod-package-transport") : path.join(container, "ad-hoc-transport", `${symbol}-${artifactKey}`);
+  return { directory, transport, filename: `manual-${kind}-analysis-${date}${kind === "sod" ? "" : `-${symbol}`}.json` };
 }
 function snapshot(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).map(entry =>
@@ -51,7 +56,7 @@ for (const kind of ["sod", "trade-card"]) {
     assert.equal(result.candidateDelivery.status, "DELIVERED");
     assert.deepEqual(JSON.parse(fs.readFileSync(result.candidateDeliveryStatusPath, "utf8")), result.candidateDelivery);
     const expectedFiles = kind === "sod" ? ["report.md", "report.html", "dashboard.html", "candidate-delivery-status.json", "individual-candidates"]
-      : ["trade-card.html", "candidate-delivery-status.json", path.basename(result.candidateDelivery.files[0])];
+      : ["trade-card.html", "candidate-delivery-status.json", "individual-candidates"];
     assert.deepEqual(fs.readdirSync(paths.directory).sort(), expectedFiles.sort());
     if (kind === "sod") assert.deepEqual(fs.readdirSync(path.join(paths.directory, "individual-candidates")).sort(), result.candidateDelivery.files.map(file => path.basename(file)).sort());
     else assert.equal(fs.readFileSync(result.htmlPath, "utf8"), data.artifactContent.html);
@@ -92,12 +97,14 @@ for (const kind of ["sod", "trade-card"]) {
     test(`${kind}: default transport and package refuse existing ${type}`, t => {
       const home = sandbox(t); const data = authored(kind); const paths = expected(home, kind); const input = source(home, data);
       fs.mkdirSync(path.dirname(paths.directory), { recursive: true });
+      fs.mkdirSync(path.dirname(paths.transport), { recursive: true });
       const target = path.join(home, "protected"); fs.mkdirSync(target);
       for (const directory of [paths.transport, paths.directory]) {
         if (type === "symlink") fs.symlinkSync(target, directory); else fs.mkdirSync(directory);
       }
       assert.match(run(home, kind, "analysis", input, ...labels(kind)).stderr, /EEXIST/);
       const named = path.join(home, paths.filename); fs.copyFileSync(input, named);
+      if (kind === "trade-card") fs.writeFileSync(named, serializeManualTradeCardAnalysis(data));
       assert.match(run(home, kind, "package", named).stderr, /EEXIST/);
       assert.deepEqual(fs.readdirSync(target), []);
     });
@@ -116,7 +123,7 @@ for (const kind of ["sod", "trade-card"]) {
       assert.equal(result.candidateDelivery.status, "WITHHELD");
       assert.equal(result.candidateDelivery.reason, defect === "missing metadata" ? "CANDIDATE_INPUT_UNAVAILABLE" : "VALIDATION_FAILED");
       assert.deepEqual(result.candidateDelivery.files, []);
-      assert.deepEqual(fs.readdirSync(expected(home, kind).directory).sort(),
+      assert.deepEqual(fs.readdirSync(expected(home, kind, data).directory).sort(),
         (kind === "sod" ? ["report.md", "report.html", "dashboard.html", "candidate-delivery-status.json"] : ["trade-card.html", "candidate-delivery-status.json"]).sort());
     });
   }
@@ -165,14 +172,17 @@ for (const reserved of ["NVDA-TRANSPORT", "nvda-transport", "NvDa-TrAnSpOrT"]) {
 
 test("trade-card: ordinary symbol keeps package and sibling transport paths", t => {
   const home = sandbox(t); t.mock.method(os, "homedir", () => home);
-  const directory = path.join(home, "Downloads", "ExecutionOS", "TradeCards", date, "NVDA");
-  assert.deepEqual(manualOutputPaths("trade-card", date, "NVDA"), {
+  const serialized = serializeManualTradeCardAnalysis(authored("trade-card"));
+  const artifactKey = manualArtifactKey(serialized);
+  const directory = path.join(home, "Downloads", "ExecutionOS", "SOD", date, "ad-hoc", `NVDA-${artifactKey}`);
+  const transport = path.join(home, "Downloads", "ExecutionOS", "SOD", date, "ad-hoc-transport", `NVDA-${artifactKey}`);
+  assert.deepEqual(manualOutputPaths("trade-card", date, "NVDA", artifactKey), {
     packageDirectory: directory,
-    transportDirectory: `${directory}-transport`,
-    analysisPath: path.join(`${directory}-transport`, `manual-trade-card-analysis-${date}-NVDA.json`),
+    transportDirectory: transport,
+    analysisPath: path.join(transport, `manual-trade-card-analysis-${date}-NVDA.json`),
   });
-  assert.equal(defaultManualPackageDirectory("trade-card", `manual-trade-card-analysis-${date}-NVDA.json`), directory);
-  assert.throws(() => defaultManualPackageDirectory("trade-card", `manual-trade-card-analysis-${date}-nvda.json`), /uppercase filename symbol/);
+  assert.equal(defaultManualPackageDirectory("trade-card", `manual-trade-card-analysis-${date}-NVDA.json`, serialized), directory);
+  assert.throws(() => defaultManualPackageDirectory("trade-card", `manual-trade-card-analysis-${date}-nvda.json`, serialized), /uppercase filename symbol/);
 });
 
 test("trade-card: reserved suffix allows explicit transport and package destinations", t => {
@@ -190,12 +200,14 @@ test("trade-card: reserved suffix allows explicit transport and package destinat
 
 test("SOD: reserved trade-card suffix does not affect default path resolution", t => {
   const home = sandbox(t); t.mock.method(os, "homedir", () => home);
-  const directory = path.join(home, "Downloads", "ExecutionOS", "SOD", date);
+  const container = path.join(home, "Downloads", "ExecutionOS", "SOD", date);
+  const directory = path.join(container, "sod-package");
+  const transport = path.join(container, "sod-package-transport");
   for (const label of [undefined, "NVDA-TRANSPORT", "nvda-transport", "NvDa-TrAnSpOrT"]) {
     assert.deepEqual(manualOutputPaths("sod", date, label), {
       packageDirectory: directory,
-      transportDirectory: `${directory}-transport`,
-      analysisPath: path.join(`${directory}-transport`, `manual-sod-analysis-${date}.json`),
+      transportDirectory: transport,
+      analysisPath: path.join(transport, `manual-sod-analysis-${date}.json`),
     });
   }
   assert.equal(defaultManualPackageDirectory("sod", `manual-sod-analysis-${date}.json`), directory);
@@ -206,7 +218,9 @@ test("default resolver uses current home and fails on permission denial without 
   assert.equal(expandManualPath("~"), home); assert.equal(expandManualPath("~/a b"), path.join(home, "a b"));
   assert.throws(() => expandManualPath("~someone/Downloads"), /current user's home/);
   assert.equal(manualOutputPaths("sod", date).packageDirectory, expected(home, "sod").directory);
-  assert.equal(manualOutputPaths("trade-card", date, symbol).packageDirectory, expected(home, "trade-card").directory);
+  const serialized = serializeManualTradeCardAnalysis(authored("trade-card"));
+  const artifactKey = manualArtifactKey(serialized);
+  assert.equal(manualOutputPaths("trade-card", date, symbol, artifactKey).packageDirectory, expected(home, "trade-card").directory);
   for (const unsafe of ["../NVDA", "/NVDA", "nvda", ".."]) assert.throws(() => manualOutputPaths("trade-card", date, unsafe), /filename symbol/);
   t.mock.method(fs, "accessSync", () => { throw Object.assign(new Error("permission denied"), { code: "EACCES" }); });
   assert.throws(() => manualOutputPaths("sod", date), /Downloads destination unavailable.*permission denied.*explicit output directory/);
@@ -218,4 +232,44 @@ test("SOD default keeps reports available when no A+ candidates exist", t => {
   const result = ok(run(home, "sod", "package", analysisPath));
   assert.equal(result.candidateDelivery.status, "NO_CANDIDATES");
   assert.equal(fs.existsSync(path.join(expected(home, "sod").directory, "individual-candidates")), false);
+});
+
+test("ad-hoc generation creates the trading-date container before SOD and the later SOD package remains independent", t => {
+  const home = sandbox(t);
+  const tradeCard = authored("trade-card");
+  const tradeAnalysis = ok(run(home, "trade-card", "analysis", source(home, tradeCard), date, symbol));
+  const tradeResult = ok(run(home, "trade-card", "package", tradeAnalysis.analysisPath));
+  const dateDirectory = path.join(home, "Downloads", "ExecutionOS", "SOD", date);
+  assert.equal(path.dirname(path.dirname(tradeResult.htmlPath)), path.join(dateDirectory, "ad-hoc"));
+  assert.equal(fs.existsSync(path.join(dateDirectory, "sod-package")), false);
+
+  const sod = authored("sod");
+  const sodSource = path.join(home, "authored-sod.json");
+  fs.writeFileSync(sodSource, JSON.stringify(sod));
+  const sodAnalysis = ok(run(home, "sod", "analysis", sodSource, date));
+  const sodResult = ok(run(home, "sod", "package", sodAnalysis.analysisPath));
+  assert.equal(path.dirname(sodResult.candidateDeliveryStatusPath), path.join(dateDirectory, "sod-package"));
+  assert.equal(fs.existsSync(tradeResult.htmlPath), true);
+  assert.deepEqual(fs.readdirSync(dateDirectory).sort(), ["ad-hoc", "ad-hoc-transport", "sod-package", "sod-package-transport"]);
+});
+
+test("distinct same-symbol ad-hoc requests receive collision-proof packages without overwriting", t => {
+  const home = sandbox(t);
+  const first = authored("trade-card");
+  const second = authored("trade-card");
+  second.artifactContent.html = second.artifactContent.html.replace("unchanged", "second idea");
+  second.candidateProposals[0].candidateId = `${second.candidateProposals[0].candidateId}-second`;
+
+  const firstSource = path.join(home, "first.json");
+  const secondSource = path.join(home, "second.json");
+  fs.writeFileSync(firstSource, JSON.stringify(first));
+  fs.writeFileSync(secondSource, JSON.stringify(second));
+  const firstAnalysis = ok(run(home, "trade-card", "analysis", firstSource, date, symbol));
+  const secondAnalysis = ok(run(home, "trade-card", "analysis", secondSource, date, symbol));
+  assert.notEqual(path.dirname(firstAnalysis.analysisPath), path.dirname(secondAnalysis.analysisPath));
+  const firstPackage = ok(run(home, "trade-card", "package", firstAnalysis.analysisPath));
+  const secondPackage = ok(run(home, "trade-card", "package", secondAnalysis.analysisPath));
+  assert.notEqual(path.dirname(firstPackage.htmlPath), path.dirname(secondPackage.htmlPath));
+  assert.equal(fs.readFileSync(firstPackage.htmlPath, "utf8"), first.artifactContent.html);
+  assert.equal(fs.readFileSync(secondPackage.htmlPath, "utf8"), second.artifactContent.html);
 });
