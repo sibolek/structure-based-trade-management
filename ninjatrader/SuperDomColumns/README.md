@@ -24,3 +24,14 @@ in NinjaTrader's built-in column.
 
 The v1 commit is the known-good baseline. Cosmetic changes should not alter the
 pulling/stacking calculations or null-safety behavior.
+
+## Version 1.1
+
+- Bid and ask values are centered within their respective column halves.
+- Bid stacking and ask pulling are lime green.
+- Bid pulling and ask stacking are red.
+- Zero values retain the configured side foreground color.
+- Values remain culture-aware signed integers, including the minus sign for
+  pulling values.
+- Pulling/stacking calculations, reset behavior, and null guards are unchanged
+  from v1.

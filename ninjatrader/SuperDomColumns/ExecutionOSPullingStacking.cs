@@ -504,17 +504,23 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 SuperDom.Font.Bold ? FontWeights.Bold : FontWeights.Normal,
                 FontStretches.Normal);
 
+            long bidValue = bidVolume.Item2;
+            Brush bidValueBrush = bidValue > 0
+                ? Brushes.LimeGreen
+                : bidValue < 0 ? Brushes.Red : BidForeColor;
+
             FormattedText bidText = new FormattedText(
-                bidVolume.Item2.ToString(Core.Globals.GeneralOptions.CurrentCulture),
+                bidValue.ToString(Core.Globals.GeneralOptions.CurrentCulture),
                 Core.Globals.GeneralOptions.CurrentCulture,
                 FlowDirection.LeftToRight,
                 currentTypeface,
                 SuperDom.Font.Size,
-                BidForeColor,
+                bidValueBrush,
                 pixelsPerDip);
 
             bidText.MaxLineCount = 1;
             bidText.MaxTextWidth = renderWidth / 2.0 - 6.0;
+            bidText.TextAlignment = TextAlignment.Center;
             bidText.Trimming = TextTrimming.CharacterEllipsis;
 
             if (heightUpdateNeeded)
@@ -526,7 +532,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             dc.DrawText(
                 bidText,
                 new Point(
-                    4.0,
+                    3.0,
                     verticalOffset + (SuperDom.ActualRowHeight - textHeight) / 2.0));
         }
 
@@ -557,17 +563,23 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 SuperDom.Font.Bold ? FontWeights.Bold : FontWeights.Normal,
                 FontStretches.Normal);
 
+            long askValue = askVolume.Item2;
+            Brush askValueBrush = askValue > 0
+                ? Brushes.Red
+                : askValue < 0 ? Brushes.LimeGreen : AskForeColor;
+
             FormattedText askText = new FormattedText(
-                askVolume.Item2.ToString(Core.Globals.GeneralOptions.CurrentCulture),
+                askValue.ToString(Core.Globals.GeneralOptions.CurrentCulture),
                 Core.Globals.GeneralOptions.CurrentCulture,
                 FlowDirection.LeftToRight,
                 currentTypeface,
                 SuperDom.Font.Size,
-                AskForeColor,
+                askValueBrush,
                 pixelsPerDip);
 
             askText.MaxLineCount = 1;
             askText.MaxTextWidth = renderWidth / 2.0 - 6.0;
+            askText.TextAlignment = TextAlignment.Center;
             askText.Trimming = TextTrimming.CharacterEllipsis;
 
             if (heightUpdateNeeded)
@@ -579,7 +591,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             dc.DrawText(
                 askText,
                 new Point(
-                    renderWidth / 2.0 + 4.0,
+                    renderWidth / 2.0 + 3.0,
                     verticalOffset + (SuperDom.ActualRowHeight - textHeight) / 2.0));
         }
 
