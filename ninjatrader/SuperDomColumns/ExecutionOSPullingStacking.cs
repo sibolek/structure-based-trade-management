@@ -24,6 +24,19 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
 {
     public class ExecutionOSPullingStacking : SuperDomColumn
     {
+        private sealed class SpoofAlertState
+        {
+            public DateTime ExpiresUtc { get; set; }
+            public bool IsEscalated { get; set; }
+        }
+
+        private sealed class SpoofCandidate
+        {
+            public long ExecutedVolume { get; set; }
+            public long PeakStackVolume { get; set; }
+            public DateTime StartedUtc { get; set; }
+        }
+
         private Dictionary<double, Timer> askNoDataResetTimers;
         private Dictionary<double, Timer> bidNoDataResetTimers;
         private Dictionary<double, Tuple<long, long>> askPriceDepthMap;
@@ -42,6 +55,14 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
         private Dictionary<string, double> mmBidPriceMap;
         private double previousAsk = double.MinValue;
         private double previousBid = double.MinValue;
+        private Dictionary<double, SpoofAlertState> askSpoofAlerts;
+        private Dictionary<double, SpoofAlertState> bidSpoofAlerts;
+        private Dictionary<double, SpoofCandidate> askSpoofCandidates;
+        private Dictionary<double, SpoofCandidate> bidSpoofCandidates;
+        private Queue<DateTime> askSpoofEvents;
+        private Queue<DateTime> bidSpoofEvents;
+        private DateTime lastSpoofSoundUtc = DateTime.MinValue;
+        private Timer spoofAlertRefreshTimer;
         private double textHeight;
         private Typeface typeFace;
 
@@ -55,6 +76,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 bidPriceDepthMap.Clear();
                 mmAskPriceMap.Clear();
                 mmBidPriceMap.Clear();
+                ClearSpoofDetectionState();
                 if (SuperDom == null || SuperDom.MarketDepth == null || SuperDom.MarketDepth.Instrument == null)
                     return;
                 lock (SuperDom.MarketDepth.Instrument.SyncMarketDepth)
@@ -75,6 +97,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 lock (collectionSync)
                 {
                     Tuple<long, long> depthTuple;
+
+                    TrackSpoofExecutions(marketData.Price, marketData.Volume);
 
                     if (askPriceDepthMap.TryGetValue(marketData.Price, out depthTuple))
                     {
@@ -142,6 +166,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                     bidPriceDepthMap.Clear();
                     mmAskPriceMap.Clear();
                     mmBidPriceMap.Clear();
+                    ClearSpoofDetectionState();
                 }
 
                 OnPropertyChanged();
@@ -163,10 +188,12 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 if (marketDepth.MarketDataType == MarketDataType.Ask)
                 {
                     ProcessAskDepth(marketDepth);
+                    TrackSpoofCandidate(marketDepth, true);
                 }
                 else if (marketDepth.MarketDataType == MarketDataType.Bid)
                 {
                     ProcessBidDepth(marketDepth);
+                    TrackSpoofCandidate(marketDepth, false);
                 }
             }
         }
@@ -351,6 +378,207 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 Timeout.Infinite);
         }
 
+        private void TrackSpoofExecutions(double price, long volume)
+        {
+            if (!SpoofDetectionEnabled || volume <= 0)
+                return;
+
+            SpoofCandidate candidate;
+            if (askSpoofCandidates.TryGetValue(price, out candidate))
+                candidate.ExecutedVolume += volume;
+            if (bidSpoofCandidates.TryGetValue(price, out candidate))
+                candidate.ExecutedVolume += volume;
+        }
+
+        private void TrackSpoofCandidate(MarketDepthEventArgs marketDepth, bool isAsk)
+        {
+            if (!SpoofDetectionEnabled)
+                return;
+
+            Dictionary<double, Tuple<long, long>> depthMap = isAsk
+                ? askPriceDepthMap
+                : bidPriceDepthMap;
+            Dictionary<double, SpoofCandidate> candidates = isAsk
+                ? askSpoofCandidates
+                : bidSpoofCandidates;
+
+            DateTime now = DateTime.UtcNow;
+            SpoofCandidate candidate;
+            if (marketDepth.Operation == Cbi.Operation.Remove)
+            {
+                if (candidates.TryGetValue(marketDepth.Price, out candidate)
+                    && (now - candidate.StartedUtc).TotalMilliseconds <= SpoofMaximumLifetimeMilliseconds
+                    && candidate.ExecutedVolume <= (long)Math.Floor(
+                        candidate.PeakStackVolume * SpoofMaximumExecutedPercent / 100.0))
+                {
+                    TriggerSpoofAlert(marketDepth.Price, isAsk, now);
+                }
+
+                candidates.Remove(marketDepth.Price);
+                return;
+            }
+
+            if (marketDepth.Operation != Cbi.Operation.Add
+                && marketDepth.Operation != Cbi.Operation.Update)
+            {
+                return;
+            }
+
+            Tuple<long, long> depth;
+            if (!depthMap.TryGetValue(marketDepth.Price, out depth))
+                return;
+
+            if (candidates.TryGetValue(marketDepth.Price, out candidate))
+            {
+                double ageMilliseconds = (now - candidate.StartedUtc).TotalMilliseconds;
+                if (ageMilliseconds > SpoofMaximumLifetimeMilliseconds)
+                {
+                    candidates.Remove(marketDepth.Price);
+                    candidate = null;
+                }
+                else
+                {
+                    if (depth.Item2 > candidate.PeakStackVolume)
+                        candidate.PeakStackVolume = depth.Item2;
+
+                    long requiredPull = (long)Math.Ceiling(
+                        candidate.PeakStackVolume * SpoofPullPercent / 100.0);
+                    long pulledVolume = candidate.PeakStackVolume - depth.Item2;
+                    long maximumExecuted = (long)Math.Floor(
+                        candidate.PeakStackVolume * SpoofMaximumExecutedPercent / 100.0);
+
+                    if (pulledVolume >= requiredPull
+                        && candidate.ExecutedVolume <= maximumExecuted)
+                    {
+                        TriggerSpoofAlert(marketDepth.Price, isAsk, now);
+                        candidates.Remove(marketDepth.Price);
+                        return;
+                    }
+                }
+            }
+
+            if (candidate == null
+                && marketDepth.Position >= 0
+                && marketDepth.Position < SpoofMaximumDepthLevels
+                && depth.Item2 >= SpoofMinimumStackVolume)
+            {
+                candidates[marketDepth.Price] = new SpoofCandidate
+                {
+                    PeakStackVolume = depth.Item2,
+                    StartedUtc = now
+                };
+            }
+        }
+
+        private void TriggerSpoofAlert(double price, bool isAsk, DateTime now)
+        {
+            Queue<DateTime> events = isAsk ? askSpoofEvents : bidSpoofEvents;
+            while (events.Count > 0
+                && (now - events.Peek()).TotalMilliseconds > SpoofRepeatWindowMilliseconds)
+            {
+                events.Dequeue();
+            }
+
+            events.Enqueue(now);
+
+            Dictionary<double, SpoofAlertState> alerts = isAsk
+                ? askSpoofAlerts
+                : bidSpoofAlerts;
+            alerts[price] = new SpoofAlertState
+            {
+                ExpiresUtc = now.AddMilliseconds(SpoofAlertDisplayMilliseconds),
+                IsEscalated = events.Count >= 2
+            };
+
+            PlaySpoofAlertSound(now);
+            ScheduleSpoofAlertRefresh(now);
+            OnPropertyChanged();
+        }
+
+        private void PlaySpoofAlertSound(DateTime now)
+        {
+            if (!SpoofAudibleAlertEnabled
+                || string.IsNullOrEmpty(SpoofAlertSound)
+                || !System.IO.File.Exists(SpoofAlertSound)
+                || (now - lastSpoofSoundUtc).TotalMilliseconds < SpoofSoundCooldownMilliseconds)
+            {
+                return;
+            }
+
+            lastSpoofSoundUtc = now;
+            Core.Globals.PlaySound(SpoofAlertSound);
+        }
+
+        private void ScheduleSpoofAlertRefresh(DateTime now)
+        {
+            DateTime nextExpiration = DateTime.MaxValue;
+            foreach (SpoofAlertState alert in askSpoofAlerts.Values)
+                if (alert.ExpiresUtc < nextExpiration)
+                    nextExpiration = alert.ExpiresUtc;
+            foreach (SpoofAlertState alert in bidSpoofAlerts.Values)
+                if (alert.ExpiresUtc < nextExpiration)
+                    nextExpiration = alert.ExpiresUtc;
+
+            if (spoofAlertRefreshTimer != null)
+            {
+                spoofAlertRefreshTimer.Dispose();
+                spoofAlertRefreshTimer = null;
+            }
+
+            if (nextExpiration == DateTime.MaxValue)
+                return;
+
+            int dueTime = Math.Max(1, (int)Math.Ceiling((nextExpiration - now).TotalMilliseconds));
+            spoofAlertRefreshTimer = new Timer(
+                OnSpoofAlertRefreshTimerCallback,
+                null,
+                dueTime,
+                Timeout.Infinite);
+        }
+
+        private void OnSpoofAlertRefreshTimerCallback(object state)
+        {
+            lock (collectionSync)
+            {
+                DateTime now = DateTime.UtcNow;
+                RemoveExpiredSpoofAlerts(askSpoofAlerts, now);
+                RemoveExpiredSpoofAlerts(bidSpoofAlerts, now);
+                ScheduleSpoofAlertRefresh(now);
+            }
+
+            OnPropertyChanged();
+        }
+
+        private void RemoveExpiredSpoofAlerts(
+            Dictionary<double, SpoofAlertState> alerts,
+            DateTime now)
+        {
+            List<double> expiredPrices = alerts
+                .Where(pair => pair.Value.ExpiresUtc <= now)
+                .Select(pair => pair.Key)
+                .ToList();
+
+            foreach (double price in expiredPrices)
+                alerts.Remove(price);
+        }
+
+        private void ClearSpoofDetectionState()
+        {
+            askSpoofAlerts.Clear();
+            bidSpoofAlerts.Clear();
+            askSpoofCandidates.Clear();
+            bidSpoofCandidates.Clear();
+            askSpoofEvents.Clear();
+            bidSpoofEvents.Clear();
+            lastSpoofSoundUtc = DateTime.MinValue;
+
+            if (spoofAlertRefreshTimer != null)
+            {
+                spoofAlertRefreshTimer.Dispose();
+                spoofAlertRefreshTimer = null;
+            }
+        }
+
         protected override void OnRender(DrawingContext dc, double renderWidth)
         {
             // This may be true if the UI for a column has not been loaded yet.
@@ -468,6 +696,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                         {
                             DrawBidValue(dc, row, renderWidth, verticalOffset, pixelsPerDip);
                             DrawAskValue(dc, row, renderWidth, verticalOffset, pixelsPerDip);
+                            DrawSpoofAlert(dc, row, renderWidth, verticalOffset, pixelsPerDip, false);
+                            DrawSpoofAlert(dc, row, renderWidth, verticalOffset, pixelsPerDip, true);
                         }
                     }
 
@@ -595,6 +825,60 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                     verticalOffset + (SuperDom.ActualRowHeight - textHeight) / 2.0));
         }
 
+        private void DrawSpoofAlert(
+            DrawingContext dc,
+            PriceRow row,
+            double renderWidth,
+            double verticalOffset,
+            double pixelsPerDip,
+            bool isAsk)
+        {
+            if (!SpoofDetectionEnabled || renderWidth / 2.0 - 4.0 <= 0)
+                return;
+
+            Dictionary<double, SpoofAlertState> alerts = isAsk
+                ? askSpoofAlerts
+                : bidSpoofAlerts;
+            SpoofAlertState alert;
+            if (!alerts.TryGetValue(row.Price, out alert)
+                || alert.ExpiresUtc <= DateTime.UtcNow)
+            {
+                return;
+            }
+
+            Brush alertBrush = alert.IsEscalated
+                ? Brushes.DarkOrange
+                : Brushes.Goldenrod;
+            double halfWidth = renderWidth / 2.0;
+            Rect alertRect = new Rect(
+                (isAsk ? halfWidth : 0.0) + 1.0,
+                verticalOffset + 1.0,
+                halfWidth - 2.0,
+                Math.Max(0.0, SuperDom.ActualRowHeight - 2.0));
+            dc.DrawRectangle(
+                null,
+                new Pen(alertBrush, alert.IsEscalated ? 2.0 : 1.0),
+                alertRect);
+
+            FormattedText alertText = new FormattedText(
+                alert.IsEscalated ? "S!" : "S?",
+                Core.Globals.GeneralOptions.CurrentCulture,
+                FlowDirection.LeftToRight,
+                typeFace,
+                Math.Max(8.0, SuperDom.Font.Size * 0.7),
+                alertBrush,
+                pixelsPerDip);
+
+            double textX = isAsk
+                ? renderWidth - alertText.Width - 3.0
+                : 3.0;
+            dc.DrawText(
+                alertText,
+                new Point(
+                    textX,
+                    verticalOffset + (SuperDom.ActualRowHeight - alertText.Height) / 2.0));
+        }
+
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
@@ -620,10 +904,30 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 bidPriceDepthMap = new Dictionary<double, Tuple<long, long>>();
                 mmAskPriceMap = new Dictionary<string, double>();
                 mmBidPriceMap = new Dictionary<string, double>();
+                askSpoofAlerts = new Dictionary<double, SpoofAlertState>();
+                bidSpoofAlerts = new Dictionary<double, SpoofAlertState>();
+                askSpoofCandidates = new Dictionary<double, SpoofCandidate>();
+                bidSpoofCandidates = new Dictionary<double, SpoofCandidate>();
+                askSpoofEvents = new Queue<DateTime>();
+                bidSpoofEvents = new Queue<DateTime>();
 
                 DisplayType = PullingStackingDisplayType.BidAsk;
                 ResetWhen = PullingStackingResetWhen.BidAskChange;
                 ResetTolerance = 2500;
+                SpoofDetectionEnabled = true;
+                SpoofMinimumStackVolume = 100;
+                SpoofMaximumDepthLevels = 3;
+                SpoofPullPercent = 80;
+                SpoofMaximumLifetimeMilliseconds = 1500;
+                SpoofMaximumExecutedPercent = 10;
+                SpoofRepeatWindowMilliseconds = 10000;
+                SpoofAlertDisplayMilliseconds = 3000;
+                SpoofAudibleAlertEnabled = true;
+                SpoofAlertSound = System.IO.Path.Combine(
+                    Core.Globals.InstallDir,
+                    "sounds",
+                    "Alert2.wav");
+                SpoofSoundCooldownMilliseconds = 3000;
             }
             else if (State == State.Configure)
             {
@@ -650,6 +954,12 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                     bidAskResetTimer.Dispose();
                     bidAskResetTimer = null;
                 }
+
+                if (spoofAlertRefreshTimer != null)
+                {
+                    spoofAlertRefreshTimer.Dispose();
+                    spoofAlertRefreshTimer = null;
+                }
             }
         }
 
@@ -668,6 +978,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                     bidPriceDepthMap.Clear();
                     mmAskPriceMap.Clear();
                     mmBidPriceMap.Clear();
+                    askSpoofCandidates.Clear();
+                    bidSpoofCandidates.Clear();
                     return;
                 }
                 Tuple<double, MarketDataType> priorPrice = (Tuple<double, MarketDataType>)state;
@@ -685,6 +997,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 bidPriceDepthMap.Clear();
                 mmAskPriceMap.Clear();
                 mmBidPriceMap.Clear();
+                askSpoofCandidates.Clear();
+                bidSpoofCandidates.Clear();
                 if (SuperDom.MarketDepth == null)
                     return;
                 lock (SuperDom.MarketDepth.Instrument.SyncMarketDepth)
@@ -715,13 +1029,19 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                     {
                         MarketDepthRow row = SuperDom.MarketDepth.Asks.FirstOrDefault(a => a.Price.ApproxCompare(priorPrice.Item1) == 0);
                         if (row == null || row.Volume == 0)
+                        {
                             askPriceDepthMap[priorPrice.Item1] = Tuple.Create(0L, 0L);
+                            askSpoofCandidates.Remove(priorPrice.Item1);
+                        }
                     }
                     else if (priorPrice.Item2 == MarketDataType.Bid)
                     {
                         MarketDepthRow row = SuperDom.MarketDepth.Bids.FirstOrDefault(a => a.Price.ApproxCompare(priorPrice.Item1) == 0);
                         if (row == null || row.Volume == 0)
+                        {
                             bidPriceDepthMap[priorPrice.Item1] = Tuple.Create(0L, 0L);
+                            bidSpoofCandidates.Remove(priorPrice.Item1);
+                        }
                     }
             }
         }
@@ -736,6 +1056,51 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
         [Display(ResourceType = typeof(Custom.Resource), Name = "NinjaScriptRecentColumnResetTolerance", GroupName = "NinjaScriptSetup", Order = 115)]
         [Range(1, int.MaxValue)]
         public int ResetTolerance { get; set; }
+
+        #endregion
+
+        #region Spoof-like alerts
+        [Display(Name = "Enabled", GroupName = "Spoof-like alerts", Order = 200)]
+        public bool SpoofDetectionEnabled { get; set; }
+
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Minimum stack volume", GroupName = "Spoof-like alerts", Order = 210)]
+        public int SpoofMinimumStackVolume { get; set; }
+
+        [Range(1, 20)]
+        [Display(Name = "Maximum depth levels", GroupName = "Spoof-like alerts", Order = 220)]
+        public int SpoofMaximumDepthLevels { get; set; }
+
+        [Range(1, 100)]
+        [Display(Name = "Minimum pull percent", GroupName = "Spoof-like alerts", Order = 230)]
+        public int SpoofPullPercent { get; set; }
+
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Maximum lifetime (ms)", GroupName = "Spoof-like alerts", Order = 240)]
+        public int SpoofMaximumLifetimeMilliseconds { get; set; }
+
+        [Range(0, 100)]
+        [Display(Name = "Maximum executed percent", GroupName = "Spoof-like alerts", Order = 250)]
+        public int SpoofMaximumExecutedPercent { get; set; }
+
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Repeat window (ms)", GroupName = "Spoof-like alerts", Order = 260)]
+        public int SpoofRepeatWindowMilliseconds { get; set; }
+
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Alert display (ms)", GroupName = "Spoof-like alerts", Order = 270)]
+        public int SpoofAlertDisplayMilliseconds { get; set; }
+
+        [Display(Name = "Audible alert", GroupName = "Spoof-like alerts", Order = 280)]
+        public bool SpoofAudibleAlertEnabled { get; set; }
+
+        [Gui.PropertyEditor("NinjaTrader.Gui.Tools.FilePathPicker", Filter = "WAV Files (*.wav)|*.wav")]
+        [Display(Name = "Alert sound", GroupName = "Spoof-like alerts", Order = 290)]
+        public string SpoofAlertSound { get; set; }
+
+        [Range(0, int.MaxValue)]
+        [Display(Name = "Sound cooldown (ms)", GroupName = "Spoof-like alerts", Order = 300)]
+        public int SpoofSoundCooldownMilliseconds { get; set; }
 
         #endregion
 
