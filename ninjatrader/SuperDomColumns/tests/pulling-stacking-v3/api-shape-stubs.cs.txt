@@ -1,0 +1,156 @@
+// TEST ONLY: intentionally small API-shape harness, NOT NinjaTrader assemblies.
+// Passing these tests does not establish Windows/NinjaTrader compilation.
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Xml.Serialization;
+namespace System.Windows
+{
+    public enum FlowDirection { LeftToRight }
+    public enum TextAlignment { Center }
+    public enum TextTrimming { CharacterEllipsis }
+    public class Application { public static Application Current = new Application(); public object TryFindResource(string key) { return new Media.SolidColorBrush(key); } }
+    public struct Point { public double X,Y; public Point(double x,double y){X=x;Y=y;} }
+    public struct Rect { public double Left,Top,Width,Height; public double Right{get{return Left+Width;}} public double Bottom{get{return Top+Height;}} public Rect(double l,double t,double w,double h){Left=l;Top=t;Width=w;Height=h;} }
+    public class PresentationSource { public Media.CompositionTarget CompositionTarget = new Media.CompositionTarget(); public static PresentationSource FromVisual(object v){return new PresentationSource();} }
+    public class UiElement { }
+    public struct FontStyle { public int Id;public static bool operator ==(FontStyle a,FontStyle b){return a.Id==b.Id;}public static bool operator !=(FontStyle a,FontStyle b){return a.Id!=b.Id;}public override bool Equals(object o){return o is FontStyle&&((FontStyle)o).Id==Id;}public override int GetHashCode(){return Id;} }
+    public struct FontWeight { public int Id;public static bool operator ==(FontWeight a,FontWeight b){return a.Id==b.Id;}public static bool operator !=(FontWeight a,FontWeight b){return a.Id!=b.Id;}public override bool Equals(object o){return o is FontWeight&&((FontWeight)o).Id==Id;}public override int GetHashCode(){return Id;} }
+    public static class FontStyles { public static FontStyle Italic=new FontStyle{Id=1};public static FontStyle Normal=new FontStyle{Id=0}; }
+    public static class FontWeights { public static FontWeight Bold=new FontWeight{Id=1};public static FontWeight Normal=new FontWeight{Id=0}; }
+    public static class FontStretches { public static object Normal=new object(); }
+}
+namespace System.Windows.Input { public class MouseButtonEventArgs : EventArgs { } }
+namespace System.Windows.Media
+{
+    public struct Matrix { public double M11; }
+    public struct Dpi { public double PixelsPerDip; }
+    public class CompositionTarget { public Matrix TransformToDevice=new Matrix{M11=1}; }
+    public static class VisualTreeHelper { public static Dpi GetDpi(object v){return new Dpi{PixelsPerDip=1};} }
+    public class Brush { public string Key;public Brush(string key){Key=key;} }
+    public class SolidColorBrush : Brush {public SolidColorBrush(string key):base(key){} }
+    public static class Brushes { public static Brush LimeGreen=new Brush("green"), Red=new Brush("red"), DarkOrange=new Brush("orange"), Goldenrod=new Brush("gold"); }
+    public class Pen {public double Thickness; public Pen(Brush b,double t){Thickness=t;} }
+    public class FontFamily { }
+    public class Typeface {public Typeface(FontFamily f,System.Windows.FontStyle s,System.Windows.FontWeight w,object stretch){} }
+    public class FormattedText
+    {
+        public string Text;public Brush Brush;public double MaxTextWidth;public int MaxLineCount;public System.Windows.TextAlignment TextAlignment;public System.Windows.TextTrimming Trimming;
+        public double Height{get{return 10;}}public double Width{get{return Text.Length*6;}}
+        public FormattedText(string text,CultureInfo culture,System.Windows.FlowDirection direction,Typeface type,double size,Brush brush,double dpi){Text=text;Brush=brush;}
+    }
+    public class GuidelineSet {public List<double> GuidelinesX=new List<double>(),GuidelinesY=new List<double>();}
+    public class DrawnText {public FormattedText Text;public System.Windows.Point Point;}
+    public class DrawingContext
+    {
+        public List<DrawnText> Text=new List<DrawnText>();
+        public void DrawText(FormattedText text,System.Windows.Point point){Text.Add(new DrawnText{Text=text,Point=point});}
+        public void DrawRectangle(Brush brush,Pen pen,System.Windows.Rect rect){}
+        public void DrawLine(Pen pen,System.Windows.Point a,System.Windows.Point b){}
+        public void PushGuidelineSet(GuidelineSet s){}public void Pop(){}
+    }
+}
+namespace NinjaTrader.Core.FloatingPoint { public static class Extensions {public static int ApproxCompare(this double a,double b){return Math.Abs(a-b)<.0000001?0:(a<b?-1:1);} } }
+namespace NinjaTrader.Core
+{
+    public static class Globals
+    {
+        public static string InstallDir="C:\\NinjaTrader";public static DateTime Now=new DateTime(2026,10,12,10,0,0);
+        public static GeneralOptions GeneralOptions=new GeneralOptions();public static void PlaySound(string path){}
+    }
+    public class GeneralOptions {public CultureInfo CurrentCulture=CultureInfo.InvariantCulture;}
+}
+namespace NinjaTrader.Cbi
+{
+    public enum Operation { Add,Update,Remove }
+    public enum ConnectionStatus {Connected,Disconnected,Connecting,ConnectionLost}
+    public enum ErrorCode {NoError,UserAbort,Error}
+    public class ConnectionStatusEventArgs:EventArgs {public ConnectionStatus PriceStatus,PreviousPriceStatus;public Connection Connection;}
+    public class Playback {public DateTime Now;}
+    public class Connection
+    {
+        public static Playback PlaybackConnection;
+        public static event EventHandler<ConnectionStatusEventArgs> ConnectionStatusUpdate;
+        public static void Raise(ConnectionStatus previous,ConnectionStatus next)
+        {if(ConnectionStatusUpdate!=null)ConnectionStatusUpdate(null,new ConnectionStatusEventArgs{PreviousPriceStatus=previous,PriceStatus=next});}
+    }
+    public class Quote {public double Price;}
+    public class MarketData {public Quote Ask=new Quote(),Bid=new Quote();}
+    public class MasterInstrument {public double TickSize=.25;public NinjaTrader.Data.TradingHours TradingHours=new NinjaTrader.Data.TradingHours();}
+    public class Instrument {public string FullName="MES TEST";public object SyncMarketDepth=new object();public MasterInstrument MasterInstrument=new MasterInstrument();public MarketData MarketData=new MarketData();}
+}
+namespace NinjaTrader.Data
+{
+    public enum MarketDataType {Ask,Bid,Last}
+    public enum BarsPeriodType {Minute,Tick}
+    public class MarketDataEventArgs:EventArgs {public MarketDataType MarketDataType;public double Price,Bid,Ask;public long Volume;public DateTime Time;public bool IsReset;public NinjaTrader.Cbi.Instrument Instrument;}
+    public class MarketDepthEventArgs:EventArgs {public MarketDataType MarketDataType;public NinjaTrader.Cbi.Operation Operation;public int Position;public double Price;public long Volume;public string MarketMaker;public bool IsReset;public DateTime Time;public NinjaTrader.Cbi.Instrument Instrument;}
+    public class MarketDepthRow {public double Price;public long Volume;}
+    public class MarketDepth {public NinjaTrader.Cbi.Instrument Instrument;public List<MarketDepthRow> Asks=new List<MarketDepthRow>(),Bids=new List<MarketDepthRow>();}
+    public class TradingHours { }
+    public class BarsPeriod {public BarsPeriodType BarsPeriodType;public int Value;}
+    public class Bars { }
+    public class BarsRequest:IDisposable
+    {
+        public static bool DeferNext, FailNext;
+        public static Action CompleteDeferred;
+        public Bars Bars=new Bars();public BarsPeriod BarsPeriod;public TradingHours TradingHours;
+        public BarsRequest(NinjaTrader.Cbi.Instrument i,int barsBack){}
+        public void Request(Action<BarsRequest,NinjaTrader.Cbi.ErrorCode,string> callback)
+        {
+            Action reply=delegate {callback(this,FailNext?NinjaTrader.Cbi.ErrorCode.Error:NinjaTrader.Cbi.ErrorCode.NoError,null);FailNext=false;};
+            if(DeferNext){DeferNext=false;CompleteDeferred=reply;}else reply();
+        }
+        public void Dispose(){}
+    }
+    public class SessionIterator
+    {
+        public DateTime ActualSessionBegin,ActualSessionEnd;
+        public SessionIterator(Bars bars){}
+        public void GetNextSession(DateTime now,bool includeEnd){ActualSessionBegin=now.Date;ActualSessionEnd=now.Date.AddDays(1);}
+    }
+}
+namespace NinjaTrader.Gui
+{
+    public sealed class PropertyEditorAttribute:Attribute {public string Filter{get;set;}public PropertyEditorAttribute(string name){} }
+    public static class Resource {public static string NinjaScriptSuperdomColumnPullingStackingDescription="Pulling stacking";}
+    public static class Serialize
+    {
+        public static string BrushToString(System.Windows.Media.Brush b,string fallback=null){return b==null?fallback:b.Key;}
+        public static System.Windows.Media.Brush StringToBrush(string value,string fallback=null){return new System.Windows.Media.Brush(value??fallback);}
+    }
+}
+namespace NinjaTrader.Custom { public class Resource { } }
+namespace NinjaTrader.Gui.SuperDom
+{
+    public class PriceRow {public double Price;public long AskVolume,BidVolume;}
+    public class Font {public System.Windows.Media.FontFamily Family=new System.Windows.Media.FontFamily();public bool Italic,Bold;public double Size=12;}
+    public class SuperDom
+    {
+        public NinjaTrader.Cbi.Instrument Instrument=new NinjaTrader.Cbi.Instrument();
+        public NinjaTrader.Data.MarketDepth MarketDepth;
+        public List<PriceRow> Rows=new List<PriceRow>();public bool IsConnected=true,IsReloading;
+        public int DepthLevels=10;public Font Font=new Font();public double ActualRowHeight=20;
+        public SuperDom(){MarketDepth=new NinjaTrader.Data.MarketDepth{Instrument=Instrument};}
+    }
+}
+namespace NinjaTrader.NinjaScript
+{
+    public enum State {SetDefaults,Configure,Active,Terminated}
+    public class SuperDomColumn
+    {
+        [XmlIgnore]public State State{get;set;}
+        [XmlIgnore]public NinjaTrader.Gui.SuperDom.SuperDom SuperDom{get;set;}
+        [XmlIgnore]public System.Windows.UiElement UiWrapper{get;set;}
+        public string Name{get;set;}public string Description{get;set;}public int DefaultWidth{get;set;}public int PreviousWidth{get;set;}public bool IsDataSeriesRequired{get;set;}
+        [XmlIgnore]public int RefreshCount;
+        [XmlIgnore]public List<string> Printed=new List<string>();
+        protected void Print(object value){Printed.Add(value.ToString());}
+        public virtual void OnColumnLabelClicked(object sender,System.Windows.Input.MouseButtonEventArgs e){}
+        protected virtual void OnMarketData(NinjaTrader.Data.MarketDataEventArgs data){}
+        protected virtual void OnMarketDepth(NinjaTrader.Data.MarketDepthEventArgs data){}
+        protected virtual void OnRender(System.Windows.Media.DrawingContext dc,double width){}
+        protected virtual void OnStateChange(){}
+        protected void OnPropertyChanged(){RefreshCount++;}
+    }
+}

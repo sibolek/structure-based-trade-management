@@ -1,0 +1,357 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Data;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.SuperDomColumns;
+using NinjaTrader.Gui.SuperDom;
+using System.Windows.Media;
+public class LegacyHarness : ExecutionOSPullingStacking
+{
+    public void SetState(State state){State=state;OnStateChange();}
+    public void Depth(MarketDepthEventArgs e){OnMarketDepth(e);}
+    public void Data(MarketDataEventArgs e){OnMarketData(e);}
+    public DrawingContext Render(){DrawingContext d=new DrawingContext();OnRender(d,100);return d;}
+}
+public class V3Harness : ExecutionOSPullingStacking_v3
+{
+    public void SetState(State state){State=state;OnStateChange();}
+    public void Depth(MarketDepthEventArgs e){OnMarketDepth(e);}
+    public void Data(MarketDataEventArgs e){OnMarketData(e);}
+    public DrawingContext Render(){DrawingContext d=new DrawingContext();OnRender(d,100);return d;}
+}
+internal static class Program
+{
+    private static int passed;
+    private static List<string> results=new List<string>();
+    private static DateTime clock=new DateTime(2026,10,12,10,0,0);
+    private static void Yes(bool test,string why){if(!test)throw new Exception(why);}
+    private static void Eq(object a,object b,string why){if(!Equals(a,b))throw new Exception(why+": "+a+" != "+b);}
+    private static void Test(string name,Action action){action();passed++;results.Add("PASS "+name);Console.WriteLine("PASS "+name);}
+    private static void Time(double seconds){Connection.PlaybackConnection.Now=clock.AddSeconds(seconds);}
+    private static V3Harness NewRolling()
+    {
+        Connection.PlaybackConnection=new Playback{Now=clock};
+        V3Harness v=new V3Harness();v.SuperDom=new SuperDom();v.UiWrapper=new System.Windows.UiElement();
+        v.SetState(State.SetDefaults);v.CalculationMode=ExecutionOSPullingStackingCalculationModeV3.RollingWindow;
+        v.SpoofDetectionEnabled=false;v.SpoofAudibleAlertEnabled=false;v.ResetTolerance=60000;v.ApplyLegacyResetsToRolling=false;
+        v.SetState(State.Active);Call(v,"OnRollingRefresh",new object[]{null});return v;
+    }
+    private static object Call(V3Harness v,string method,object[] args)
+    {return typeof(ExecutionOSPullingStacking_v3).GetMethod(method,BindingFlags.NonPublic|BindingFlags.Instance).Invoke(v,args);}
+    private static MarketDepthEventArgs Depth(SuperDom dom,MarketDataType side,Operation operation,int pos,double price,long qty)
+    {
+        List<MarketDepthRow> book=side==MarketDataType.Ask?dom.MarketDepth.Asks:dom.MarketDepth.Bids;
+        if(operation==Operation.Add)book.Insert(pos,new MarketDepthRow{Price=price,Volume=qty});
+        else if(operation==Operation.Update)book[pos]=new MarketDepthRow{Price=price,Volume=qty};
+        else book.RemoveAt(pos);
+        PriceRow row=dom.Rows.FirstOrDefault(delegate(PriceRow r){return r.Price==price;});
+        if(row==null){row=new PriceRow{Price=price};dom.Rows.Add(row);}
+        if(side==MarketDataType.Ask)row.AskVolume=operation==Operation.Remove?0:qty;
+        else row.BidVolume=operation==Operation.Remove?0:qty;
+        return new MarketDepthEventArgs{Instrument=dom.Instrument,MarketDataType=side,Operation=operation,Position=pos,Price=price,Volume=qty,Time=Connection.PlaybackConnection.Now};
+    }
+    private static MarketDataEventArgs Last(SuperDom dom,double price,long volume,DateTime source,double bid=100,double ask=100.25)
+    {return new MarketDataEventArgs{Instrument=dom.Instrument,MarketDataType=MarketDataType.Last,Price=price,Volume=volume,Bid=bid,Ask=ask,Time=source};}
+    private static string Text(DrawingContext dc)
+    {return String.Join("|",dc.Text.Select(delegate(DrawnText x){return x.Text.Text+":"+x.Text.Brush.Key+":"+x.Point.X+":"+x.Point.Y+":"+x.Text.TextAlignment+":"+x.Text.MaxTextWidth;}));}
+    private static string Value(V3Harness v){DrawingContext d=v.Render();return d.Text.Count==0?"":d.Text[0].Text.Text;}
+    private static void Seed(V3Harness v){v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,0,100.25,100));}
+    public static int Main()
+    {
+        try
+        {
+            Test("Default mode and existing property defaults preserved",delegate {
+                LegacyHarness old=new LegacyHarness();old.SuperDom=new SuperDom();old.SetState(State.SetDefaults);
+                V3Harness v=new V3Harness();v.SuperDom=new SuperDom();v.SetState(State.SetDefaults);
+                foreach(PropertyInfo p in typeof(ExecutionOSPullingStacking).GetProperties(BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly))
+                {
+                    PropertyInfo q=typeof(ExecutionOSPullingStacking_v3).GetProperty(p.Name);Yes(q!=null,"missing "+p.Name);
+                    object a=p.GetValue(old),b=q.GetValue(v);
+                    if(a is Brush)Eq(((Brush)a).Key,((Brush)b).Key,p.Name);
+                    else Eq(Convert.ToString(a),Convert.ToString(b),p.Name);
+                }
+                Eq(v.CalculationMode,ExecutionOSPullingStackingCalculationModeV3.LegacyBaseline,"default mode");
+                Eq(v.RollingWindowSeconds,5,"window");Yes(v.ApplyLegacyResetsToRolling,"reset compatibility");
+                Eq(v.Name,"ExecutionOS Pulling/Stacking v3","distinct name");
+            });
+            Test("Legacy mode matches 1000 depth/trade events and rendered values",delegate {
+                Connection.PlaybackConnection=new Playback{Now=clock};
+                LegacyHarness old=new LegacyHarness();old.SuperDom=new SuperDom();old.UiWrapper=new System.Windows.UiElement();old.SetState(State.SetDefaults);
+                V3Harness v=new V3Harness();v.SuperDom=new SuperDom();v.UiWrapper=new System.Windows.UiElement();v.SetState(State.SetDefaults);
+                old.SpoofDetectionEnabled=false;v.SpoofDetectionEnabled=false;old.ResetTolerance=60000;v.ResetTolerance=60000;
+                old.SetState(State.Active);v.SetState(State.Active);
+                old.Depth(Depth(old.SuperDom,MarketDataType.Ask,Operation.Add,0,100.25,100));v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,0,100.25,100));
+                old.Depth(Depth(old.SuperDom,MarketDataType.Bid,Operation.Add,0,100,100));v.Depth(Depth(v.SuperDom,MarketDataType.Bid,Operation.Add,0,100,100));
+                Random random=new Random(611);
+                for(int i=0;i<1000;i++){
+                    Time(i*.01);MarketDataType side=i%2==0?MarketDataType.Ask:MarketDataType.Bid;double price=side==MarketDataType.Ask?100.25:100;
+                    if(i%3==0){long volume=random.Next(1,40);old.Data(Last(old.SuperDom,price,volume,Connection.PlaybackConnection.Now));v.Data(Last(v.SuperDom,price,volume,Connection.PlaybackConnection.Now));}
+                    else{long qty=random.Next(1,200);old.Depth(Depth(old.SuperDom,side,Operation.Update,0,price,qty));v.Depth(Depth(v.SuperDom,side,Operation.Update,0,price,qty));}
+                    Eq(Text(v.Render()),Text(old.Render()),"render event "+i);
+                }
+                old.OnColumnLabelClicked(null,null);v.OnColumnLabelClicked(null,null);Eq(Text(v.Render()),Text(old.Render()),"manual reset");
+                old.SetState(State.Terminated);v.SetState(State.Terminated);
+            });
+            Test("Rolling trade-first execution adjustment through real adapter paths",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Data(Last(v.SuperDom,100.25,30,clock.AddSeconds(1)));
+                Time(1.01);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,70));
+                Eq(Value(v),"0","execution");Yes(v.RollingStatus.Contains("matched 30"),"diagnostic");v.SetState(State.Terminated);
+            });
+            Test("Rolling depth-first execution adjustment through adapter",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1.01);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,70));
+                Time(1.05);v.Data(Last(v.SuperDom,100.25,30,clock.AddSeconds(1)));Eq(Value(v),"0","execution");v.SetState(State.Terminated);
+            });
+            Test("Rolling refresh expires quiet-market values with replay clock",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                Eq(Value(v),"40","before");Time(6);Call(v,"OnRollingRefresh",new object[]{null});Eq(Value(v),"0","expiry");v.SetState(State.Terminated);
+            });
+            Test("Rolling signs, side colors and centered alignment retained",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,70));
+                DrawingContext d=v.Render();Eq(d.Text[0].Text.Text,"-30","signed");Eq(d.Text[0].Text.Brush.Key,"green","ask pull color");
+                Eq(d.Text[0].Text.TextAlignment,System.Windows.TextAlignment.Center,"center");v.SetState(State.Terminated);
+            });
+            Test("Inside spread and locked quotes remain unclassified",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Data(Last(v.SuperDom,100.25,20,clock.AddSeconds(1),100,100.5));
+                v.Data(Last(v.SuperDom,100.25,30,clock.AddSeconds(1),100.25,100.25));
+                Eq(Value(v),"0","no credit");Yes(v.RollingStatus.Contains("unclassified 50"),"unclassified count");v.SetState(State.Terminated);
+            });
+            Test("Feed reset clears rolling and legacy state",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                v.Data(new MarketDataEventArgs{Instrument=v.SuperDom.Instrument,IsReset=true});Eq(Value(v),"—","reset blank");v.SetState(State.Terminated);
+            });
+            Test("Wrong instrument callbacks are rejected",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);
+                v.Depth(new MarketDepthEventArgs{Instrument=new Instrument{FullName="NQ OTHER"},MarketDataType=MarketDataType.Ask,Operation=Operation.Update,Position=0,Price=100.25,Volume=10,Time=clock.AddSeconds(1)});
+                Eq(Value(v),"0","wrong instrument");v.SetState(State.Terminated);
+            });
+            Test("Instrument change reseeds and clears old histories",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                v.SuperDom.Instrument=new Instrument{FullName="MES NEW"};v.SuperDom.MarketDepth.Instrument=v.SuperDom.Instrument;
+                Call(v,"OnRollingRefresh",new object[]{null});Eq(Value(v),"—","cleared");v.SetState(State.Terminated);
+            });
+            Test("Disconnect/reconnect reseeds",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                v.SuperDom.IsConnected=false;Call(v,"OnRollingRefresh",new object[]{null});v.SuperDom.IsConnected=true;
+                Call(v,"OnRollingRefresh",new object[]{null});Eq(Value(v),"—","reconnect empty");v.SetState(State.Terminated);
+            });
+            Test("Connection event invalidates even before scheduler polling",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                Connection.Raise(ConnectionStatus.Connected,ConnectionStatus.ConnectionLost);Eq(Value(v),"—","connection event");v.SetState(State.Terminated);
+            });
+            Test("Mode/window changes cannot reuse mixed histories",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                v.RollingWindowSeconds=10;Eq(Value(v),"—","new window needs seed");
+                Time(2);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,130));Eq(Value(v),"0","seeded");
+                v.CalculationMode=ExecutionOSPullingStackingCalculationModeV3.LegacyBaseline;Yes(Value(v)!="","legacy available");
+                v.CalculationMode=ExecutionOSPullingStackingCalculationModeV3.RollingWindow;Eq(Value(v),"—","rolling reseed");v.SetState(State.Terminated);
+            });
+            Test("Session transition cannot compare old session quantities",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                Connection.PlaybackConnection.Now=clock.AddDays(1);Call(v,"OnRollingRefresh",new object[]{null});Eq(Value(v),"—","session awaiting observations");
+                v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,50));Eq(Value(v),"0","new session seed");v.SetState(State.Terminated);
+            });
+            Test("Already populated DOM boots from an arbitrary updated position",delegate {
+                V3Harness v=NewRolling();
+                for(int i=0;i<5;i++) Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,i,100.25+i*.25,100);
+                Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,4,101.25,130));
+                DrawingContext d=v.Render();Yes(d.Text.Any(delegate(DrawnText x){return x.Text.Text=="0";}),"position four seeded");
+                Time(2);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,4,101.25,140));
+                Yes(v.Render().Text.Any(delegate(DrawnText x){return x.Text.Text=="10";}),"next update measured");v.SetState(State.Terminated);
+            });
+            Test("A snapshot not yet reflecting the triggering update waits for confirmation",delegate {
+                V3Harness v=NewRolling();Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,0,100.25,100);
+                Time(1);v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Ask,Operation=Operation.Update,Position=0,Price=100.25,Volume=130,Time=clock.AddSeconds(1)});
+                Eq(Value(v),"—","not reflected remains unconfirmed");
+                Time(2);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));Eq(Value(v),"0","fresh seed");
+                Time(3);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,150));Eq(Value(v),"10","fresh delta");v.SetState(State.Terminated);
+            });
+            Test("Replay rewind clears current book",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(2);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                Time(1);Call(v,"OnRollingRefresh",new object[]{null});Eq(Value(v),"—","rewind blank");v.SetState(State.Terminated);
+            });
+            Test("V3 XML settings serialize and reload with rolling configuration",delegate {
+                V3Harness v=NewRolling();v.RollingWindowSeconds=10;v.ExecutionReconciliationMilliseconds=500;
+                v.BidForeColor=new Brush("custom");v.DisplayType=ExecutionOSPullingStacking_v3.PullingStackingDisplayType.Bid;
+                ExecutionOSPullingStacking_v3 snapshot=new ExecutionOSPullingStacking_v3();
+                foreach(PropertyInfo p in typeof(ExecutionOSPullingStacking_v3).GetProperties(BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly))
+                    if(p.CanWrite)p.SetValue(snapshot,p.GetValue(v));
+                XmlSerializer serializer=new XmlSerializer(typeof(ExecutionOSPullingStacking_v3));StringWriter writer=new StringWriter();serializer.Serialize(writer,snapshot);
+                ExecutionOSPullingStacking_v3 restored=(ExecutionOSPullingStacking_v3)serializer.Deserialize(new StringReader(writer.ToString()));
+                Eq(restored.CalculationMode,v.CalculationMode,"mode");Eq(restored.RollingWindowSeconds,10,"window");Eq(restored.ExecutionReconciliationMilliseconds,500,"reconcile");
+                Eq(restored.BidForeColor.Key,"custom","brush");Eq(restored.DisplayType,v.DisplayType,"display");v.SetState(State.Terminated);
+            });
+            Test("Quote reset policy preserves legacy condition and can leave rolling intact",delegate {
+                foreach(bool apply in new bool[]{true,false}){
+                    V3Harness v=NewRolling();v.ApplyLegacyResetsToRolling=apply;Seed(v);Time(1);
+                    v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                    v.SuperDom.Instrument.MarketData.Ask.Price=100.25;
+                    Call(v,"OnBidAskResetTimerCallback",new object[]{Tuple.Create(100.25,MarketDataType.Ask)});
+                    Eq(Value(v),"40","existing matching-quote condition leaves value");
+                    v.SuperDom.Instrument.MarketData.Ask.Price=100.5;
+                    Call(v,"OnBidAskResetTimerCallback",new object[]{Tuple.Create(100.25,MarketDataType.Ask)});
+                    Eq(Value(v),apply?"0":"40","rolling reset policy");v.SetState(State.Terminated);
+                }
+            });
+            Test("Rolling expiry cannot create new spoof-like alerts",delegate {
+                V3Harness v=NewRolling();v.SpoofDetectionEnabled=true;v.SpoofMinimumStackVolume=10;Seed(v);
+                Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,200));
+                Time(1.1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,120));
+                object events=typeof(ExecutionOSPullingStacking_v3).GetField("askSpoofEvents",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(v);
+                Eq(((System.Collections.ICollection)events).Count,1,"baseline alert triggered");
+                Time(7);Call(v,"OnRollingRefresh",new object[]{null});v.Render();
+                Eq(((System.Collections.ICollection)events).Count,1,"expiry did not trigger another alert");v.SetState(State.Terminated);
+            });
+            Test("Reset events without instrument identity still clear state",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                v.Depth(new MarketDepthEventArgs{IsReset=true});Eq(Value(v),"—","anonymous depth reset");v.SetState(State.Terminated);
+            });
+            Test("Termination disposes per-level timers and blocks refresh callbacks",delegate {
+                V3Harness v=NewRolling();FieldInfo field=typeof(ExecutionOSPullingStacking_v3).GetField("askNoDataResetTimers",BindingFlags.NonPublic|BindingFlags.Instance);
+                Dictionary<double,Timer> timers=(Dictionary<double,Timer>)field.GetValue(v);Timer owned=new Timer(delegate{},null,Timeout.Infinite,Timeout.Infinite);timers[100.25]=owned;
+                v.SetState(State.Terminated);bool disposed=false;try{disposed=!owned.Change(1,Timeout.Infinite);}catch(ObjectDisposedException){disposed=true;}Yes(disposed,"owned timer disposed");
+                int refresh=v.RefreshCount;Call(v,"OnRollingRefresh",new object[]{null});Eq(v.RefreshCount,refresh,"late refresh ignored");
+            });
+            Test("Pre-reset queued callbacks cannot mutate the new generation",delegate {
+                V3Harness v=NewRolling();ManualResetEvent gate=new ManualResetEvent(false);
+                TimerCallback callback=delegate(object ignored){gate.Set();};
+                Timer stale=(Timer)Call(v,"CreateGuardedTimer",new object[]{callback,null,Timeout.Infinite,Timeout.Infinite});
+                v.OnColumnLabelClicked(null,null);stale.Change(0,Timeout.Infinite);Yes(!gate.WaitOne(100),"stale callback fired");stale.Dispose();
+                Timer fresh=(Timer)Call(v,"CreateGuardedTimer",new object[]{callback,null,0,Timeout.Infinite});
+                Yes(gate.WaitOne(2000),"fresh callback not delivered");fresh.Dispose();v.SetState(State.Terminated);gate.Dispose();
+            });
+            Test("Known quiet snapshot levels remain visible after rolling expiry",delegate {
+                Connection.PlaybackConnection=new Playback{Now=clock};
+                V3Harness v=new V3Harness();v.SuperDom=new SuperDom();v.UiWrapper=new System.Windows.UiElement();
+                v.SetState(State.SetDefaults);v.SpoofDetectionEnabled=false;v.ResetTolerance=60000;
+                v.ApplyLegacyResetsToRolling=false;v.SetState(State.Active);
+                try {
+                    for(int i=0;i<5;i++)v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,i,100.25+i*.25,100));
+                    Eq(v.Render().Text.Count,5,"legacy populated levels");
+                    v.CalculationMode=ExecutionOSPullingStackingCalculationModeV3.RollingWindow;
+                    Call(v,"OnRollingRefresh",new object[]{null});
+                    Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,110));
+                    Time(6);Call(v,"OnRollingRefresh",new object[]{null});
+                    Console.WriteLine("DIAGNOSTIC: known resting levels=5; displayed rolling rows="+v.Render().Text.Count);
+                    Eq(v.Render().Text.Count,5,"known levels should remain represented after expiry");
+                } finally { v.SetState(State.Terminated); }
+            });
+            Test("Snapshot displays both sides even when legacy maps only know one row",delegate {
+                V3Harness v=NewRolling();
+                for(int i=0;i<5;i++) {Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,i,100.25+i*.25,100);Depth(v.SuperDom,MarketDataType.Bid,Operation.Add,i,100-i*.25,100);}
+                Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,3,101,110));
+                Eq(v.Render().Text.Count,10,"all snapshot levels shown");
+                Yes(v.Render().Text.All(delegate(DrawnText x){return x.Text.Text=="0";}),"snapshot baseline is zero");
+                Yes(v.RollingStatus.Contains("known bid/ask 5/5"),"live known counts");v.SetState(State.Terminated);
+            });
+            Test("Legacy quote-map clearing cannot hide rolling levels",delegate {
+                foreach(bool apply in new bool[]{true,false}) {
+                    V3Harness v=NewRolling();v.ApplyLegacyResetsToRolling=apply;Seed(v);Time(1);
+                    v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                    v.SuperDom.Instrument.MarketData.Ask.Price=100.5;
+                    Call(v,"OnBidAskResetTimerCallback",new object[]{Tuple.Create(100.25,MarketDataType.Ask)});
+                    Eq(Value(v),apply?"0":"40","rolling renders independently of legacy map");
+                    Time(6);Call(v,"OnRollingRefresh",new object[]{null});Eq(Value(v),"0","quiet zero survives expiry");v.SetState(State.Terminated);
+                }
+            });
+            Test("Session transition marks untouched rows unavailable instead of inventing zeros",delegate {
+                V3Harness v=NewRolling();Seed(v);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,1,100.5,100));
+                Connection.PlaybackConnection.Now=clock.AddDays(1);Call(v,"OnRollingRefresh",new object[]{null});
+                Yes(v.Render().Text.All(delegate(DrawnText x){return x.Text.Text=="—";}),"unavailable markers");
+                v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,50));
+                Eq(String.Join("|",v.Render().Text.Select(delegate(DrawnText x){return x.Text.Text;})),"0|—","fresh row only");v.SetState(State.Terminated);
+            });
+            Test("Settings-only instance does not pretend to have a live calendar failure",delegate {
+                V3Harness v=new V3Harness();v.SetState(State.SetDefaults);v.CalculationMode=ExecutionOSPullingStackingCalculationModeV3.RollingWindow;
+                Yes(v.RollingStatus.StartsWith("Settings view"),"settings view label");
+            });
+            Test("Live diagnostic output is opt-in and rate limited",delegate {
+                V3Harness v=NewRolling();Seed(v);Eq(v.Printed.Count,0,"logging disabled");
+                v.LogRollingDiagnostics=true;Call(v,"OnRollingRefresh",new object[]{null});Eq(v.Printed.Count,1,"first live sample");
+                Yes(v.Printed[0].Contains("known bid/ask 0/1"),"live output includes coverage");
+                for(int i=0;i<100;i++) Call(v,"OnRollingRefresh",new object[]{null});Eq(v.Printed.Count,1,"no high-frequency printing");
+                v.SetState(State.Terminated);Call(v,"OnRollingRefresh",new object[]{null});Eq(v.Printed.Count,1,"no terminated print");
+            });
+            Test("Delayed calendar arrival preserves a current snapshot across quiet levels",delegate {
+                BarsRequest.DeferNext=true;V3Harness v=NewRolling();
+                for(int i=0;i<5;i++) Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,i,100.25+i*.25,100);
+                Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,110));
+                Yes(v.Render().Text.All(delegate(DrawnText x){return x.Text.Text=="—";}),"calendar pending");
+                BarsRequest.CompleteDeferred();BarsRequest.CompleteDeferred=null;
+                Eq(v.Render().Text.Count,5,"snapshot coverage retained after calendar arrives");
+                Yes(v.Render().Text.All(delegate(DrawnText x){return x.Text.Text=="0";}),"fresh session starts at zero");v.SetState(State.Terminated);
+            });
+            Test("Actual live calendar failure produces unavailable markers and diagnostic",delegate {
+                BarsRequest.FailNext=true;V3Harness v=NewRolling();Seed(v);
+                Eq(Value(v),"—","calendar failure marker");Yes(v.RollingStatus.Contains("calendar request failed"),"actual live failure");
+                v.SetState(State.Terminated);
+            });
+            Test("Ordered depth with 200 ms provider timestamp lag retains five seconds",delegate {
+                V3Harness v=NewRolling();
+                Time(1);MarketDepthEventArgs first=Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,0,100.25,100);
+                first.Time=clock.AddSeconds(.8);v.Depth(first);
+                for(int i=1;i<=100;i++) {
+                    Time(1+i*.01);MarketDepthEventArgs update=Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,100+i);
+                    update.Time=Connection.PlaybackConnection.Now.AddMilliseconds(-200);v.Depth(update);
+                }
+                Time(6.5);Call(v,"OnRollingRefresh",new object[]{null});
+                Console.WriteLine("SOURCE-LAG REPRO "+v.RollingStatus);
+                Eq(Value(v),"50","half the contributions still inside the window");
+                Yes(v.RollingStatus.Contains("continuity breaks 0"),"ordered lag must not break continuity");
+                Yes(!v.RollingStatus.Contains("warming up"),"window should be warm");v.SetState(State.Terminated);
+            });
+            Test("Provider lag survives an explicit reset without repeated reinitialization",delegate {
+                V3Harness v=NewRolling();Time(1);
+                MarketDepthEventArgs seed=Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,0,100.25,100);seed.Time=clock.AddSeconds(.8);v.Depth(seed);
+                Time(2);v.OnColumnLabelClicked(null,null);
+                Time(2.1);MarketDepthEventArgs update=Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,120);update.Time=clock.AddSeconds(1.9);v.Depth(update);
+                Eq(Value(v),"20","reset keeps quantity baseline");Yes(v.RollingStatus.Contains("continuity breaks 0"),"lag after reset remains valid");v.SetState(State.Terminated);
+            });
+            Test("Lagged trade timestamps reconcile in both callback arrival orders",delegate {
+                foreach(bool tradeFirst in new bool[]{true,false}) {
+                    V3Harness v=NewRolling();Time(1);
+                    MarketDepthEventArgs seed=Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,0,100.25,100);seed.Time=clock.AddSeconds(.8);v.Depth(seed);
+                    Time(2);MarketDataEventArgs trade=Last(v.SuperDom,100.25,30,clock.AddSeconds(1.8));
+                    if(tradeFirst)v.Data(trade);
+                    Time(2.05);MarketDepthEventArgs update=Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,70);update.Time=clock.AddSeconds(1.8);v.Depth(update);
+                    if(!tradeFirst){Time(2.1);v.Data(trade);}
+                    Eq(Value(v),"0","pure execution compensated with provider lag");Yes(v.RollingStatus.Contains("matched 30"),"matched");
+                    Yes(v.RollingStatus.Contains("continuity breaks 0"),"ordered lag accepted");v.SetState(State.Terminated);
+                }
+            });
+            Test("Timestamp regressions do not masquerade as structural book loss",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);
+                v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,140));
+                Time(1.1);MarketDepthEventArgs update=Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,130);update.Time=clock.AddSeconds(.9);v.Depth(update);
+                Eq(Value(v),"30","ordered quantity retained");Yes(v.RollingStatus.Contains("source regressions 1"),"regression diagnostic");
+                Yes(v.RollingStatus.Contains("continuity breaks 0"),"no structural reset");v.SetState(State.Terminated);
+            });
+            Test("True invalid positions still reject the book and explain the failure",delegate {
+                V3Harness v=NewRolling();Seed(v);Time(1);
+                v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Ask,Operation=Operation.Update,Position=4,Price=101.25,Volume=100,Time=clock.AddSeconds(1)});
+                Yes(v.RollingStatus.Contains("invalid depth 1"),"invalid counter");Yes(v.RollingStatus.Contains("position 4 / stored rows 1"),"specific reason");
+                Eq(Value(v),"—","invalid book unavailable");v.SetState(State.Terminated);
+            });
+            Test("Provider book deeper than display coverage cannot cause false gaps",delegate {
+                V3Harness v=NewRolling();v.SuperDom.DepthLevels=3;Call(v,"OnRollingRefresh",new object[]{null});
+                for(int i=0;i<8;i++)Depth(v.SuperDom,MarketDataType.Ask,Operation.Add,i,100.25+i*.25,100);
+                Time(1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,110));
+                Time(1.1);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,6,101.75,120));
+                Time(1.2);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Remove,6,101.75,0));
+                Time(1.3);v.Depth(Depth(v.SuperDom,MarketDataType.Ask,Operation.Update,0,100.25,120));
+                Eq(Value(v),"10","nearby history survives deeper updates");
+                Yes(v.RollingStatus.Contains("continuity breaks 0"),"deeper positions valid");
+                Yes(v.RollingStatus.Contains("known bid/ask 0/3"),"only configured coverage observed");
+                Yes(v.RollingStatus.Contains("unstamped depth 0"),"snapshot rows not mistaken for unstamped callbacks");v.SetState(State.Terminated);
+            });
+            Console.WriteLine("RESULT "+passed+" API-shape integration scenarios passed; 0 failed. Not actual NinjaTrader compilation.");
+            File.WriteAllLines("adapter-results.txt",results.ToArray());return 0;
+        }
+        catch(Exception e){Console.Error.WriteLine("FAIL "+e);return 1;}
+    }
+}
