@@ -1,0 +1,335 @@
+--- 2026-10-15.1
++++ 2026-10-16.1
+@@ -912,6 +912,7 @@
+                     .GetDpi(UiWrapper)
+                     .PixelsPerDip;
+ 
++            lock (collectionSync) { BeginFlowRender(renderWidth, pixelsPerDip); }
+             lock (SuperDom.Rows)
+             {
+                 foreach (PriceRow row in SuperDom.Rows)
+@@ -1415,6 +1416,8 @@
+                 FlowDepthLevels = 3;
+                 FlowDisplayMilliseconds = 3000;
+                 FlowCooldownMilliseconds = 5000;
++                PersistLastQualifiedFlowSignal = true;
++                LastQualifiedFlowHoldSeconds = 0;
+ 
+                 SpoofDetectionEnabled = false;
+                 SpoofMinimumStackVolume = 100;
+@@ -1957,7 +1960,7 @@
+ 
+     public partial class ExecutionOSPullingStacking_v4_Experimental
+     {
+-        private const string RollingBuildId = "2026-10-15.1 EXP";
++        private const string RollingBuildId = "2026-10-16.1 EXP";
+         private ExecutionOSRollingLiquidityV4 rolling;
+         private Timer rollingRefreshTimer;
+         private BarsRequest rollingSessionRequest;
+@@ -2568,12 +2571,14 @@
+             if (!FlowDetectionEnabled)
+             {
+                 if (flow != null) flow.Reset(now, "Detection disabled");
+-                DrainFlowTransitions(); DetachFlowBook(); flow = null; flowRuntimeError = null; return;
++                DrainFlowTransitions(); ClearLastQualifiedFlowSignal("Detection disabled");
++                DetachFlowBook(); flow = null; flowRuntimeError = null; return;
+             }
+             long key = FlowConfigurationKey();
+             if (flow == null || key != flowSettingsKey)
+             {
+                 if (flow != null) { flow.Reset(now, "Detector settings changed"); DrainFlowTransitions(); }
++                ClearLastQualifiedFlowSignal("Detector configuration changed");
+                 DetachFlowBook(); flowGeneration++; flowLogOrigin = now; flowSettingsKey = key; flowRuntimeError = null;
+                 try
+                 {
+@@ -2595,6 +2600,7 @@
+             }
+             if (ReferenceEquals(rolling, flowBookOwner)) return;
+             DetachFlowBook(); flowBookOwner = rolling; flow.Reset(now, "New depth engine context");
++            ClearLastQualifiedFlowSignal("New depth engine context");
+             flowContributionFloor = rolling == null ? 0 : rolling.LatestContributionId;
+             flowSourceRegressions = rolling == null ? 0 : rolling.TimestampRegressionCount;
+             if (rolling == null) return;
+@@ -2620,10 +2626,12 @@
+             { flow.Reset(now, reason); DrainFlowTransitions(); flowGeneration++; flowLogOrigin = now;
+                 flowContributionFloor = rolling == null ? 0 : rolling.LatestContributionId;
+                 flowSourceRegressions = rolling == null ? 0 : rolling.TimestampRegressionCount; }
++            ClearLastQualifiedFlowSignal(reason);
+         }
+         private void StopFlowEvidence()
+         {
+             if (flow != null) flow.Reset(RawClockTicks(), "Column terminated");
++            ClearLastQualifiedFlowSignal("Column terminated");
+             DetachFlowBook();
+         }
+         private void SynchronizeFlowCoverage(long now)
+@@ -2642,6 +2650,7 @@
+                 : rollingRuntimeError != null ? rollingRuntimeError
+                 : flowRuntimeError;
+             bool context = failure == null;
++            if (!context) ClearLastQualifiedFlowSignal(failure);
+             long resetsBefore = flow.ResetCount;
+             flow.SetReady(context, now, failure ?? "Context ready");
+             if (flow.ResetCount != resetsBefore)
+@@ -2688,7 +2697,8 @@
+                 DrainFlowTransitions();
+             }
+             catch (Exception ex)
+-            { flowRuntimeError = "Flow evaluation failure (" + ex.GetType().Name + ")"; flow.SetReady(false, now, flowRuntimeError); }
++            { flowRuntimeError = "Flow evaluation failure (" + ex.GetType().Name + ")"; flow.SetReady(false, now, flowRuntimeError);
++                ClearLastQualifiedFlowSignal(flowRuntimeError); }
+         }
+         private void DrainFlowTransitions()
+         {
+@@ -2696,9 +2706,10 @@
+             ExecutionOSFlowEvidenceV4.Signal signal;
+                 while ((signal = flow.TakeTransition()) != null)
+                 {
++                    RememberQualifiedFlowTransition(signal);
+                     if (!LogFlowEvents || v3Terminated) continue;
+                     double tickSize = SuperDom.Instrument.MasterInstrument.TickSize;
+-                    Print("ExecutionOS Flow v4 [" + SuperDom.Instrument.FullName + "] build 2026-10-15.1 EXP; "
++                    Print("ExecutionOS Flow v4 [" + SuperDom.Instrument.FullName + "] build 2026-10-16.1 EXP; "
+                         + "NT-local " + SessionClockNow().ToString("yyyy-MM-dd HH:mm:ss.fff")
+                         + "; generation " + flowGeneration + "; id " + signal.Id
+                         + "; event receipt ms " + ((signal.Updated - flowLogOrigin) / TimeSpan.TicksPerMillisecond)
+@@ -2719,11 +2730,12 @@
+             if (lastFlowStatusPrint != long.MinValue && realNow - lastFlowStatusPrint < 5 * TimeSpan.TicksPerSecond) return;
+             lastFlowStatusPrint = realNow;
+             Print("ExecutionOS Flow v4 [" + (rollingInstrument == null ? "no instrument" : rollingInstrument.FullName)
+-                + "] build 2026-10-15.1 EXP; STATUS; " + FlowStatus);
++                + "] build 2026-10-16.1 EXP; STATUS; " + FlowStatus
++                + "; last-qualified " + LastQualifiedFlowSummary + "; flow-render " + FlowRenderingStatus);
+         }
+         private void DrawFlowEvidence(DrawingContext dc, PriceRow row, double renderWidth, double verticalOffset, double dpi)
+         {
+-            if (!FlowDetectionEnabled || flow == null || flowRuntimeError != null || renderWidth < 180) return;
++            if (!FlowDetectionEnabled || flow == null || flowRuntimeError != null || renderWidth <= 0) return;
+             long price; if (!TryRollingPrice(row.Price, out price)) return;
+             for (int side = 0; side < 2; side++)
+             {
+@@ -2731,25 +2743,208 @@
+                     || (side == 1 && DisplayType == PullingStackingDisplayType.Bid)) continue;
+                 ExecutionOSFlowEvidenceV4.Signal signal = flow.At(side == 0
+                     ? ExecutionOSFlowEvidenceV4.Side.Bid : ExecutionOSFlowEvidenceV4.Side.Ask, price);
+-                if (signal == null || (signal.State == ExecutionOSFlowEvidenceV4.Stage.Candidate && !ShowFlowCandidates)) continue;
+-                string label = signal.Pattern == ExecutionOSFlowEvidenceV4.Kind.BuyerAbsorption ? "BABS"
+-                    : signal.Pattern == ExecutionOSFlowEvidenceV4.Kind.SellerAbsorption ? "SABS"
+-                    : signal.Pattern == ExecutionOSFlowEvidenceV4.Kind.BuyInitiative ? "BUY↑" : "SELL↓";
+-                bool qualified = signal.State == ExecutionOSFlowEvidenceV4.Stage.Qualified;
+-                if (!qualified) label += "?";
+-                Brush brush = !qualified ? Brushes.Goldenrod
+-                    : (signal.Pattern == ExecutionOSFlowEvidenceV4.Kind.BuyerAbsorption
+-                        || signal.Pattern == ExecutionOSFlowEvidenceV4.Kind.BuyInitiative) ? Brushes.LimeGreen : Brushes.Red;
+-                FormattedText text = new FormattedText(label, Core.Globals.GeneralOptions.CurrentCulture,
++                bool remembered = LastQualifiedFlowMarkerVisible() && lastQualifiedFlowSignal.Price == price
++                    && FlowSignalSide(lastQualifiedFlowSignal.Pattern) == side;
++                bool latestIsLive = remembered && signal != null && signal.Id == lastQualifiedFlowSignal.Id
++                    && signal.Pattern == lastQualifiedFlowSignal.Pattern && signal.State == ExecutionOSFlowEvidenceV4.Stage.Qualified;
++                // A retained qualification takes its own slot; candidates elsewhere still render normally.
++                if (remembered && !latestIsLive)
++                    DrawRememberedOrLiveFlow(dc, row, side, lastQualifiedFlowSignal, true, renderWidth, verticalOffset, dpi);
++                else if (signal != null && (signal.State != ExecutionOSFlowEvidenceV4.Stage.Candidate || ShowFlowCandidates))
++                    DrawRememberedOrLiveFlow(dc, row, side, signal, false, renderWidth, verticalOffset, dpi);
++            }
++        }
++        // Presentation-only memory: never feeds a value back into either evidence engine.
++        private ExecutionOSFlowEvidenceV4.Signal lastQualifiedFlowSignal;
++        private ExecutionOSFlowEvidenceV4.Stage lastQualifiedFlowOutcome;
++        private DateTime lastQualifiedFlowTime;
++        private long lastQualifiedFlowGeneration;
++        private string lastQualifiedFlowReason, lastFlowHistoryClearReason = "No qualification recorded";
++        private double lastFlowRenderWidth, lastFlowRenderDpi;
++        private int lastFlowLiveLabels, lastFlowHistoryLabels, lastFlowCompactLabels, lastFlowNoSpace;
++        private string lastFlowHistoryVisibility = "Not rendered yet";
++        private object lastFlowTooltipOwner;
++        private string lastFlowTooltipText;
++
++        [Display(Name = "Persist last qualified signal", GroupName = "Flow display", Order = 780)]
++        public bool PersistLastQualifiedFlowSignal { get; set; }
++
++        [Range(0, 3600)]
++        [Display(Name = "History marker seconds (0 = until replaced/reset)", GroupName = "Flow display", Order = 790)]
++        public int LastQualifiedFlowHoldSeconds { get; set; }
++
++        [XmlIgnore]
++        [ReadOnly(true)]
++        [Display(Name = "Last qualified signal", GroupName = "Flow display diagnostics", Order = 800)]
++        public string LastQualifiedFlowSummary
++        {
++            get
++            {
++                lock (collectionSync)
++                    return FormatLastQualifiedFlowSignal(true);
++            }
++        }
++
++        private string FormatLastQualifiedFlowSignal(bool includeAge)
++        {
++            if (lastQualifiedFlowSignal == null) return "None; " + lastFlowHistoryClearReason;
++            ExecutionOSFlowEvidenceV4.Signal s = lastQualifiedFlowSignal;
++            double tickSize = rollingInstrument == null ? 0 : rollingInstrument.MasterInstrument.TickSize;
++            string price = tickSize > 0 ? (s.Price * tickSize).ToString(Core.Globals.GeneralOptions.CurrentCulture) : "unavailable";
++            double age = Math.Max(0, RawClockTicks() - s.QualifiedAt) / (double)TimeSpan.TicksPerSecond;
++            return "LAST " + FlowPatternLabel(s.Pattern, false) + " @ " + price
++                + "; qualified NT-local " + lastQualifiedFlowTime.ToString("yyyy-MM-dd HH:mm:ss.fff")
++                + (includeAge ? "; age " + age.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "s" : "")
++                + "; last transition " + lastQualifiedFlowOutcome + "; " + lastQualifiedFlowReason;
++        }
++
++        [XmlIgnore]
++        [ReadOnly(true)]
++        [Display(Name = "Rendering", GroupName = "Flow display diagnostics", Order = 810)]
++        public string FlowRenderingStatus
++        {
++            get
++            {
++                lock (collectionSync)
++                    return "width " + lastFlowRenderWidth.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)
++                        + " logical; scale " + lastFlowRenderDpi.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "x"
++                        + "; live " + lastFlowLiveLabels + "; history " + lastFlowHistoryLabels
++                        + "; compact " + lastFlowCompactLabels + "; no-space " + lastFlowNoSpace
++                        + "; " + lastFlowHistoryVisibility;
++            }
++        }
++
++        private void ClearLastQualifiedFlowSignal(string reason)
++        {
++            lastQualifiedFlowSignal = null; lastQualifiedFlowReason = null;
++            lastQualifiedFlowTime = DateTime.MinValue; lastQualifiedFlowGeneration = 0;
++            lastFlowHistoryClearReason = reason; lastFlowHistoryVisibility = "No retained qualification; " + reason;
++        }
++
++        private void RememberQualifiedFlowTransition(ExecutionOSFlowEvidenceV4.Signal signal)
++        {
++            if (v3Terminated || !FlowDetectionEnabled || (flow != null && flow.Faulted))
++            { ClearLastQualifiedFlowSignal("Detector inactive or faulted"); return; }
++            if (signal.State == ExecutionOSFlowEvidenceV4.Stage.Qualified)
++            {
++                if (lastQualifiedFlowSignal != null && lastQualifiedFlowGeneration == flowGeneration
++                    && lastQualifiedFlowSignal.Id == signal.Id) return;
++                lastQualifiedFlowSignal = signal.Copy(); lastQualifiedFlowGeneration = flowGeneration;
++                lastQualifiedFlowTime = SessionClockNow(); lastQualifiedFlowOutcome = signal.State;
++                lastQualifiedFlowReason = signal.Reason;
++            }
++            else if (lastQualifiedFlowSignal != null && lastQualifiedFlowGeneration == flowGeneration
++                && signal.Id == lastQualifiedFlowSignal.Id && signal.Pattern == lastQualifiedFlowSignal.Pattern
++                && signal.State != ExecutionOSFlowEvidenceV4.Stage.Candidate)
++            {
++                // Keep qualification price, time and metrics frozen. Only the recorded outcome changes.
++                lastQualifiedFlowOutcome = signal.State; lastQualifiedFlowReason = signal.Reason;
++            }
++        }
++
++        private static string FlowPatternLabel(ExecutionOSFlowEvidenceV4.Kind kind, bool compact)
++        {
++            if (kind == ExecutionOSFlowEvidenceV4.Kind.BuyerAbsorption) return compact ? "BA" : "BABS";
++            if (kind == ExecutionOSFlowEvidenceV4.Kind.SellerAbsorption) return compact ? "SA" : "SABS";
++            if (kind == ExecutionOSFlowEvidenceV4.Kind.BuyInitiative) return compact ? "BI" : "BUY↑";
++            return compact ? "SI" : "SELL↓";
++        }
++
++        private static int FlowSignalSide(ExecutionOSFlowEvidenceV4.Kind kind)
++        {
++            return kind == ExecutionOSFlowEvidenceV4.Kind.BuyerAbsorption
++                || kind == ExecutionOSFlowEvidenceV4.Kind.SellInitiative ? 0 : 1;
++        }
++
++        private static string FlowOutcomeCode(ExecutionOSFlowEvidenceV4.Stage state)
++        {
++            return state == ExecutionOSFlowEvidenceV4.Stage.Suppressed ? "SUP"
++                : state == ExecutionOSFlowEvidenceV4.Stage.Invalidated ? "INV"
++                : state == ExecutionOSFlowEvidenceV4.Stage.Expired ? "EXP" : "REC";
++        }
++
++        private bool LastQualifiedFlowMarkerVisible()
++        {
++            if (!PersistLastQualifiedFlowSignal || lastQualifiedFlowSignal == null) return false;
++            long age = Math.Max(0, RawClockTicks() - lastQualifiedFlowSignal.QualifiedAt);
++            return LastQualifiedFlowHoldSeconds == 0 || age <= LastQualifiedFlowHoldSeconds * TimeSpan.TicksPerSecond;
++        }
++
++        private void BeginFlowRender(double width, double dpi)
++        {
++            // OnRender is the UI-thread boundary. Do not touch WPF from a market-data callback.
++            // The tooltip omits ticking age so unchanged history does not reset an open tooltip.
++            string tooltip = "Recorded flow history\n" + FormatLastQualifiedFlowSignal(false);
++            if (UiWrapper != null && (!ReferenceEquals(lastFlowTooltipOwner, UiWrapper) || tooltip != lastFlowTooltipText))
++            {
++                System.Windows.Controls.ToolTipService.SetToolTip(UiWrapper, tooltip);
++                lastFlowTooltipOwner = UiWrapper; lastFlowTooltipText = tooltip;
++            }
++            lastFlowRenderWidth = width; lastFlowRenderDpi = dpi;
++            lastFlowLiveLabels = lastFlowHistoryLabels = lastFlowCompactLabels = lastFlowNoSpace = 0;
++            lastFlowHistoryVisibility = lastQualifiedFlowSignal == null ? "No retained qualification"
++                : !PersistLastQualifiedFlowSignal ? "History marker disabled; summary retained"
++                : !LastQualifiedFlowMarkerVisible() ? "History marker timed out; summary retained"
++                : "History price outside visible rows, side filtered, or column inactive";
++        }
++
++        private double FlowNumberWidth(PriceRow row, int side, double dpi)
++        {
++            if ((side == 0 ? row.BidVolume : row.AskVolume) <= 0) return -1;
++            long value = 0; string number;
++            if (CalculationMode == ExecutionOSPullingStackingCalculationModeV4.RollingWindow)
++                number = TryRollingValue(row.Price, side == 1, out value)
++                    ? value.ToString(Core.Globals.GeneralOptions.CurrentCulture) : "—";
++            else
++            {
++                Tuple<long, long> entry;
++                if (!(side == 0 ? bidPriceDepthMap : askPriceDepthMap).TryGetValue(row.Price, out entry)) return -1;
++                number = entry.Item2.ToString(Core.Globals.GeneralOptions.CurrentCulture);
++            }
++            return new FormattedText(number, Core.Globals.GeneralOptions.CurrentCulture, FlowDirection.LeftToRight,
++                typeFace, SuperDom.Font.Size, side == 0 ? BidForeColor : AskForeColor, dpi).Width;
++        }
++
++        private void DrawRememberedOrLiveFlow(DrawingContext dc, PriceRow row, int side,
++            ExecutionOSFlowEvidenceV4.Signal signal, bool history, double width, double y, double dpi)
++        {
++            double half = DisplayType == PullingStackingDisplayType.BidAsk ? width / 2.0 : width;
++            double left = DisplayType == PullingStackingDisplayType.BidAsk && side == 1 ? half : 0;
++            double edgeLeft = left + 3, edgeRight = left + half - 3;
++            double numberWidth = FlowNumberWidth(row, side, dpi);
++            if (numberWidth >= 0)
++            {
++                double center = side == 0 ? width / 4.0 : width * 3.0 / 4.0;
++                if (side == 0) edgeLeft = Math.Max(edgeLeft, center + numberWidth / 2.0 + 4);
++                else edgeRight = Math.Min(edgeRight, center - numberWidth / 2.0 - 4);
++            }
++            bool candidate = signal.State == ExecutionOSFlowEvidenceV4.Stage.Candidate;
++            string label = FlowPatternLabel(signal.Pattern, false), shortLabel = FlowPatternLabel(signal.Pattern, true);
++            string outcome = FlowOutcomeCode(lastQualifiedFlowOutcome);
++            string[] choices = history ? new[] { "LAST " + label + " " + outcome, "L " + shortLabel + " " + outcome, "L " + shortLabel }
++                : new[] { label + (candidate ? "?" : ""), shortLabel + (candidate ? "?" : "") };
++            Brush brush = history ? Brushes.Gray : candidate ? Brushes.Goldenrod
++                : (signal.Pattern == ExecutionOSFlowEvidenceV4.Kind.BuyerAbsorption
++                    || signal.Pattern == ExecutionOSFlowEvidenceV4.Kind.BuyInitiative) ? Brushes.LimeGreen : Brushes.Red;
++            for (int i = 0; i < choices.Length; i++)
++            {
++                FormattedText text = new FormattedText(choices[i], Core.Globals.GeneralOptions.CurrentCulture,
+                     FlowDirection.LeftToRight, typeFace, Math.Max(8.0, Math.Min(10.0, SuperDom.Font.Size * 0.65)), brush, dpi);
+-                double half = DisplayType == PullingStackingDisplayType.BidAsk ? renderWidth / 2.0 : renderWidth;
+-                double left = DisplayType == PullingStackingDisplayType.BidAsk && side == 1 ? half : 0;
+-                Rect clip = new Rect(left, verticalOffset, half, SuperDom.ActualRowHeight);
++                if (text.Width > edgeRight - edgeLeft || text.Height > SuperDom.ActualRowHeight) continue;
++                Rect clip = new Rect(edgeLeft, y, edgeRight - edgeLeft, SuperDom.ActualRowHeight);
+                 dc.PushClip(new RectangleGeometry(clip));
+-                double x = side == 0 ? Math.Max(3, clip.Right - text.Width - 3) : clip.Left + 3;
+-                dc.DrawText(text, new Point(x, verticalOffset + (SuperDom.ActualRowHeight - text.Height) / 2.0));
++                dc.DrawText(text, new Point(side == 0 ? edgeRight - text.Width : edgeLeft,
++                    y + (SuperDom.ActualRowHeight - text.Height) / 2.0));
+                 dc.Pop();
+-            }
++                if (i > 0) lastFlowCompactLabels++;
++                if (history) { lastFlowHistoryLabels++; lastFlowHistoryVisibility = "Historical marker drawn; L/LAST = recorded qualification"; }
++                else { lastFlowLiveLabels++; if (lastQualifiedFlowSignal != null && signal.Id == lastQualifiedFlowSignal.Id)
++                    lastFlowHistoryVisibility = "Latest qualification currently drawn as live evidence"; }
++                return;
++            }
++            lastFlowNoSpace++;
++            if (history || (lastQualifiedFlowSignal != null && signal.Id == lastQualifiedFlowSignal.Id))
++                lastFlowHistoryVisibility = "Insufficient measured label space; summary retained";
+         }
+     }
+     #endregion

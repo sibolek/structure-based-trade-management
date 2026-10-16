@@ -1,0 +1,87 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using F = ExecutionOSFlowEvidenceV4;
+internal static class Program
+{
+    private static int passed;
+    private static long T(double seconds) { return (long)(seconds * TimeSpan.TicksPerSecond); }
+    private static void Yes(bool value,string why) { if(!value)throw new Exception(why); }
+    private static void Eq(object actual,object expected,string why) { if(!Equals(actual,expected))throw new Exception(why+": "+actual+" != "+expected); }
+    private static void Test(string name,Action test) { test();passed++;Console.WriteLine("PASS "+name); }
+    private static F New(F.Settings settings=null)
+    {
+        F f=new F(settings??new F.Settings());f.Reset(T(0),"start");f.SetReady(true,T(0),"ready");
+        f.BeginCoverage();f.Quantity(F.Side.Bid,100,100,T(0));f.Quantity(F.Side.Ask,101,100,T(0));f.EndCoverage(T(0));f.Quote(100,101);f.Evaluate(T(5),true);return f;
+    }
+    private static long Trade(F f,int direction,long price,long volume,double time,bool match=true,long bid=100,long ask=101)
+    {long id=f.AddTrade(direction,price,volume,bid,ask,T(time));if(match)f.MatchTrade(id,volume);return id;}
+    private static void Abs(F f,F.Side side,bool match=true,bool replenishment=true)
+    {
+        int direction=side==F.Side.Bid?-1:1;long price=side==F.Side.Bid?100:101;
+        Trade(f,direction,price,60,5.1,match);if(replenishment)f.Contribution(1,side,price,60,T(5.12),T(5.12));
+        Trade(f,direction,price,60,5.5,match);if(replenishment)f.Contribution(2,side,price,60,T(5.52),T(5.52));
+        f.Evaluate(T(5.9),true);Trade(f,direction,price,1,6.2,match);f.Evaluate(T(6.5),true);
+    }
+    private static F.Signal At(F f,F.Side side,long price) {return f.At(side,price);}
+    private static List<F.Signal> Drain(F f) {List<F.Signal> result=new List<F.Signal>();F.Signal e;while((e=f.TakeTransition())!=null)result.Add(e);return result;}
+    private static void Initiative(F f,bool buy)
+    {
+        int direction=buy?1:-1;
+        Trade(f,direction,buy?100:102,50,5.1,false,buy?99:102,buy?100:103);
+        Trade(f,direction,101,50,5.5,false,100,101);
+        Trade(f,direction,buy?102:100,50,5.9,false,buy?101:100,buy?102:101);
+        f.Evaluate(T(5.9),true);f.Evaluate(T(6.5),true);
+    }
+    public static int Main()
+    {
+        try {
+            Test("Buyer absorption requires matched selling, replenishment and a hold",delegate {F f=New();Abs(f,F.Side.Bid);F.Signal s=At(f,F.Side.Bid,100);Eq(s.Pattern,F.Kind.BuyerAbsorption,"side");Eq(s.State,F.Stage.Qualified,"qualified");Eq(s.Matched,121L,"matched");Eq(s.Refills,2,"two refill observations");});
+            Test("Seller absorption is the mirrored pattern",delegate {F f=New();Abs(f,F.Side.Ask);F.Signal s=At(f,F.Side.Ask,101);Eq(s.Pattern,F.Kind.SellerAbsorption,"side");Eq(s.State,F.Stage.Qualified,"qualified");});
+            Test("Executions without replenishment remain candidates",delegate {F f=New();Abs(f,F.Side.Bid,true,false);Eq(At(f,F.Side.Bid,100).State,F.Stage.Candidate,"no confirmed refill");Eq(f.QualifiedCount,0L,"no qualification");});
+            Test("Replenishment without executions cannot signal absorption",delegate {F f=New();f.Contribution(1,F.Side.Bid,100,200,T(5.1),T(5.1));f.Contribution(2,F.Side.Bid,100,100,T(5.2),T(5.2));f.Evaluate(T(6),true);Yes(At(f,F.Side.Bid,100)==null,"no trade evidence");});
+            Test("Unmatched executions block absorption qualification",delegate {F f=New();Abs(f,F.Side.Ask,false);Eq(At(f,F.Side.Ask,101).State,F.Stage.Candidate,"unmatched");Eq(f.QualifiedCount,0L,"no qualification");});
+            Test("Low matched share cannot be hidden by lifetime volume",delegate {F f=New();long id=Trade(f,-1,100,100,5.1,false);f.MatchTrade(id,50);f.Contribution(1,F.Side.Bid,100,100,T(5.2),T(5.2));f.Contribution(2,F.Side.Bid,100,100,T(5.3),T(5.3));f.Evaluate(T(5.9),true);f.Evaluate(T(6.5),true);Eq(f.QualifiedCount,0L,"50 percent below gate");});
+            Test("Unknown trade share blocks strong labels",delegate {F f=New();Abs(f,F.Side.Bid);f.Reset(T(7),"new sample");f.SetReady(true,T(7),"ready");f.BeginCoverage();f.Quantity(F.Side.Bid,100,100,T(7));f.Quantity(F.Side.Ask,101,100,T(7));f.EndCoverage(T(7));f.Evaluate(T(12),true);Trade(f,0,100,100,12.1,false);Trade(f,-1,100,100,12.2);f.Contribution(8,F.Side.Bid,100,100,T(12.3),T(12.3));f.Contribution(9,F.Side.Bid,100,100,T(12.4),T(12.4));f.Evaluate(T(13.1),true);f.Evaluate(T(13.7),true);Eq(At(f,F.Side.Bid,100).State,F.Stage.Candidate,"unknown classification");});
+            Test("Candidate timestamps and qualification have no backdating",delegate {F f=New();Abs(f,F.Side.Bid);List<F.Signal> e=Drain(f);F.Signal c=e.Find(delegate(F.Signal s){return s.State==F.Stage.Candidate;});F.Signal q=e.Find(delegate(F.Signal s){return s.State==F.Stage.Qualified;});Eq(c.Detected,T(5.9),"actual first candidate observation");Eq(q.QualifiedAt,T(6.5),"actual qualification time");Eq(c.Executed,120L,"candidate log includes evidence");Yes(q.QualifiedAt>c.Detected,"later observation");});
+            Test("Adverse movement invalidates a candidate before qualification",delegate {F f=New();Abs(f,F.Side.Bid,true,false);Trade(f,-1,98,1,6.6);f.Evaluate(T(6.6),true);Yes(At(f,F.Side.Bid,100)==null,"candidate invalidated");Eq(f.QualifiedCount,0L,"no false qualification");});
+            Test("Qualified absorption can be invalidated without rewriting its old event",delegate {F f=New();Abs(f,F.Side.Bid);Trade(f,-1,98,1,6.6);f.Evaluate(T(6.6),true);List<F.Signal> e=Drain(f);Yes(e.Exists(delegate(F.Signal s){return s.State==F.Stage.Qualified;}),"qualification retained in event log");Yes(e.Exists(delegate(F.Signal s){return s.State==F.Stage.Invalidated;}),"later invalidation");Yes(At(f,F.Side.Bid,100)==null,"marker removed");});
+            Test("Observation loss suppresses a marker rather than treating it as pulling",delegate {F f=New();Abs(f,F.Side.Bid);f.BeginCoverage();f.Quantity(F.Side.Ask,101,100,T(6.6));f.EndCoverage(T(6.6));Yes(At(f,F.Side.Bid,100)==null,"lost coverage");Yes(Drain(f).Exists(delegate(F.Signal s){return s.State==F.Stage.Suppressed;}),"suppression recorded");});
+            Test("Coverage reentry cannot reuse prior executions",delegate {F f=New();Abs(f,F.Side.Bid);f.BeginCoverage();f.EndCoverage(T(6.6));f.BeginCoverage();f.Quantity(F.Side.Bid,100,100,T(6.7));f.Quantity(F.Side.Ask,101,100,T(6.7));f.EndCoverage(T(6.7));f.Evaluate(T(6.8),true);Yes(At(f,F.Side.Bid,100)==null,"old evidence predates new coverage");});
+            Test("Historical expiry alone cannot create an alert",delegate {F f=New();Abs(f,F.Side.Bid);long qualified=f.QualifiedCount;f.Evaluate(T(20),true);Eq(f.QualifiedCount,qualified,"expiry is not a new event");Eq(f.RetainedTrades,0,"tape expires");Eq(f.RetainedContributions,0,"contributions expire");Yes(At(f,F.Side.Bid,100)==null,"old marker expires");});
+            Test("Matched credit keeps the original depth evidence timestamp",delegate {F f=New();long id=Trade(f,-1,100,100,5.1,false);f.Contribution(1,F.Side.Bid,100,-100,T(5.12),T(5.12));f.MatchTrade(id,100);f.Contribution(1,F.Side.Bid,100,0,T(5.12),T(5.2));Eq(f.RetainedContributions,1,"correction not duplicate");f.Evaluate(T(11),true);Eq(f.RetainedContributions,0,"no revival");});
+            Test("One corrected contribution is one refill observation",delegate {F f=New();Trade(f,-1,100,100,5.1);f.Contribution(1,F.Side.Bid,100,50,T(5.2),T(5.2));f.Contribution(1,F.Side.Bid,100,100,T(5.2),T(5.3));f.Evaluate(T(6),true);f.Evaluate(T(6.6),true);Eq(f.QualifiedCount,0L,"one refill does not satisfy two-observation gate");});
+            Test("Attribution uncertainty pauses absorption",delegate {F f=New();Abs(f,F.Side.Bid);f.AttributionUncertain(T(6.6));Trade(f,-1,100,100,6.7);f.Contribution(3,F.Side.Bid,100,100,T(6.7),T(6.7));f.Evaluate(T(7.5),true);f.Evaluate(T(8.1),true);Eq(f.QualifiedCount,1L,"no new qualified absorption during uncertainty");});
+            Test("Both-sided activity need not imply absorption dominance",delegate {F f=New();Trade(f,-1,100,100,5.1);Trade(f,1,101,100,5.2);f.Contribution(1,F.Side.Bid,100,100,T(5.3),T(5.3));f.Contribution(2,F.Side.Bid,100,100,T(5.4),T(5.4));f.Evaluate(T(6),true);Yes(At(f,F.Side.Bid,100)==null,"balanced activity is not dominant selling");});
+            Test("Quiet old executions cannot qualify a new pattern",delegate {F f=New();Trade(f,-1,100,100,5.1);f.Contribution(1,F.Side.Bid,100,100,T(5.2),T(5.2));f.Contribution(2,F.Side.Bid,100,100,T(5.3),T(5.3));f.Evaluate(T(8),true);Yes(At(f,F.Side.Bid,100)==null,"quiet timeout");});
+            Test("Buy initiative requires price and inside-quote progress",delegate {F f=New();Initiative(f,true);F.Signal s=At(f,F.Side.Ask,102);Eq(s.Pattern,F.Kind.BuyInitiative,"buy");Eq(s.State,F.Stage.Qualified,"qualified");Eq(s.AdvanceTicks,2L,"two ticks");});
+            Test("Sell initiative is symmetric",delegate {F f=New();Initiative(f,false);F.Signal s=At(f,F.Side.Bid,100);Eq(s.Pattern,F.Kind.SellInitiative,"sell");Eq(s.State,F.Stage.Qualified,"qualified");});
+            Test("Buying at one stationary price is not initiative",delegate {F f=New();Trade(f,1,101,150,5.1);f.Evaluate(T(6),true);f.Evaluate(T(6.6),true);F.Signal s=At(f,F.Side.Ask,101);Yes(s==null||s.Pattern!=F.Kind.BuyInitiative,"no price progress");});
+            Test("Quote-only movement cannot establish initiative",delegate {F f=New();Trade(f,1,101,150,5.1);f.Quote(102,103);f.Evaluate(T(6),true);Yes(At(f,F.Side.Ask,103)==null,"no executed advance");});
+            Test("Print advance with no quote follow-through remains unqualified",delegate {F f=New();Trade(f,1,100,50,5.1,false,99,100);Trade(f,1,101,50,5.5,false,99,100);Trade(f,1,102,50,5.9,false,99,100);f.Evaluate(T(5.9),true);f.Evaluate(T(6.5),true);Yes(At(f,F.Side.Ask,102)==null,"quotes must follow");});
+            Test("Initiative can be recognized without asserting execution-depth matches",delegate {F f=New();Initiative(f,true);Eq(At(f,F.Side.Ask,102).State,F.Stage.Qualified,"actual prints and quote progress are sufficient for initiative");Eq(At(f,F.Side.Ask,102).Matched,0L,"no invented matches");});
+            Test("A large isolated print is insufficient for initiative",delegate {F f=New();Trade(f,1,105,1000,5.1,false,104,105);f.Evaluate(T(6),true);Yes(At(f,F.Side.Ask,105)==null,"no observed multi-price advance");});
+            Test("Qualified initiative invalidates on a retracement",delegate {F f=New();Initiative(f,true);Trade(f,-1,100,1,6.6,false,100,101);f.Evaluate(T(6.6),true);Yes(At(f,F.Side.Ask,102)==null,"initiative retraced");Yes(Drain(f).Exists(delegate(F.Signal s){return s.State==F.Stage.Invalidated;}),"invalidation log");});
+            Test("Feed unavailability suppresses qualified states",delegate {F f=New();Initiative(f,true);f.SetReady(false,T(6.6),"feed reset");Yes(At(f,F.Side.Ask,102)==null,"suppressed");Eq(f.RetainedTrades,0,"old tape cleared");});
+            Test("Manual reset cannot reuse old IDs or matched evidence",delegate {F f=New();long old=Trade(f,-1,100,100,5.1,false);f.Reset(T(6),"manual");f.SetReady(true,T(6),"ready");long fresh=Trade(f,-1,100,100,6.1,false);Yes(fresh>old,"unique ID across reset");f.MatchTrade(old,100);Eq(f.RetainedTrades,1,"old ID ignored");});
+            Test("Rewind resets receipt-clock evidence",delegate {F f=New();Abs(f,F.Side.Bid);f.Advance(T(1));Yes(!f.IsWarm,"rewind cold");Eq(f.RetainedTrades,0,"rewind clears tape");Yes(At(f,F.Side.Bid,100)==null,"no future signal survives");});
+            Test("Capacity failure prevents strong labels",delegate {F.Settings c=new F.Settings{Capacity=2};F f=New(c);Trade(f,-1,100,50,5.1);Trade(f,-1,100,50,5.2);Trade(f,-1,100,50,5.3);Yes(f.Faulted,"explicit fault");f.Evaluate(T(6),true);Eq(f.QualifiedCount,0L,"no truncated-evidence qualification");});
+            Test("Evidence cutoff excludes its exact left boundary",delegate {F f=New();Trade(f,-1,100,100,5.1);f.Advance(T(10.1));Eq(f.RetainedTrades,0,"exact cutoff");});
+            Test("Detection options can disable each pattern independently",delegate {F f=New(new F.Settings{Absorption=false,Initiative=false});Abs(f,F.Side.Bid);Initiative(f,true);Eq(f.QualifiedCount,0L,"disabled");});
+            Test("Fresh unresolved executions receive grace before lowering matched quality",delegate {F f=New();Abs(f,F.Side.Bid);Trade(f,-1,100,100,6.6,false);f.Evaluate(T(6.6),true);Eq(At(f,F.Side.Bid,100).State,F.Stage.Qualified,"pending fresh trade is not mature evidence");f.Evaluate(T(6.9),true);Yes(At(f,F.Side.Bid,100)==null,"mature unmatched volume suppresses label");Yes(Drain(f).Exists(delegate(F.Signal s){return s.State==F.Stage.Suppressed;}),"quality change recorded");});
+            Test("Partial fresh match credit cannot inflate the eligible denominator",delegate {F f=New();Trade(f,-1,100,100,5.1,true);f.Contribution(1,F.Side.Bid,100,100,T(5.2),T(5.2));f.Contribution(2,F.Side.Bid,100,100,T(5.3),T(5.3));long pending=Trade(f,-1,100,100,5.8,false);f.MatchTrade(pending,10);f.Evaluate(T(5.9),true);F.Signal s=At(f,F.Side.Bid,100);Eq(s.Eligible,100L,"pending volume excluded");Eq(s.Matched,100L,"pending partial credit excluded");});
+            Test("Invalid trade prices cannot create false adverse movement",delegate {F f=New();Abs(f,F.Side.Bid);f.AddTrade(0,0,1,100,101,T(6.6),false);f.Evaluate(T(6.6),true);Eq(At(f,F.Side.Bid,100).State,F.Stage.Qualified,"malformed price ignored for movement");});
+            Test("Classification deterioration suppresses already qualified absorption",delegate {F f=New();Abs(f,F.Side.Bid);Trade(f,0,100,100,6.6,false);f.Evaluate(T(6.6),true);Yes(At(f,F.Side.Bid,100)==null,"quality degradation");Yes(f.Status.Contains("classification incomplete"),"status");});
+            Test("Confirmation duration is measured after all conditions first agree",delegate {F f=New();Trade(f,-1,100,120,5.1);f.Contribution(1,F.Side.Bid,100,60,T(5.12),T(5.12));f.Contribution(2,F.Side.Bid,100,60,T(5.52),T(5.52));f.Evaluate(T(5.85),true);f.Evaluate(T(6.34),true);Eq(At(f,F.Side.Bid,100).State,F.Stage.Candidate,"499 milliseconds still provisional");f.Evaluate(T(6.35),true);Eq(At(f,F.Side.Bid,100).State,F.Stage.Qualified,"exact 500 milliseconds qualifies");});
+            Test("Withdrawals offset refills in net replenishment",delegate {F f=New();Trade(f,-1,100,120,5.1);f.Contribution(1,F.Side.Bid,100,100,T(5.2),T(5.2));f.Contribution(2,F.Side.Bid,100,100,T(5.3),T(5.3));f.Contribution(3,F.Side.Bid,100,-200,T(5.4),T(5.4));f.Evaluate(T(5.9),true);f.Evaluate(T(6.5),true);Eq(At(f,F.Side.Bid,100).Replenished,0L,"true net");Eq(At(f,F.Side.Bid,100).State,F.Stage.Candidate,"canceled additions cannot qualify");});
+            Test("Execution-only correction is not a refill observation",delegate {F f=New();Trade(f,-1,100,120,5.1);f.Contribution(1,F.Side.Bid,100,-120,T(5.2),T(5.2));f.Contribution(1,F.Side.Bid,100,0,T(5.2),T(5.3));f.Evaluate(T(5.9),true);Eq(At(f,F.Side.Bid,100).Refills,0,"matched execution alone adds no liquidity");});
+            Benchmark();Console.WriteLine("RESULT "+passed+" flow scenarios passed; 0 failed");return 0;
+        }catch(Exception ex){Console.Error.WriteLine("FAIL "+ex);return 1;}
+    }
+    private static void Benchmark()
+    {
+        F f=New();Stopwatch w=Stopwatch.StartNew();const int n=100000;
+        for(int i=1;i<=n;i++){long now=T(5)+i*TimeSpan.TicksPerMillisecond;long id=f.AddTrade(i%2==0?1:-1,i%2==0?101:100,1,100,101,now);f.MatchTrade(id,1);f.Contribution(i,i%2==0?F.Side.Ask:F.Side.Bid,i%2==0?101:100,1,now,now);f.Evaluate(now);while(f.TakeTransition()!=null){}}
+        w.Stop();Yes(!f.Faulted,"bounded load");Console.WriteLine("BENCH flow input pairs="+n+" wallMs="+w.Elapsed.TotalMilliseconds.ToString("F1")+" retainedTrades="+f.RetainedTrades+" retainedContributions="+f.RetainedContributions+"; excludes NinjaTrader/WPF");
+    }
+}

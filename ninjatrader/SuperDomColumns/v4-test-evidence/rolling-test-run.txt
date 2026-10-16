@@ -1,0 +1,56 @@
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Core.cs(50,51): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ContributionObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Tests.csproj]
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Core.cs(51,33): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ExecutionMatchedObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Tests.csproj]
+PASS Initial Add and bootstrap Update seed zero
+PASS Net additions and cancellations
+PASS Pure execution trade-first
+PASS Pure execution depth-first using event timestamps
+PASS Execution plus additions and unchanged-depth replenishment
+PASS Execution credit consumed once across subsequent depth updates
+PASS Split executions, coalesced depth
+PASS Independent bid/ask at same price and independent price levels
+PASS Expiry excludes exact left boundary and works without ticks
+PASS Contributions expire individually with no periodic reset
+PASS Late correction retains original depth timestamp
+PASS Expired contribution cannot be resurrected by correction
+PASS Unconfirmed executions expire without invented stacking
+PASS Contradictory event timestamps stay unmatched
+PASS Missing source timestamp blocks execution attribution
+PASS Positional shifts keep history attached to price
+PASS Price replacement handles old removal and new baseline
+PASS Explicit inner removal is measured; outer loss is unavailable
+PASS Visibility loss and re-entry seed instead of fake pull/stack
+PASS Duplicate price rows aggregate side quantity
+PASS Ordered depth source regression preserves quantities but blocks ambiguous execution credit
+PASS Invalid position cannot corrupt the book
+PASS Manual history reset discards old pending credit
+PASS Late pre-reset executions cannot be credited to post-reset depth
+PASS Session epoch waits for fresh quantities while retaining positions
+PASS Feed/instrument reset discards book and history
+PASS Replay pause, speed progression, and rewind
+PASS Capacity overflow blanks result until explicit reset
+PASS Warm-up and provisional diagnostics
+PASS 3/5/10/30 second cutoff contracts
+PASS Randomized rolling sums against independent event-list oracle
+PASS Atomic snapshot preserves known zeros without fabricated execution intervals
+PASS Snapshot trigger uncertainty affects only the addressed level
+PASS Provider source clock can lag receipt time across rolling expiry
+PASS Reset fence cannot confuse lagged depth with pre-reset execution
+BENCH horizon=3s events=1000000 wallMs=349.0 eventsPerSecond=2865037 allocatedBytes=120524632 retainedEntries=30000
+BENCH horizon=5s events=1000000 wallMs=191.3 eventsPerSecond=5228731 allocatedBytes=121048944 retainedEntries=50000
+BENCH horizon=10s events=1000000 wallMs=160.3 eventsPerSecond=6237533 allocatedBytes=122097584 retainedEntries=100000
+BENCH horizon=30s events=1000000 wallMs=200.0 eventsPerSecond=5000958 allocatedBytes=128389048 retainedEntries=300000
+BENCH multiLevel=20 horizon=30s events=1000000 wallMs=826.7 eventsPerSecond=1209580 allocatedBytes=125248928 retainedEntries=300000 matchedVolume=100000
+RESULT 35 calculation scenarios passed; 0 failed
+
+Welcome to .NET 10.0!
+---------------------
+SDK Version: 10.0.401
+
+----------------
+Write your first app: https://aka.ms/dotnet-hello-world
+Find out what's new: https://aka.ms/dotnet-whats-new
+Explore documentation: https://aka.ms/dotnet-docs
+Report issues and find source on GitHub: https://github.com/dotnet/core
+Use 'dotnet --help' to see available commands or visit: https://aka.ms/dotnet-cli
+--------------------------------------------------------------------------------------
+An issue was encountered verifying workloads. For more information, run "dotnet workload update".

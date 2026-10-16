@@ -1,0 +1,21 @@
+PASS Adapter adverse excursion side=False, phase=1ms
+PASS Adapter adverse excursion side=True, phase=1ms
+PASS Adapter adverse excursion side=False, phase=30ms
+PASS Adapter adverse excursion side=True, phase=30ms
+PASS Adapter adverse excursion side=False, phase=99ms
+PASS Adapter adverse excursion side=True, phase=99ms
+PASS Adapter adverse excursion side=False, phase=100ms
+PASS Adapter adverse excursion side=True, phase=100ms
+PASS Adapter adverse excursion side=False, phase=101ms
+PASS Adapter adverse excursion side=True, phase=101ms
+PASS Adapter 30ms replenishment loss restarts confirmation side=False
+PASS Adapter 30ms replenishment loss restarts confirmation side=True
+PASS Adapter same-receipt reset excludes late execution credits
+PASS Coalesced depth reconciliation preserves split-print continuity side=False
+PASS Separate same-time withdrawal/refill callbacks still restart continuity side=False
+PASS Coalesced depth reconciliation preserves split-print continuity side=True
+PASS Separate same-time withdrawal/refill callbacks still restart continuity side=True
+PASS Coalesced one-print execution is equivalent to split-print reconciliation
+PASS Old opposite-order correction identities excluded after context change disable=False
+PASS Old opposite-order correction identities excluded after context change disable=True
+RESULT 20 repair integration scenarios passed; 0 failed

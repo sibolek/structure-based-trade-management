@@ -1,0 +1,115 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.IO;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Data;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.SuperDomColumns;
+using NinjaTrader.Gui.SuperDom;
+using System.Windows.Media;
+using F=NinjaTrader.NinjaScript.SuperDomColumns.ExecutionOSFlowEvidenceV4;
+public class FlowHarness:ExecutionOSPullingStacking_v4_Experimental
+{
+ public void SetState(State s){State=s;OnStateChange();}
+ public void Depth(MarketDepthEventArgs e){OnMarketDepth(e);}
+ public void Data(MarketDataEventArgs e){OnMarketData(e);}
+ public DrawingContext Render(double width=240){DrawingContext d=new DrawingContext();OnRender(d,width);return d;}
+}
+internal static class Program
+{
+ static int passed;static DateTime origin=new DateTime(2026,10,13,10,0,0);
+ static Type type=typeof(ExecutionOSPullingStacking_v4_Experimental);
+ static void Yes(bool value,string why){if(!value)throw new Exception(why);}
+ static void Eq(object a,object b,string why){if(!Equals(a,b))throw new Exception(why+": "+a+" != "+b);}
+ static void Test(string name,Action test){test();passed++;Console.WriteLine("PASS "+name);}
+ static object Call(FlowHarness v,string name,params object[] args){return type.GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance).Invoke(v,args);}
+ static object Field(FlowHarness v,string name){return type.GetField(name,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(v);}
+ static F Engine(FlowHarness v){return (F)Field(v,"flow");}
+ static void Time(double seconds){Connection.PlaybackConnection.Now=origin.AddSeconds(seconds);}
+ static void Refresh(FlowHarness v,double seconds){Time(seconds);Call(v,"OnRollingRefresh",new object[]{null});}
+ static void Book(FlowHarness v)
+ {
+  for(int i=0;i<4;i++){
+   v.SuperDom.MarketDepth.Bids.Add(new MarketDepthRow{Price=100-i*.25,Volume=200});
+   v.SuperDom.MarketDepth.Asks.Add(new MarketDepthRow{Price=100.25+i*.25,Volume=200});
+   v.SuperDom.Rows.Add(new PriceRow{Price=100-i*.25,BidVolume=200});v.SuperDom.Rows.Add(new PriceRow{Price=100.25+i*.25,AskVolume=200});
+  }
+ }
+ static FlowHarness New(bool rolling=true,bool log=true)
+ {
+  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);
+  v.CalculationMode=rolling?ExecutionOSPullingStackingCalculationModeV4.RollingWindow:ExecutionOSPullingStackingCalculationModeV4.LegacyBaseline;
+  v.ApplyLegacyResetsToRolling=false;v.ResetTolerance=60000;v.LogFlowEvents=log;Book(v);v.SetState(State.Active);
+  // Deterministic harness: exercise the timer callback explicitly instead of racing it.
+  Timer timer=(Timer)Field(v,"rollingRefreshTimer");timer.Dispose();type.GetField("rollingRefreshTimer",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,null);
+  Refresh(v,0);Update(v,false,0,200,.01);Update(v,true,0,200,.02);Refresh(v,5.02);return v;
+ }
+ static void Update(FlowHarness v,bool ask,int pos,long qty,double seconds,double lag=0)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book[pos].Volume=qty;
+  PriceRow row=v.SuperDom.Rows.First(delegate(PriceRow r){return r.Price==price;});if(ask)row.AskVolume=qty;else row.BidVolume=qty;
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Update,Position=pos,Price=price,Volume=qty,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Remove(FlowHarness v,bool ask,int pos,double seconds)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book.RemoveAt(pos);
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Remove,Position=pos,Price=price,Volume=0,Time=origin.AddSeconds(seconds)});
+ }
+ static void Trade(FlowHarness v,bool buy,double price,long qty,double seconds,double bid=100,double ask=100.25,double lag=0)
+ {
+  Time(seconds);v.Data(new MarketDataEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Last,Price=price,Volume=qty,Bid=bid,Ask=ask,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Abs(FlowHarness v,bool ask,bool depthFirst=false,double lag=0)
+ {
+  double price=ask?100.25:100;
+  for(int i=0;i<2;i++){
+   double t=5.1+i*.4;
+   if(depthFirst){Update(v,ask,0,140,t+.01,lag);Trade(v,ask,price,60,t+.04,100,100.25,lag+.04);}
+   else{Trade(v,ask,price,60,t,100,100.25,lag);Update(v,ask,0,140,t+.01,lag);}
+   Update(v,ask,0,200,t+.06,lag);
+  }
+  Refresh(v,5.9);Refresh(v,6.5);
+ }
+ static F.Signal At(FlowHarness v,bool ask,double price){return Engine(v).At(ask?F.Side.Ask:F.Side.Bid,(long)Math.Round(price/.25));}
+ static void End(FlowHarness v){v.SetState(State.Terminated);}
+ static void Add(FlowHarness v,bool ask,double price,double seconds)
+ {
+ Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;book.Insert(0,new MarketDepthRow{Price=price,Volume=200});
+ if(!v.SuperDom.Rows.Any(delegate(PriceRow r){return r.Price==price;}))v.SuperDom.Rows.Add(new PriceRow{Price=price});
+ v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Add,Position=0,Price=price,Volume=200,Time=origin.AddSeconds(seconds)});
+ }
+ public static int Main(){try{
+ foreach(bool up in new[]{true,false}){bool u=up;foreach(bool lockedFirst in new[]{true,false}){bool l=lockedFirst;Test("Ordered inside transition up="+u+" lockedFirst="+l,delegate{
+ FlowHarness v=New();Abs(v,!u);long resets=Engine(v).ResetCount;int tape=Engine(v).RetainedTrades;var book=(ExecutionOSRollingLiquidityV4)Field(v,"rolling");long psresets=book.ResetCount;
+ if(l){Add(v,!u,u?100.25:100,6.6);Yes(!Engine(v).QuoteReady,"locked quotes pause");Yes(Engine(v).QuotePauseReason.Contains("locked"),"specific locked diagnostic");Eq(Engine(v).RetainedTrades,tape,"history survives intermediate callback");Remove(v,u,0,6.61);}
+ else{Remove(v,u,0,6.6);Add(v,!u,u?100.25:100,6.61);}
+ Eq(Engine(v).ResetCount,resets,"no flow context reset");Eq(book.ResetCount,psresets,"P/S untouched");Eq(book.ContinuityBreakCount,0L,"valid sequence");Yes(Engine(v).IsWarm&&Engine(v).QuoteReady,"warm after valid quote transition");Eq(Engine(v).QuotePauseCount,l?1L:0L,"pause count");End(v);
+ });}}
+ Test("Crossed quote pause preserves tape and publishes both prices",delegate{
+ FlowHarness v=New();Trade(v,false,100,60,5.1);long resets=Engine(v).ResetCount;Add(v,false,100.5,5.2);Yes(!Engine(v).QuoteReady,"crossed gate closed");Refresh(v,5.31);Yes(Engine(v).Status.Contains("crossed (bid tick 402, ask tick 401)"),"exact reason");Eq(Engine(v).RetainedTrades,1,"tape kept");Remove(v,false,0,5.32);Eq(Engine(v).ResetCount,resets,"no resets");Yes(Engine(v).QuoteReady&&Engine(v).IsWarm,"recovered");End(v);
+ });
+ Test("Disconnect during pause clears history with exact reset reason",delegate{
+ FlowHarness v=New();Trade(v,false,100,60,5.1);Add(v,false,100.25,5.2);v.SuperDom.IsConnected=false;Refresh(v,5.3);Eq(Engine(v).RetainedTrades,0,"hard context loss");Eq(Engine(v).LastContextFailure,"Feed disconnected","specific hard reason");v.SuperDom.IsConnected=true;Refresh(v,5.4);Remove(v,true,0,5.5);Refresh(v,10.499);Yes(!Engine(v).IsWarm,"freshwarmup4999");Refresh(v,10.5);Yes(Engine(v).IsWarm,"freshwarmup5000");End(v);
+ });
+ Test("Hard reset fences older same-receipt correction IDs",delegate{
+ FlowHarness v=New();Update(v,false,0,160,5.1);Update(v,true,0,160,5.2,.1);long before=(long)Field(v,"flowContributionFloor");v.SuperDom.IsReloading=true;Refresh(v,5.2);long fence=(long)Field(v,"flowContributionFloor");Yes(fence>before,"implicit context reset advances contribution identity fence");v.SuperDom.IsReloading=false;Refresh(v,5.21);Trade(v,true,100.25,40,5.22,100,100.25,.13);Trade(v,false,100,40,5.23,100,100.25,.135);Eq(Engine(v).RetainedContributions,0,"precontext corrections blocked");Yes(!Engine(v).Faulted,"no erroneous receipt regression");End(v);
+ });
+ Test("Flow diagnostic includes reset count, pause count and warm clock",delegate{
+ FlowHarness v=New();Trade(v,false,100,60,5.1);Add(v,false,100.25,5.2);Refresh(v,5.31);string status=Engine(v).Status;Yes(status.Contains("flow resets ")&&status.Contains("quote pauses 1")&&status.Contains("quote ready False")&&status.Contains("warm elapsed ms ")&&status.Contains("last flow reset: "),"observable lifecycle fields");End(v);
+ });
+ Test("Zero ask queues pause detection while bid coverage survives",delegate{
+ FlowHarness v=New();Trade(v,false,100,60,5.1);long resets=Engine(v).ResetCount;for(int i=0;i<4;i++)Update(v,true,i,0,5.2+i*.01);Yes(!Engine(v).QuoteReady,"no inside ask");Yes(Engine(v).QuotePauseReason.Contains("Inside ask unconfirmed"),"specific missing side");Eq(Engine(v).RetainedTrades,1,"tape retained");Update(v,true,0,200,5.24);Eq(Engine(v).ResetCount,resets,"no hard reset");Yes(Engine(v).QuoteReady&&Engine(v).IsWarm,"new ask observation recovers warm context");End(v);
+ });
+ foreach(bool buy in new[]{false,true}){bool b=buy;foreach(bool stale in new[]{false,true}){bool st=stale;Test("Trusted L2 confirmation is independent of stale trade snapshot buy="+b+" stale="+st,delegate{
+ FlowHarness v=New();
+ if(b){Trade(v,true,100.25,50,5.1);Remove(v,true,0,5.11);Remove(v,false,3,5.12);Add(v,false,100.25,5.13);Trade(v,true,100.5,50,5.5,100.25,100.5);Remove(v,true,0,5.51);Add(v,false,100.5,5.52);Trade(v,true,100.75,50,5.9,100.5,100.75);}
+ else{Trade(v,false,100,50,5.1);Remove(v,false,0,5.11);Remove(v,true,3,5.12);Add(v,true,100,5.13);Trade(v,false,99.75,50,5.5,99.75,100);Remove(v,false,0,5.51);Add(v,true,99.75,5.52);Trade(v,false,99.5,50,5.9,99.5,99.75);}
+ double price=b?100.75:99.5;F.Signal before=At(v,b,price);Yes(before!=null,"initiative candidate");long clock=before.QualifyingSince;Eq(clock,origin.AddSeconds(5.9).Ticks,"initial support");Trade(v,b,price,1,6,st?100:(b?100.5:99.5),st?100.25:(b?100.75:99.75));Eq(At(v,b,price).QualifyingSince,clock,"L2 support stays continuous");Refresh(v,6.399);Eq(At(v,b,price).State,F.Stage.Candidate,"499ms");Refresh(v,6.4);Eq(At(v,b,price).State,F.Stage.Qualified,"same500msboundary");End(v);
+ });}}
+ Console.WriteLine("RESULT "+passed+" live readiness integration scenarios passed; 0 failed");return 0;
+ }catch(Exception ex){Console.Error.WriteLine("FAIL "+ex);return 1;}}
+}

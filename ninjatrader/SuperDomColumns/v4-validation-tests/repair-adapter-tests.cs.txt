@@ -1,0 +1,115 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.IO;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Data;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.SuperDomColumns;
+using NinjaTrader.Gui.SuperDom;
+using System.Windows.Media;
+using F=NinjaTrader.NinjaScript.SuperDomColumns.ExecutionOSFlowEvidenceV4;
+public class FlowHarness:ExecutionOSPullingStacking_v4_Experimental
+{
+ public void SetState(State s){State=s;OnStateChange();}
+ public void Depth(MarketDepthEventArgs e){OnMarketDepth(e);}
+ public void Data(MarketDataEventArgs e){OnMarketData(e);}
+ public DrawingContext Render(double width=240){DrawingContext d=new DrawingContext();OnRender(d,width);return d;}
+}
+internal static class Program
+{
+ static int passed;static DateTime origin=new DateTime(2026,10,13,10,0,0);
+ static Type type=typeof(ExecutionOSPullingStacking_v4_Experimental);
+ static void Yes(bool value,string why){if(!value)throw new Exception(why);}
+ static void Eq(object a,object b,string why){if(!Equals(a,b))throw new Exception(why+": "+a+" != "+b);}
+ static void Test(string name,Action test){test();passed++;Console.WriteLine("PASS "+name);}
+ static object Call(FlowHarness v,string name,params object[] args){return type.GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance).Invoke(v,args);}
+ static object Field(FlowHarness v,string name){return type.GetField(name,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(v);}
+ static F Engine(FlowHarness v){return (F)Field(v,"flow");}
+ static void Time(double seconds){Connection.PlaybackConnection.Now=origin.AddSeconds(seconds);}
+ static void Refresh(FlowHarness v,double seconds){Time(seconds);Call(v,"OnRollingRefresh",new object[]{null});}
+ static void Book(FlowHarness v)
+ {
+  for(int i=0;i<4;i++){
+   v.SuperDom.MarketDepth.Bids.Add(new MarketDepthRow{Price=100-i*.25,Volume=200});
+   v.SuperDom.MarketDepth.Asks.Add(new MarketDepthRow{Price=100.25+i*.25,Volume=200});
+   v.SuperDom.Rows.Add(new PriceRow{Price=100-i*.25,BidVolume=200});v.SuperDom.Rows.Add(new PriceRow{Price=100.25+i*.25,AskVolume=200});
+  }
+ }
+ static FlowHarness New(bool rolling=true,bool log=true)
+ {
+  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);
+  v.CalculationMode=rolling?ExecutionOSPullingStackingCalculationModeV4.RollingWindow:ExecutionOSPullingStackingCalculationModeV4.LegacyBaseline;
+  v.ApplyLegacyResetsToRolling=false;v.ResetTolerance=60000;v.LogFlowEvents=log;Book(v);v.SetState(State.Active);
+  // Deterministic harness: exercise the timer callback explicitly instead of racing it.
+  Timer timer=(Timer)Field(v,"rollingRefreshTimer");timer.Dispose();type.GetField("rollingRefreshTimer",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,null);
+  Refresh(v,0);Update(v,false,0,200,.01);Update(v,true,0,200,.02);Refresh(v,5.02);return v;
+ }
+ static void Update(FlowHarness v,bool ask,int pos,long qty,double seconds,double lag=0)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book[pos].Volume=qty;
+  PriceRow row=v.SuperDom.Rows.First(delegate(PriceRow r){return r.Price==price;});if(ask)row.AskVolume=qty;else row.BidVolume=qty;
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Update,Position=pos,Price=price,Volume=qty,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Remove(FlowHarness v,bool ask,int pos,double seconds)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book.RemoveAt(pos);
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Remove,Position=pos,Price=price,Volume=0,Time=origin.AddSeconds(seconds)});
+ }
+ static void Trade(FlowHarness v,bool buy,double price,long qty,double seconds,double bid=100,double ask=100.25,double lag=0)
+ {
+  Time(seconds);v.Data(new MarketDataEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Last,Price=price,Volume=qty,Bid=bid,Ask=ask,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Abs(FlowHarness v,bool ask,bool depthFirst=false,double lag=0)
+ {
+  double price=ask?100.25:100;
+  for(int i=0;i<2;i++){
+   double t=5.1+i*.4;
+   if(depthFirst){Update(v,ask,0,140,t+.01,lag);Trade(v,ask,price,60,t+.04,100,100.25,lag+.04);}
+   else{Trade(v,ask,price,60,t,100,100.25,lag);Update(v,ask,0,140,t+.01,lag);}
+   Update(v,ask,0,200,t+.06,lag);
+  }
+  Refresh(v,5.9);Refresh(v,6.5);
+ }
+ static F.Signal At(FlowHarness v,bool ask,double price){return Engine(v).At(ask?F.Side.Ask:F.Side.Bid,(long)Math.Round(price/.25));}
+ static void End(FlowHarness v){v.SetState(State.Terminated);}
+ public static int Main(){try{
+ int[] phases={1,30,99,100,101};
+ foreach(int phase in phases){int delay=phase;foreach(bool ask in new[]{false,true}){bool a=ask;Test("Adapter adverse excursion side="+a+", phase="+delay+"ms",delegate{
+ FlowHarness v=New();Abs(v,a);double p=a?100.25:100;Eq(At(v,a,p).State,F.Stage.Qualified,"setup");
+ double t=6.5+delay/1000.0;Trade(v,a,a?p+.5:p-.5,1,t);Trade(v,a,p,1,t+.001);Refresh(v,t+.11);
+ Yes(At(v,a,p)==null,"marker permanently invalidated");Yes(v.Printed.Any(delegate(string s){return s.Contains((a?"SellerAbsorption":"BuyerAbsorption")+"; Invalidated;");}),"invalidation log");End(v);
+ });}}
+ foreach(bool ask in new[]{false,true}){bool a=ask;Test("Adapter 30ms replenishment loss restarts confirmation side="+a,delegate{
+ FlowHarness v=New();double p=a?100.25:100;
+ Trade(v,a,p,60,5.1);Update(v,a,0,140,5.11);Update(v,a,0,200,5.16);
+ Trade(v,a,p,60,5.5);Update(v,a,0,140,5.51);Update(v,a,0,200,5.56);Refresh(v,5.9);Eq(At(v,a,p).State,F.Stage.Candidate,"setup");
+ Update(v,a,0,40,5.95);Update(v,a,0,200,5.98);Refresh(v,6.4);Eq(At(v,a,p).State,F.Stage.Candidate,"not 500ms continuous");
+ Refresh(v,6.479);Eq(At(v,a,p).State,F.Stage.Candidate,"499ms remains candidate");Refresh(v,6.48);Eq(At(v,a,p).State,F.Stage.Qualified,"500ms qualifies");End(v);
+ });}
+ Test("Adapter same-receipt reset excludes late execution credits",delegate{
+ FlowHarness v=New();Trade(v,false,100,120,5.1);v.ApplyLegacyResetsToRolling=true;Call(v,"ResetRollingLevel",100.0,false);Update(v,false,0,80,5.1);Refresh(v,5.9);Yes(At(v,false,100)==null,"no pre-reset candidate");End(v);
+ });
+ foreach(bool ask in new[]{false,true}){bool a=ask;Test("Coalesced depth reconciliation preserves split-print continuity side="+a,delegate{
+  FlowHarness v=New();double p=a?100.25:100;Trade(v,a,p,60,5.1);Update(v,a,0,140,5.11);Update(v,a,0,200,5.16);Trade(v,a,p,60,5.5);Update(v,a,0,140,5.51);Update(v,a,0,200,5.56);Refresh(v,5.9);
+  long start=At(v,a,p).QualifyingSince;Trade(v,a,p,40,5.95);Trade(v,a,p,80,5.96);Update(v,a,0,80,5.97);Refresh(v,6.4);Eq(At(v,a,p).State,F.Stage.Qualified,"pure execution shrink did not interrupt");Eq(At(v,a,p).QualifyingSince,start,"original support clock");Eq(At(v,a,p).Replenished,120L,"exact net");Eq(At(v,a,p).Matched,240L,"all matching credit");End(v);
+ });Test("Separate same-time withdrawal/refill callbacks still restart continuity side="+a,delegate{
+  FlowHarness v=New();double p=a?100.25:100;Trade(v,a,p,60,5.1);Update(v,a,0,140,5.11);Update(v,a,0,200,5.16);Trade(v,a,p,60,5.5);Update(v,a,0,140,5.51);Update(v,a,0,200,5.56);Refresh(v,5.9);
+  Update(v,a,0,40,5.95);Update(v,a,0,200,5.95);Refresh(v,6.4);Eq(At(v,a,p).State,F.Stage.Candidate,"real callback failure retained even at equal receipt");Refresh(v,6.45);Eq(At(v,a,p).State,F.Stage.Qualified,"new confirmation interval");End(v);
+ });}
+ Test("Coalesced one-print execution is equivalent to split-print reconciliation",delegate{
+  FlowHarness v=New();Trade(v,false,100,60,5.1);Update(v,false,0,140,5.11);Update(v,false,0,200,5.16);Trade(v,false,100,60,5.5);Update(v,false,0,140,5.51);Update(v,false,0,200,5.56);Refresh(v,5.9);
+  Trade(v,false,100,120,5.95);Update(v,false,0,80,5.97);Refresh(v,6.4);Eq(At(v,false,100).State,F.Stage.Qualified,"coalesced control");End(v);
+ });
+ foreach(bool disable in new[]{false,true}){bool d=disable;Test("Old opposite-order correction identities excluded after context change disable="+d,delegate{
+  FlowHarness v=New();Update(v,false,0,160,5.1);Update(v,true,0,160,5.2,.1);
+  if(d){v.FlowDetectionEnabled=false;Refresh(v,5.205);v.FlowDetectionEnabled=true;}else v.FlowMinimumVolume=150;Refresh(v,5.21);
+  Trade(v,true,100.25,40,5.22,100,100.25,.13);Trade(v,false,100,40,5.23,100,100.25,.135);
+  Yes(!Engine(v).Faulted,"no false contribution-order fault");Eq(((ExecutionOSRollingLiquidityV4)Field(v,"rolling")).MatchedVolume,80L,"P/S reconciliation unchanged");Eq(Engine(v).RetainedContributions,0,"pre-context corrected contributions excluded");Update(v,false,0,155,5.24);Eq(Engine(v).RetainedContributions,1,"new post-context contribution remains eligible for collection");End(v);
+ });}
+ Console.WriteLine("RESULT "+passed+" repair integration scenarios passed; 0 failed");return 0;
+ }catch(Exception ex){Console.Error.WriteLine("FAIL "+ex);return 1;}}
+}

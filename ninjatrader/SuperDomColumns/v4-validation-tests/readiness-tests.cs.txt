@@ -1,0 +1,62 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using F=ExecutionOSFlowEvidenceV4;
+internal static class Program
+{
+ static int passed;
+ static long T(double s){return (long)Math.Round(s*TimeSpan.TicksPerSecond);}
+ static void Check(bool v,string s){if(!v)throw new Exception(s);}
+ static void Eq(long a,long b,string s){Check(a==b,s+": "+a+" != "+b);}
+ static void Test(string s,Action a){a();passed++;Console.WriteLine("PASS "+s);}
+ static F New(F.Settings settings=null){F f=new F(settings??new F.Settings());f.Reset(0,"start");f.SetReady(true,0,"ready");f.BeginCoverage();f.Quantity(F.Side.Bid,100,200,0);f.Quantity(F.Side.Ask,101,200,0);f.EndCoverage(0);f.Quote(100,101);f.SetQuoteReady(true,0,"quotes ready");f.Evaluate(T(5));return f;}
+ static long Trade(F f,int d,long p,long q,double t,bool match=true,long bid=100,long ask=101){if(f.QuoteReady)f.Quote(bid,ask);long id=f.AddTrade(d,p,q,bid,ask,T(t));if(match)f.MatchTrade(id,q);f.Evaluate(T(t));return id;}
+ static List<F.Signal> Drain(F f){List<F.Signal> a=new List<F.Signal>();F.Signal s;while((s=f.TakeTransition())!=null)a.Add(s);return a;}
+ static void AbsPrepare(F f,bool ask=false){int d=ask?1:-1;long p=ask?101:100;F.Side side=ask?F.Side.Ask:F.Side.Bid;Trade(f,d,p,60,5.1);f.Contribution(1,side,p,60,T(5.12),T(5.12));Trade(f,d,p,60,5.5);f.Contribution(2,side,p,60,T(5.52),T(5.52));f.Evaluate(T(5.9));}
+ static void InitiativePrepare(F f,bool buy=true){int d=buy?1:-1;Trade(f,d,buy?101:103,50,5.1,false,buy?100:103,buy?101:104);Trade(f,d,102,50,5.5,false,buy?101:102,buy?102:103);Trade(f,d,buy?103:101,50,5.9,false,buy?102:101,buy?103:102);}
+ static void Stage(F f,F.Side side,long price,F.Stage stage){F.Signal s=f.At(side,price);Check(s!=null&&s.State==stage,"expected "+stage+" at "+price);}
+ static void No(F f,F.Side side,long price){Check(f.At(side,price)==null,"ended marker must stay removed");}
+ public static int Main(){try{
+ foreach(bool ask in new[]{false,true}){bool a=ask;Test("Candidate pause preserves evidence and restarts confirmation side="+a,delegate{
+ F f=New();AbsPrepare(f,a);long p=a?101:100;F.Side side=a?F.Side.Ask:F.Side.Bid;long old=f.At(side,p).Id;long resets=f.ResetCount;
+ f.SetQuoteReady(false,T(5.95),"locked");f.Evaluate(T(5.95),true);No(f,side,p);Eq(f.RetainedTrades,2,"history retained");Eq(f.ResetCount,resets,"no reset");Check(f.IsWarm,"warm history");Check(f.Status.Contains("quote observation paused: locked"),"specific status");
+ f.Quote(100,101);f.Evaluate(T(5.98));No(f,side,p);Check(!f.QuoteReady,"L1 cannot reopen L2 gate");
+ f.SetQuoteReady(true,T(6),"ready");f.Quote(100,101);f.Evaluate(T(6));Stage(f,side,p,F.Stage.Candidate);Check(f.At(side,p).Id!=old,"fresh candidate identity");Eq(f.At(side,p).QualifyingSince,T(6),"fresh confirmation");f.Evaluate(T(6.499));Stage(f,side,p,F.Stage.Candidate);f.Evaluate(T(6.5));Stage(f,side,p,F.Stage.Qualified);
+ });Test("Qualified pause suppresses marker and enforces cooldown side="+a,delegate{
+ F f=New();AbsPrepare(f,a);f.Evaluate(T(6.4));long p=a?101:100;F.Side side=a?F.Side.Ask:F.Side.Bid;Stage(f,side,p,F.Stage.Qualified);f.SetQuoteReady(false,T(6.41),"missing inside");No(f,side,p);f.SetQuoteReady(true,T(6.42),"ready");f.Quote(100,101);f.Evaluate(T(6.42));No(f,side,p);Check(Drain(f).Exists(delegate(F.Signal x){return x.State==F.Stage.Suppressed&&x.Reason=="missing inside";}),"explicit suppression");
+ });Test("Missing level still clears its epoch while quote-paused side="+a,delegate{
+ F f=New();AbsPrepare(f,a);f.SetQuoteReady(false,T(5.95),"missing inside");f.BeginCoverage();f.Quantity(a?F.Side.Bid:F.Side.Ask,a?100:101,200,T(5.95));f.EndCoverage(T(5.95));f.BeginCoverage();f.Quantity(F.Side.Bid,100,200,T(5.96));f.Quantity(F.Side.Ask,101,200,T(5.96));f.EndCoverage(T(5.96));f.SetQuoteReady(true,T(5.96),"ready");f.Quote(100,101);f.Evaluate(T(6.5));No(f,a?F.Side.Ask:F.Side.Bid,a?101:100);Eq(f.RetainedTrades,2,"tape survives individual coverage loss");
+ });}
+ foreach(bool buy in new[]{false,true}){bool b=buy;Test("Initiative adverse path during pause survives recovery buy="+b,delegate{
+ F f=New();InitiativePrepare(f,b);f.SetQuoteReady(false,T(5.95),"crossed");Trade(f,b?-1:1,b?100:104,1,5.96,false);Trade(f,b?1:-1,b?103:101,1,5.97,false,b?102:101,b?103:102);f.SetQuoteReady(true,T(5.98),"ready");f.Quote(b?102:101,b?103:102);f.Evaluate(T(6.5));No(f,b?F.Side.Ask:F.Side.Bid,b?103:101);Eq(f.QualifiedCount,0,"path failure retained");
+ });Test("Qualified initiative pauses and cannot resurrect buy="+b,delegate{
+ F f=New();InitiativePrepare(f,b);f.Evaluate(T(6.4));Stage(f,b?F.Side.Ask:F.Side.Bid,b?103:101,F.Stage.Qualified);f.SetQuoteReady(false,T(6.41),"locked");f.SetQuoteReady(true,T(6.42),"ready");f.Quote(b?102:101,b?103:102);f.Evaluate(T(6.42));No(f,b?F.Side.Ask:F.Side.Bid,b?103:101);
+ });}
+ Test("Long pause ages trades and contributions normally",delegate{
+ F f=New();AbsPrepare(f);f.SetQuoteReady(false,T(5.95),"locked");f.Evaluate(T(11),true);Eq(f.RetainedTrades,0,"prints expired");Eq(f.RetainedContributions,0,"contributions expired");f.SetQuoteReady(true,T(11.01),"ready");f.Quote(100,101);f.Evaluate(T(11.01));No(f,F.Side.Bid,100);Check(f.IsWarm,"warm context survives lengthy pause");
+ });
+ Test("Startup warm-up begins at first trusted inside quote",delegate{
+ F f=new F(new F.Settings());f.Reset(0,"start");f.SetReady(true,0,"context");f.SetQuoteReady(false,0,"unconfirmed");f.AddTrade(-1,100,60,100,101,T(1));f.Contribution(1,F.Side.Bid,100,60,T(1.1),T(1.1));f.Evaluate(T(6));Check(!f.IsWarm,"no warm-up without trusted L2");f.SetQuoteReady(true,T(6.1),"ready");f.Quote(100,101);f.Contribution(2,F.Side.Bid,100,60,T(6),T(6.2));Eq(f.RetainedContributions,2,"warm clock is independent from context contribution fence");f.Evaluate(T(11.099));Check(!f.IsWarm,"4999ms");f.Evaluate(T(11.1));Check(f.IsWarm,"full5000ms");
+ });
+ Test("Hard context loss while paused resets and requires new warm-up",delegate{
+ F f=New();AbsPrepare(f);f.SetQuoteReady(false,T(5.95),"locked");f.SetReady(false,T(5.96),"Feed disconnected");Eq(f.RetainedTrades,0,"hard reset clears tape");Eq(f.ResetCount,2,"hard reset count");Check(f.LastResetReason=="Feed disconnected","hard reason");f.SetReady(true,T(6),"context");f.SetQuoteReady(true,T(6.1),"ready");f.Quote(100,101);f.Evaluate(T(11.099));Check(!f.IsWarm,"new full warm-up");f.Evaluate(T(11.1));Check(f.IsWarm,"reconnected warm");
+ });
+ Test("Receipt rewind supersedes pause",delegate{
+ F f=New();AbsPrepare(f);f.SetQuoteReady(false,T(5.95),"locked");f.SetQuoteReady(true,T(1),"ready");Eq(f.RetainedTrades,0,"rewind cleared tape");Check(!f.IsWarm,"rewind does not resume oldcontext");Check(f.LastResetReason=="Receipt clock rewind","rewind reason");
+ });
+ Test("Capacity fault cannot be reopened by trusted quote",delegate{
+ F f=New(new F.Settings{Capacity=1});f.AddTrade(-1,100,60,100,101,T(5.1));f.SetQuoteReady(false,T(5.11),"locked");f.AddTrade(-1,100,60,100,101,T(5.12));f.SetQuoteReady(true,T(5.13),"ready");Check(f.Faulted&&!f.QuoteReady,"fault remains closed");f.Evaluate(T(5.2));No(f,F.Side.Bid,100);
+ });
+ Test("Repeated short transitions retain warm-up and window history",delegate{
+ F f=New();AbsPrepare(f);long resets=f.ResetCount;for(int i=0;i<20;i++){double t=5.95+i*.01;f.SetQuoteReady(false,T(t),"locked");f.Evaluate(T(t));f.SetQuoteReady(true,T(t+.001),"ready");f.Quote(100,101);f.Evaluate(T(t+.001));}Eq(f.QuotePauseCount,20,"pauses counted");Eq(f.ResetCount,resets,"no resets");Eq(f.RetainedTrades,2,"retained tape");Check(f.IsWarm,"warm");
+ });
+ Test("Pause preserves late execution credits at their original receipts",delegate{
+ F f=New();long id=f.AddTrade(-1,100,120,100,101,T(5.1));f.Contribution(1,F.Side.Bid,100,60,T(5.12),T(5.12));f.Contribution(2,F.Side.Bid,100,60,T(5.2),T(5.2));f.Evaluate(T(5.9));f.SetQuoteReady(false,T(5.95),"locked");f.MatchTrade(id,120);f.Contribution(1,F.Side.Bid,100,80,T(5.12),T(5.96));f.SetQuoteReady(true,T(6),"ready");f.Quote(100,101);f.Evaluate(T(6));Eq(f.At(F.Side.Bid,100).Matched,120,"late credit retained");Eq(f.At(F.Side.Bid,100).Replenished,140,"original contribution corrected once");f.Evaluate(T(6.5));Stage(f,F.Side.Bid,100,F.Stage.Qualified);
+ });
+ Test("Unknown prints during pause remain in classification quality",delegate{
+ F f=New();AbsPrepare(f);f.SetQuoteReady(false,T(5.95),"locked");Trade(f,0,100,100,5.96,false);f.SetQuoteReady(true,T(5.98),"ready");f.Quote(100,101);f.Evaluate(T(6.5));Stage(f,F.Side.Bid,100,F.Stage.Candidate);Eq(f.QualifiedCount,0,"pause did not discard quality failure");Check(f.Status.Contains("trade classification incomplete"),"quality status");
+ });
+ Console.WriteLine("RESULT "+passed+" live readiness core scenarios passed; 0 failed");return 0;
+ }catch(Exception ex){Console.Error.WriteLine("FAIL "+ex);return 1;}}
+}

@@ -1,0 +1,41 @@
+PASS Buyer absorption requires matched selling, replenishment and a hold
+PASS Seller absorption is the mirrored pattern
+PASS Executions without replenishment remain candidates
+PASS Replenishment without executions cannot signal absorption
+PASS Unmatched executions block absorption qualification
+PASS Low matched share cannot be hidden by lifetime volume
+PASS Unknown trade share blocks strong labels
+PASS Candidate timestamps and qualification have no backdating
+PASS Adverse movement invalidates a candidate before qualification
+PASS Qualified absorption can be invalidated without rewriting its old event
+PASS Observation loss suppresses a marker rather than treating it as pulling
+PASS Coverage reentry cannot reuse prior executions
+PASS Historical expiry alone cannot create an alert
+PASS Matched credit keeps the original depth evidence timestamp
+PASS One corrected contribution is one refill observation
+PASS Attribution uncertainty pauses absorption
+PASS Both-sided activity need not imply absorption dominance
+PASS Quiet old executions cannot qualify a new pattern
+PASS Buy initiative requires price and inside-quote progress
+PASS Sell initiative is symmetric
+PASS Buying at one stationary price is not initiative
+PASS Quote-only movement cannot establish initiative
+PASS Print advance with no quote follow-through remains unqualified
+PASS Initiative can be recognized without asserting execution-depth matches
+PASS A large isolated print is insufficient for initiative
+PASS Qualified initiative invalidates on a retracement
+PASS Feed unavailability suppresses qualified states
+PASS Manual reset cannot reuse old IDs or matched evidence
+PASS Rewind resets receipt-clock evidence
+PASS Capacity failure prevents strong labels
+PASS Evidence cutoff excludes its exact left boundary
+PASS Detection options can disable each pattern independently
+PASS Fresh unresolved executions receive grace before lowering matched quality
+PASS Partial fresh match credit cannot inflate the eligible denominator
+PASS Invalid trade prices cannot create false adverse movement
+PASS Classification deterioration suppresses already qualified absorption
+PASS Confirmation duration is measured after all conditions first agree
+PASS Withdrawals offset refills in net replenishment
+PASS Execution-only correction is not a refill observation
+BENCH flow input pairs=100000 wallMs=418.1 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
+RESULT 39 flow scenarios passed; 0 failed

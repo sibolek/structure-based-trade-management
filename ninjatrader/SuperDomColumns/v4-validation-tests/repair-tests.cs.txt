@@ -1,0 +1,131 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using F=ExecutionOSFlowEvidenceV4;
+internal static class Program
+{
+ static int passed;
+ static long T(double s){return (long)Math.Round(s*TimeSpan.TicksPerSecond);}
+ static void Check(bool v,string s){if(!v)throw new Exception(s);}
+ static void Eq(long a,long b,string s){Check(a==b,s+": "+a+" != "+b);}
+ static void Test(string s,Action a){a();passed++;Console.WriteLine("PASS "+s);}
+ static F New(F.Settings settings=null){F f=new F(settings??new F.Settings());f.Reset(0,"start");f.SetReady(true,0,"ready");f.BeginCoverage();f.Quantity(F.Side.Bid,100,200,0);f.Quantity(F.Side.Ask,101,200,0);f.EndCoverage(0);f.Quote(100,101);f.Evaluate(T(5));return f;}
+ static long Trade(F f,int d,long p,long q,double t,bool match=true,long bid=100,long ask=101){long id=f.AddTrade(d,p,q,bid,ask,T(t));if(match)f.MatchTrade(id,q);f.Evaluate(T(t));return id;}
+ static List<F.Signal> Drain(F f){List<F.Signal> a=new List<F.Signal>();F.Signal s;while((s=f.TakeTransition())!=null)a.Add(s);return a;}
+ static void AbsPrepare(F f,bool ask=false){int d=ask?1:-1;long p=ask?101:100;F.Side side=ask?F.Side.Ask:F.Side.Bid;Trade(f,d,p,60,5.1);f.Contribution(1,side,p,60,T(5.12),T(5.12));Trade(f,d,p,60,5.5);f.Contribution(2,side,p,60,T(5.52),T(5.52));f.Evaluate(T(5.9));}
+ static void InitiativePrepare(F f,bool buy=true){int d=buy?1:-1;Trade(f,d,buy?101:103,50,5.1,false,buy?100:103,buy?101:104);Trade(f,d,102,50,5.5,false,buy?101:102,buy?102:103);Trade(f,d,buy?103:101,50,5.9,false,buy?102:101,buy?103:102);}
+ static void Stage(F f,F.Side side,long price,F.Stage stage){F.Signal s=f.At(side,price);Check(s!=null&&s.State==stage,"expected "+stage+" at "+price);}
+ static void No(F f,F.Side side,long price){Check(f.At(side,price)==null,"ended marker must stay removed");}
+ public static int Main(){try{
+  int[] phases={1,30,99,100,101};
+  foreach(int phase in phases){int delay=phase;foreach(bool ask in new[]{false,true}){bool a=ask;Test("Absorption adverse excursion, side="+a+", phase="+delay+"ms",delegate{
+   F f=New();AbsPrepare(f,a);f.Evaluate(T(6.4));F.Side side=a?F.Side.Ask:F.Side.Bid;long p=a?101:100;Stage(f,side,p,F.Stage.Qualified);
+   double t=6.4+delay/1000.0;Trade(f,a?1:-1,a?p+2:p-2,1,t,false);Trade(f,a?1:-1,p,1,t+.001,false);f.Evaluate(T(t+.11));No(f,side,p);
+   Check(Drain(f).Exists(delegate(F.Signal x){return x.Pattern==(a?F.Kind.SellerAbsorption:F.Kind.BuyerAbsorption)&&x.State==F.Stage.Invalidated&&x.Updated==T(t);}),"invalidation records actual print time");
+  });}
+  foreach(bool buy in new[]{true,false}){bool b=buy;Test("Initiative adverse excursion, buy="+b+", phase="+delay+"ms",delegate{
+   F f=New();InitiativePrepare(f,b);f.Evaluate(T(6.4));long p=b?103:101;F.Side side=b?F.Side.Ask:F.Side.Bid;Stage(f,side,p,F.Stage.Qualified);
+   double t=6.4+delay/1000.0;Trade(f,b?-1:1,b?p-3:p+3,1,t,false);Trade(f,b?1:-1,p,1,t+.001,false,b?102:101,b?103:102);f.Evaluate(T(t+.11));No(f,side,p);
+   Check(Drain(f).Exists(delegate(F.Signal x){return x.Pattern==(b?F.Kind.BuyInitiative:F.Kind.SellInitiative)&&x.State==F.Stage.Invalidated&&x.Updated==T(t);}),"initiative invalidation retained");
+  });}}
+  foreach(bool ask in new[]{false,true}){bool a=ask;
+   Test("A3 net replenishment failure restarts exact confirmation, side="+a,delegate{
+    F f=New();AbsPrepare(f,a);F.Side side=a?F.Side.Ask:F.Side.Bid;long p=a?101:100;
+    f.Contribution(3,side,p,-160,T(5.95),T(5.95));f.Evaluate(T(5.95));f.Contribution(4,side,p,160,T(5.98),T(5.98));f.Evaluate(T(5.98));f.Evaluate(T(6.4));Stage(f,side,p,F.Stage.Candidate);
+    Eq(f.At(side,p).QualifyingSince,T(5.98),"recovery time");f.Evaluate(T(6.479));Stage(f,side,p,F.Stage.Candidate);f.Evaluate(T(6.48));Stage(f,side,p,F.Stage.Qualified);
+   });
+   Test("Exactly maximum adverse ticks remain permitted, side="+a,delegate{
+    F f=New();AbsPrepare(f,a);f.Evaluate(T(6.4));long p=a?101:100;Trade(f,a?1:-1,a?p+1:p-1,1,6.41,false);f.Evaluate(T(6.42));Stage(f,a?F.Side.Ask:F.Side.Bid,p,F.Stage.Qualified);
+   });
+  }
+  foreach(bool buy in new[]{true,false}){bool b=buy;
+   Test("A4 quote failure restarts initiative confirmation, buy="+b,delegate{
+    F f=New();InitiativePrepare(f,b);f.Quote(b?100:103,b?101:104);f.Evaluate(T(5.95));f.Quote(b?102:101,b?103:102);f.Evaluate(T(5.98));f.Evaluate(T(6.4));F.Side side=b?F.Side.Ask:F.Side.Bid;long p=b?103:101;Stage(f,side,p,F.Stage.Candidate);
+    Eq(f.At(side,p).QualifyingSince,T(5.98),"new continuous interval");f.Evaluate(T(6.48));Stage(f,side,p,F.Stage.Qualified);
+   });
+   Test("A5 large prequalification retreat is rejected despite net advance, buy="+b,delegate{
+    F f=New();Trade(f,b?1:-1,b?101:110,50,5.1,false,b?100:110,b?101:111);Trade(f,b?1:-1,b?110:101,50,5.5,false,b?109:101,b?110:102);Trade(f,b?1:-1,b?103:108,50,5.9,false,b?102:108,b?103:109);f.Evaluate(T(6.4),true);
+    No(f,b?F.Side.Ask:F.Side.Bid,b?103:108);Eq(f.QualifiedCount,0,"no large-reversal qualification");
+   });
+   Test("Recovered retreat does not erase a candidate path breach, buy="+b,delegate{
+    F f=New();InitiativePrepare(f,b);Trade(f,b?-1:1,b?100:104,1,5.95,false);Trade(f,b?1:-1,b?103:101,1,5.98,false,b?102:101,b?103:102);f.Evaluate(T(6.5));No(f,b?F.Side.Ask:F.Side.Bid,b?103:101);Eq(f.QualifiedCount,0,"retained path breach");
+   });
+   Test("Exactly one tick candidate retracement permits initiative, buy="+b,delegate{
+    F f=New();Trade(f,b?1:-1,b?101:105,50,5.1,false,b?100:105,b?101:106);Trade(f,b?1:-1,b?105:101,50,5.5,false,b?104:101,b?105:102);Trade(f,b?1:-1,b?104:102,50,5.9,false,b?103:102,b?104:103);f.Evaluate(T(6.4));Stage(f,b?F.Side.Ask:F.Side.Bid,b?104:102,F.Stage.Qualified);
+   });
+  }
+  foreach(int phase in phases){int delay=phase;foreach(bool ask in new[]{false,true}){bool a=ask;Test("Support failure restarts timer side="+a+", phase="+delay+"ms",delegate{
+   F f=New();AbsPrepare(f,a);F.Side side=a?F.Side.Ask:F.Side.Bid;long p=a?101:100;double t=5.9+delay/1000.0;
+   f.Contribution(3,side,p,-160,T(t),T(t));f.Evaluate(T(t));f.Contribution(4,side,p,160,T(t+.001),T(t+.001));f.Evaluate(T(t+.001));f.Evaluate(T(6.4));Stage(f,side,p,F.Stage.Candidate);
+   f.Evaluate(T(t+.5));Stage(f,side,p,F.Stage.Candidate);f.Evaluate(T(t+.501));Stage(f,side,p,F.Stage.Qualified);
+  });}}
+  foreach(bool buy in new[]{true,false}){bool b=buy;Test("Qualified initiative protects the new favorable peak, buy="+b,delegate{
+   F f=New();InitiativePrepare(f,b);f.Evaluate(T(6.4));Trade(f,b?1:-1,b?106:98,1,6.41,false,b?105:98,b?106:99);Trade(f,b?-1:1,b?104:100,1,6.42,false);No(f,b?F.Side.Ask:F.Side.Bid,b?103:101);
+  });}
+  foreach(bool buy in new[]{true,false}){bool b=buy;Test("Qualification retains the prequalification favorable peak, buy="+b,delegate{
+   F f=New();Trade(f,b?1:-1,b?101:105,50,5.1,false,b?100:105,b?101:106);Trade(f,b?1:-1,b?105:101,50,5.5,false,b?104:101,b?105:102);Trade(f,b?1:-1,b?104:102,50,5.9,false,b?103:102,b?104:103);f.Evaluate(T(6.4));Stage(f,b?F.Side.Ask:F.Side.Bid,b?104:102,F.Stage.Qualified);
+   Trade(f,b?-1:1,b?103:103,1,6.41,false);No(f,b?F.Side.Ask:F.Side.Bid,b?104:102);
+  });}
+  foreach(bool buy in new[]{true,false}){bool b=buy;Test("Later local retracement survives older global peak expiry, buy="+b,delegate{
+   F f=New();long[] prices=b?new long[]{101,110,108,105,110}:new long[]{110,101,103,106,101};double[] times={5.1,5.2,6.0,6.3,9.5};
+   for(int i=0;i<prices.Length;i++)Trade(f,b?1:-1,prices[i],50,times[i],false,b?prices[i]-1:prices[i],b?prices[i]:prices[i]+1);
+   f.Evaluate(T(10.3));f.Evaluate(T(10.8));No(f,b?F.Side.Ask:F.Side.Bid,prices[4]);Eq(f.QualifiedCount,0,"retained three-tick local breach blocks qualification");
+  });}
+  foreach(bool buy in new[]{true,false}){bool b=buy;Test("Older later breach cannot overwrite a newer local breach, buy="+b,delegate{
+   F f=New();long[] prices=b?new long[]{101,110,108,105,109,108,110}:new long[]{110,101,103,106,102,103,101};double[] times={5.1,5.2,6.0,6.3,6.4,6.5,9.5};
+   for(int i=0;i<prices.Length;i++)Trade(f,b?1:-1,prices[i],50,times[i],false,b?prices[i]-1:prices[i],b?prices[i]:prices[i]+1);
+   f.Evaluate(T(10.3));f.Evaluate(T(10.8));No(f,b?F.Side.Ask:F.Side.Bid,prices[6]);Eq(f.QualifiedCount,0,"latest retained anchor remains latched");
+  });}
+  Test("Mature unmatched failure followed by late credit restarts confirmation",delegate{
+   F f=New();AbsPrepare(f);long id=Trade(f,-1,100,60,5.95,false);f.Evaluate(T(6.21));f.Advance(T(6.23));f.MatchTrade(id,60);f.Evaluate(T(6.23));f.Evaluate(T(6.4));Stage(f,F.Side.Bid,100,F.Stage.Candidate);Eq(f.At(F.Side.Bid,100).QualifyingSince,T(6.23),"credit recovery clock");f.Evaluate(T(6.73));Stage(f,F.Side.Bid,100,F.Stage.Qualified);
+  });
+  Test("Unknown-volume failure and recovery cannot bridge confirmation",delegate{
+   F f=New();AbsPrepare(f);Trade(f,0,100,20,5.95,false);Trade(f,-1,100,120,5.98);f.Evaluate(T(6.4));Stage(f,F.Side.Bid,100,F.Stage.Candidate);Eq(f.At(F.Side.Bid,100).QualifyingSince,T(5.98),"classification recovered");
+  });
+  Test("Dominance failure and recovery cannot bridge confirmation",delegate{
+   F f=New();AbsPrepare(f);Trade(f,1,101,80,5.95);Trade(f,-1,100,180,5.98);f.Evaluate(T(6.4));Stage(f,F.Side.Bid,100,F.Stage.Candidate);Eq(f.At(F.Side.Bid,100).QualifyingSince,T(5.98),"dominance recovered");
+  });
+  Test("Expiry-induced failure then recovery between evaluations resets confirmation",delegate{
+   F f=New(new F.Settings{ConfirmationMs=1000});Trade(f,-1,100,120,5.1);f.Contribution(1,F.Side.Bid,100,100,T(4.9),T(5.12));f.Contribution(2,F.Side.Bid,100,-160,T(5),T(5.13));f.Contribution(3,F.Side.Bid,100,100,T(5.2),T(5.2));f.Contribution(4,F.Side.Bid,100,80,T(5.3),T(5.3));Trade(f,-1,100,60,9.1);Trade(f,-1,100,60,9.5);f.Evaluate(T(9.7));Stage(f,F.Side.Bid,100,F.Stage.Candidate);
+   Eq(f.At(F.Side.Bid,100).QualifyingSince,T(9.1),"observed supported interval begins on actual callback");
+   f.Evaluate(T(10.02));Stage(f,F.Side.Bid,100,F.Stage.Candidate);Eq(f.At(F.Side.Bid,100).QualifyingSince,T(10.02),"9.9 failure cannot be erased by 10.0 recovery");
+  });
+  Test("Same-receipt coverage reentry excludes old execution and late credit",delegate{
+   F f=New();long id=Trade(f,-1,100,120,5.1,false);f.BeginCoverage();f.EndCoverage(T(5.1));f.BeginCoverage();f.Quantity(F.Side.Bid,100,200,T(5.1));f.Quantity(F.Side.Ask,101,200,T(5.1));f.EndCoverage(T(5.1));f.MatchTrade(id,120);f.Evaluate(T(5.9));No(f,F.Side.Bid,100);
+  });
+  Test("Quiet interval cannot be hidden by a later fresh execution",delegate{
+   F f=New();AbsPrepare(f);f.Evaluate(T(5.9));Trade(f,-1,100,1,7.1);f.Evaluate(T(7.2));Stage(f,F.Side.Bid,100,F.Stage.Candidate);Eq(f.At(F.Side.Bid,100).QualifyingSince,T(7.1),"quiet timeout visited before new print");
+  });
+  Test("Randomized independent rolling evidence oracle",Oracle);
+  Console.WriteLine("RESULT "+passed+" repair scenarios passed; 0 failed");return 0;
+ }catch(Exception e){Console.Error.WriteLine("FAIL "+e);return 1;}}
+ class OTrade{internal long Id,Time,Price,Volume,Matched;internal int Direction;}
+ class ORefill{internal long Id,Time,Price,Net;internal F.Side Side;}
+ static object Get(object o,string n){return o.GetType().GetField(n,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(o);}
+ static void Oracle(){
+  F f=New();Random r=new Random(68721);List<OTrade> trades=new List<OTrade>();List<ORefill> refills=new List<ORefill>();long serial=0,now=T(5);
+  for(int i=0;i<8000;i++){
+   now+=r.Next(1,7)*TimeSpan.TicksPerMillisecond;int op=r.Next(4);
+   if(op==0||trades.Count==0){int d=r.Next(3)-1;long price=99+r.Next(4),vol=1+r.Next(70);long id=f.AddTrade(d,price,vol,100,101,now);trades.Add(new OTrade{Id=id,Time=now,Price=price,Volume=vol,Direction=d});}
+   else if(op==1){OTrade t=trades[r.Next(trades.Count)];long vol=r.Next(80);f.Advance(now);f.MatchTrade(t.Id,vol);if(t.Time>now-T(5))t.Matched=Math.Min(t.Volume,t.Matched+vol);}
+   else if(op==2){F.Side side=r.Next(2)==0?F.Side.Bid:F.Side.Ask;long price=side==F.Side.Bid?100:101,net=r.Next(-100,101);ORefill x=new ORefill{Id=++serial,Time=now,Price=price,Net=net,Side=side};refills.Add(x);f.Contribution(x.Id,side,price,net,now,now);}
+   else{ORefill x=refills.Count==0?null:refills[r.Next(refills.Count)];if(x!=null){long net=r.Next(-100,101);f.Contribution(x.Id,x.Side,x.Price,net,x.Time,now);if(x.Time>now-T(5.25))x.Net=net;}}
+   f.Evaluate(now);
+   foreach(bool buy in new[]{true,false}){
+    int direction=buy?1:-1;bool started=false,breached=false;long peak=0;
+    foreach(OTrade t in trades){if(t.Time<=now-T(5))continue;if(!started){if(t.Direction!=direction)continue;started=true;peak=t.Price;}
+     if(buy? t.Price>peak:t.Price<peak)peak=t.Price;if((buy?peak-t.Price:t.Price-peak)>1)breached=true;
+    }
+    object m=Get(f,buy?"buys":"sells");bool actual=(bool)m.GetType().GetProperty("PathBreached",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(m,null);Check(actual==breached,"independent retained path step"+i+" buy="+buy);
+   }
+   IDictionary levels=(IDictionary)Get(f,"levels");foreach(DictionaryEntry entry in levels){object key=entry.Key,level=entry.Value;F.Side side=(F.Side)Get(key,"Side");long price=(long)Get(key,"Price");object m=Get(level,"Metrics");int d=side==F.Side.Bid?-1:1;
+    long executed=0,eligible=0,matched=0,opposite=0,first=long.MinValue,last=long.MinValue,adverse=0,net=0,count=0;
+    foreach(OTrade t in trades){if(t.Time<=now-T(5))continue;if(t.Direction==d&&t.Price==price){executed+=t.Volume;if(t.Matched==t.Volume||now-t.Time>T(.25)){eligible+=t.Volume;matched+=t.Matched;}if(first==long.MinValue)first=t.Time;last=t.Time;}else if(t.Direction!=0&&t.Direction!=d&&Math.Abs(t.Price-price)<=1)opposite+=t.Volume;if(first!=long.MinValue)adverse=Math.Max(adverse,side==F.Side.Bid?price-t.Price:t.Price-price);}
+    foreach(ORefill x in refills)if(first!=long.MinValue&&x.Side==side&&x.Price==price&&x.Time>now-T(5)&&x.Time>=first-T(.25)){net+=x.Net;if(x.Net>0)count++;}
+    Eq((long)Get(m,"Executed"),executed,"executed step"+i);Eq((long)Get(m,"Eligible"),eligible,"eligible step"+i);Eq((long)Get(m,"Matched"),matched,"matched step"+i);Eq((long)Get(m,"Opposite"),opposite,"opposite step"+i);Eq((long)Get(m,"First"),first,"first step"+i);Eq((long)Get(m,"Last"),last,"last step"+i);Eq((long)Get(m,"Adverse"),adverse,"adverse step"+i);Eq((long)Get(m,"Replenished"),net,"net step"+i);Eq((int)Get(m,"Refills"),count,"refills step"+i);
+   }
+  }
+  Check(!f.Faulted,"random stream stays available");Console.WriteLine("ORACLE 8000 randomized events: accounting and both retained price-path predicates independently checked");
+ }
+}

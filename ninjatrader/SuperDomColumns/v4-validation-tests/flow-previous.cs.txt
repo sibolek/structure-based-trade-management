@@ -1,0 +1,696 @@
+using System;
+using System.Collections.Generic;
+// Pure, experimental event-evidence engine. No NinjaTrader, UI, IO or timers.
+internal sealed class ExecutionOSFlowEvidencePrevious
+{
+    internal enum Side { Bid, Ask }
+    internal enum Kind { BuyerAbsorption, SellerAbsorption, BuyInitiative, SellInitiative }
+    internal enum Stage { Candidate, Qualified, Expired, Invalidated, Suppressed }
+    internal sealed class Settings
+    {
+        internal int WindowSeconds = 5, MinimumVolume = 100, MinimumReplenishment = 50;
+        internal int MinimumRefills = 2, MinimumHoldMs = 750, ConfirmationMs = 500;
+        internal int MaximumAdverseTicks = 1, MinimumMatchPercent = 80, MinimumDominancePercent = 70;
+        internal int MinimumAdvanceTicks = 2, MaximumUnknownPercent = 10, QuietTimeoutMs = 1500;
+        internal int DisplayMs = 3000, CooldownMs = 5000, ReconciliationMs = 250;
+        internal int Capacity = 100000;
+        internal bool Absorption = true, Initiative = true;
+        internal void Validate()
+        {
+            if (WindowSeconds < 1 || WindowSeconds > 30 || MinimumVolume < 1 || MinimumReplenishment < 1
+                || MinimumRefills < 1 || MinimumHoldMs < 0 || ConfirmationMs < 0 || MaximumAdverseTicks < 0
+                || MinimumMatchPercent < 1 || MinimumMatchPercent > 100 || MinimumDominancePercent < 51
+                || MinimumDominancePercent > 100 || MinimumAdvanceTicks < 1 || MaximumUnknownPercent < 0
+                || MaximumUnknownPercent > 100 || QuietTimeoutMs < 1 || DisplayMs < 1 || CooldownMs < 0
+                || ReconciliationMs < 0 || ReconciliationMs > 1000 || Capacity < 1)
+                throw new ArgumentOutOfRangeException("Flow settings");
+        }
+    }
+    internal sealed class Signal
+    {
+        internal long Id, Price, Detected, Updated, QualifiedAt, QualifyingSince = long.MinValue;
+        internal Kind Pattern;
+        internal Stage State;
+        internal long Executed, Eligible, Matched, Replenished, HeldMs, AdvanceTicks, FavorablePrice;
+        internal int Refills, Dominance;
+        internal string Reason;
+        internal Signal Copy() { return (Signal)MemberwiseClone(); }
+    }
+    private struct Key : IEquatable<Key>
+    {
+        internal Side Side; internal long Price;
+        internal Key(Side side, long price) { Side = side; Price = price; }
+        public bool Equals(Key other) { return Side == other.Side && Price == other.Price; }
+        public override bool Equals(object value) { return value is Key && Equals((Key)value); }
+        public override int GetHashCode() { return Price.GetHashCode() ^ ((int)Side * 397); }
+    }
+    private sealed class Trade
+    {
+        internal long Id, Receipt, Price, Volume, Matched, Bid, Ask;
+        internal bool HasPrice, Eligible;
+        internal Level Owner; internal long OwnerVersion;
+        internal LinkedListNode<Trade> DirectionNode;
+        internal int Direction; // 1 = ask-classified buy; -1 = bid-classified sell; 0 = unknown.
+    }
+    private sealed class Refill
+    {
+        internal long Id, Receipt, Net;
+        internal Key Key;
+        internal Level Owner; internal long OwnerVersion; internal bool Counted;
+    }
+    private sealed class Metrics
+    {
+        internal long Executed, Eligible, Matched, Opposite, First = long.MinValue, Last = long.MinValue;
+        internal long Replenished, Adverse; internal int Refills;
+        internal void Clear()
+        { Executed = Eligible = Matched = Opposite = Replenished = Adverse = 0; Refills = 0; First = Last = long.MinValue; }
+    }
+    private sealed class Level
+    {
+        internal bool Available, Seen;
+        internal long Quantity, Epoch, LastSeen, CooldownUntil;
+        internal readonly Metrics Metrics = new Metrics();
+        internal Signal Active;
+        internal long Version;
+        internal readonly Queue<Trade> Passive = new Queue<Trade>(), Opposite = new Queue<Trade>();
+        internal readonly LinkedList<Trade> Extremes = new LinkedList<Trade>();
+        internal readonly Queue<Refill> AllRefills = new Queue<Refill>(), IncludedRefills = new Queue<Refill>();
+        internal void ClearEvidence()
+        {
+            Version++; Metrics.Clear(); Passive.Clear(); Opposite.Clear(); Extremes.Clear();
+            AllRefills.Clear(); IncludedRefills.Clear();
+        }
+    }
+    private sealed class InitiativeMetrics
+    {
+        internal long Executed, First = long.MinValue, Last = long.MinValue, StartPrice, EndPrice, StartBid, StartAsk;
+        internal long BreachAnchorId;
+        internal readonly LinkedList<Trade> Trades = new LinkedList<Trade>(), Extremes = new LinkedList<Trade>();
+        internal bool PathBreached { get { return Trades.First != null && BreachAnchorId >= Trades.First.Value.Id; } }
+        internal void Clear()
+        { Executed = StartPrice = EndPrice = StartBid = StartAsk = BreachAnchorId = 0;
+            First = Last = long.MinValue; Trades.Clear(); Extremes.Clear(); }
+    }
+    private readonly Settings settings;
+    private readonly Dictionary<Key, Level> levels = new Dictionary<Key, Level>();
+    private readonly Queue<Trade> tape = new Queue<Trade>();
+    private readonly Queue<Trade> maturity = new Queue<Trade>();
+    private readonly Queue<Refill> windowRefills = new Queue<Refill>();
+    private readonly Dictionary<long, Trade> tradeIds = new Dictionary<long, Trade>();
+    private readonly Queue<Refill> refills = new Queue<Refill>();
+    private readonly Dictionary<long, Refill> refillIds = new Dictionary<long, Refill>();
+    private readonly Queue<Signal> transitions = new Queue<Signal>();
+    private readonly List<Key> prune = new List<Key>();
+    private readonly InitiativeMetrics buys = new InitiativeMetrics(), sells = new InitiativeMetrics();
+    private Signal buyInitiative, sellInitiative;
+    private long nextTrade, nextSignal, started, lastNow = long.MinValue, lastEvaluation = long.MinValue;
+    private long currentBid, currentAsk, lastPrice, lastPrint = long.MinValue;
+    private long buyCooldown, sellCooldown, attributionBlockedUntil, unknown, classified;
+    private bool ready, haveQuote;
+    private bool quoteGateEnabled, quoteReady, quoteInitialized;
+    private long contextStarted;
+    internal long QuotePauseCount { get; private set; }
+    internal string QuotePauseReason { get; private set; }
+    internal string LastResetReason { get; private set; }
+    internal string LastContextFailure { get; private set; }
+    internal bool QuoteReady { get { return !quoteGateEnabled || quoteReady; } }
+    internal long WarmElapsedMs { get { return ready && (!quoteGateEnabled || quoteInitialized)
+        ? Math.Max(0, lastNow - started) / TimeSpan.TicksPerMillisecond : 0; } }
+    private int updateDepth;
+    internal bool Faulted { get; private set; }
+    internal long QualifiedCount { get; private set; }
+    internal long ResetCount { get; private set; }
+    internal long DroppedTransitionCount { get; private set; }
+    internal string Status { get; private set; }
+    internal int RetainedTrades { get { return tape.Count; } }
+    internal int RetainedContributions { get { return refills.Count; } }
+    internal int QueuedTransitions { get { return transitions.Count; } }
+    internal bool IsWarm { get { return ready && (!quoteGateEnabled || quoteInitialized) && lastNow != long.MinValue && lastNow - started >= Window; } }
+    private long Window { get { return settings.WindowSeconds * TimeSpan.TicksPerSecond; } }
+    private static long Ms(int milliseconds) { return milliseconds * TimeSpan.TicksPerMillisecond; }
+
+    internal ExecutionOSFlowEvidencePrevious(Settings configuration)
+    {
+        configuration.Validate(); settings = configuration; Status = "Waiting for trusted depth";
+    }
+    internal void Reset(long now, string reason)
+    {
+        SuppressAll(now, reason);
+        tape.Clear(); tradeIds.Clear(); maturity.Clear(); refills.Clear(); windowRefills.Clear(); refillIds.Clear(); levels.Clear();
+        buys.Clear(); sells.Clear(); unknown = classified = 0;
+        Faulted = false; ready = false; haveQuote = false; quoteReady = quoteInitialized = false; started = contextStarted = now; lastNow = now;
+        LastResetReason = reason; QuotePauseReason = "Waiting for first trusted inside quotes";
+        lastEvaluation = long.MinValue; lastPrint = long.MinValue; attributionBlockedUntil = 0;
+        buyCooldown = sellCooldown = 0; latestRefillReceipt = long.MinValue; ResetCount++; Status = "Waiting: " + reason;
+    }
+    internal void SetReady(bool value, long now, string reason)
+    {
+        Advance(now);
+        if (Faulted) return;
+        if (!value)
+        {
+            if (ready) Reset(now, reason);
+            LastContextFailure = reason; Status = "Unavailable: " + reason + LifecycleDiagnostics(); return;
+        }
+        if (!ready) { ready = true; started = contextStarted = now; lastEvaluation = long.MinValue; }
+    }
+    // Quote transitions are an observation pause, not a new feed/session context.
+    // The explicit L2 gate cannot be reopened by an L1 trade snapshot.
+    internal void SetQuoteReady(bool value, long now, string reason)
+    {
+        Advance(now);
+        if (!quoteGateEnabled) { quoteGateEnabled = true; quoteReady = quoteInitialized = false; }
+        if (Faulted || !ready) { quoteReady = false; return; }
+        if (!value)
+        {
+            if (quoteReady) { QuotePauseCount++; SuppressAll(now, reason); }
+            quoteReady = false; haveQuote = false; QuotePauseReason = reason;
+            return;
+        }
+        if (!quoteInitialized) { quoteInitialized = true; started = now; }
+        quoteReady = true;
+    }
+    internal void BeginCoverage() { foreach (Level level in levels.Values) level.Seen = false; }
+    internal void Quantity(Side side, long price, long quantity, long now)
+    {
+        if (quantity < 0) { Fail(now, "Negative quantity"); return; }
+        Key key = new Key(side, price); Level level;
+        if (!levels.TryGetValue(key, out level)) { level = new Level(); levels.Add(key, level); }
+        if (!level.Available) { level.Epoch = now; level.Active = null; level.CooldownUntil = 0; level.ClearEvidence(); }
+        level.Available = quantity > 0; level.Seen = true; level.Quantity = quantity; level.LastSeen = now;
+    }
+    internal void EndCoverage(long now)
+    {
+        foreach (Level level in levels.Values)
+        {
+            if (level.Seen && level.Available) continue;
+            if (level.Active != null) End(level.Active, Stage.Suppressed, now, "Observation coverage lost");
+            level.Active = null; level.Available = false; level.Epoch = now; level.ClearEvidence();
+        }
+    }
+    internal void ResetLevelEvidence(Side side, long price, long now, string reason)
+    {
+        Level level;
+        if (!levels.TryGetValue(new Key(side, price), out level)) return;
+        if (level.Active != null) End(level.Active, Stage.Suppressed, now, reason);
+        level.Active = null; level.Epoch = now; level.ClearEvidence();
+    }
+    internal void Quote(long bid, long ask) { currentBid = bid; currentAsk = ask; haveQuote = bid < ask; }
+    internal void AttributionUncertain(long now)
+    {
+        attributionBlockedUntil = now + Window;
+        foreach (Level level in levels.Values)
+        {
+            if (level.Active != null) End(level.Active, Stage.Suppressed, now, "Depth source timing uncertain");
+            level.Active = null;
+        }
+    }
+    internal long AddTrade(int direction, long price, long volume, long bid, long ask, long now, bool hasPrice = true, long evidenceId = 0)
+    {
+        Advance(now);
+        if (Faulted || volume <= 0) return 0;
+        if (direction != -1 && direction != 0 && direction != 1) throw new ArgumentOutOfRangeException("direction");
+        if (!Room(now)) return 0;
+        if (evidenceId != 0)
+        { if (evidenceId <= nextTrade) throw new ArgumentException("Execution IDs must increase"); nextTrade = evidenceId; }
+        else nextTrade++;
+        Trade trade = new Trade { Id = nextTrade, Receipt = now, Direction = direction,
+            Price = price, Volume = volume, Bid = bid, Ask = ask, HasPrice = hasPrice };
+        tape.Enqueue(trade); tradeIds.Add(trade.Id, trade); maturity.Enqueue(trade);
+        if (direction == 0) unknown = checked(unknown + volume);
+        else
+        {
+            classified = checked(classified + volume);
+            InitiativeMetrics m = direction == 1 ? buys : sells;
+            trade.DirectionNode = m.Trades.AddLast(trade); m.Executed = checked(m.Executed + volume);
+            RefreshDirection(m);
+        }
+        // Once the adapter supplies trusted L2 quotes, an L1 execution snapshot
+        // cannot change quote support inside this callback transaction.
+        if (!quoteGateEnabled && bid < ask) Quote(bid, ask);
+        if (hasPrice)
+        {
+            lastPrice = price; lastPrint = now;
+            foreach (KeyValuePair<Key, Level> pair in levels)
+            {
+                Level level = pair.Value; Metrics m = level.Metrics;
+                if (!level.Available || now < level.Epoch) continue;
+                int passive = pair.Key.Side == Side.Ask ? 1 : -1;
+                if (direction == passive && price == pair.Key.Price)
+                {
+                    bool first = level.Passive.Count == 0;
+                    level.Passive.Enqueue(trade); trade.Owner = level; trade.OwnerVersion = level.Version;
+                    m.Executed = checked(m.Executed + volume);
+                    m.First = level.Passive.Peek().Receipt; m.Last = now;
+                    if (first) IncludeWaitingRefills(level, now);
+                }
+                else if (direction != 0 && direction != passive && Math.Abs(price - pair.Key.Price) <= 1)
+                { level.Opposite.Enqueue(trade); m.Opposite = checked(m.Opposite + volume); }
+                if (level.Passive.Count > 0) PushExtreme(level.Extremes, trade, pair.Key.Side == Side.Ask);
+                Signal active = level.Active;
+                if (active != null && (pair.Key.Side == Side.Bid ? pair.Key.Price - price : price - pair.Key.Price) > settings.MaximumAdverseTicks)
+                {
+                    bool qualified = active.State == Stage.Qualified;
+                    End(active, Stage.Invalidated, now, "Price crossed the held level"); level.Active = null;
+                    if (qualified) level.CooldownUntil = now + Ms(settings.CooldownMs);
+                }
+            }
+            ObserveInitiativePrint(buys, true, trade);
+            ObserveInitiativePrint(sells, false, trade);
+            InvalidateInitiativePrint(buyInitiative, true, trade);
+            InvalidateInitiativePrint(sellInitiative, false, trade);
+        }
+        RefreshLevels(now); return trade.Id;
+    }
+    internal void MatchTrade(long id, long volume)
+    {
+        Trade trade;
+        if (volume <= 0 || id == 0 || !tradeIds.TryGetValue(id, out trade)) return;
+        long before = trade.Matched;
+        trade.Matched = volume >= trade.Volume - before ? trade.Volume : before + volume;
+        Level level = TradeOwner(trade);
+        if (trade.Eligible && level != null) level.Metrics.Matched = checked(level.Metrics.Matched + trade.Matched - before);
+        if (!trade.Eligible && trade.Matched == trade.Volume) MakeEligible(trade);
+    }
+    internal void Contribution(long id, Side side, long price, long net, long receipt, long now)
+    {
+        Advance(now);
+        if (Faulted || receipt <= now - Window - Ms(settings.ReconciliationMs)) return;
+        Refill refill;
+        if (refillIds.TryGetValue(id, out refill))
+        {
+            if (refill.Counted && RefillOwner(refill) != null)
+            {
+                Metrics m = refill.Owner.Metrics;
+                m.Replenished = checked(m.Replenished + net - refill.Net);
+                m.Refills += (net > 0 ? 1 : 0) - (refill.Net > 0 ? 1 : 0);
+            }
+            refill.Net = net; return;
+        }
+        if (receipt < contextStarted) return; // First-seen pre-context corrections cannot seed new flow evidence.
+        if (!Room(now)) return;
+        refill = new Refill { Id = id, Key = new Key(side, price), Net = net, Receipt = receipt };
+        // New contributions carry their own depth receipt time. Corrections retain that time.
+        // Production depth receipts are monotonic; fail closed if that contract is violated.
+        if (refills.Count > 0 && receipt < latestRefillReceipt)
+        { Fail(now, "New contribution receipt order regressed; reset required"); return; }
+        latestRefillReceipt = receipt;
+        refills.Enqueue(refill); windowRefills.Enqueue(refill); refillIds.Add(id, refill);
+        Level level;
+        if (levels.TryGetValue(refill.Key, out level) && level.Available && receipt >= level.Epoch)
+        {
+            refill.Owner = level; refill.OwnerVersion = level.Version; level.AllRefills.Enqueue(refill);
+            if (InRefillRange(level, refill, now)) CountRefill(level, refill);
+        }
+    }
+    private long latestRefillReceipt = long.MinValue;
+    private Level TradeOwner(Trade trade)
+    { return trade.Owner != null && trade.Owner.Available && trade.OwnerVersion == trade.Owner.Version ? trade.Owner : null; }
+    private Level RefillOwner(Refill refill)
+    { return refill.Owner != null && refill.Owner.Available && refill.OwnerVersion == refill.Owner.Version ? refill.Owner : null; }
+    private void MakeEligible(Trade trade)
+    {
+        if (trade.Eligible) return;
+        trade.Eligible = true; Level level = TradeOwner(trade);
+        if (level != null)
+        { level.Metrics.Eligible = checked(level.Metrics.Eligible + trade.Volume);
+            level.Metrics.Matched = checked(level.Metrics.Matched + trade.Matched); }
+    }
+    private bool InRefillRange(Level level, Refill refill, long now)
+    { return level.Metrics.First != long.MinValue && refill.Receipt >= level.Epoch
+        && refill.Receipt >= level.Metrics.First - Ms(settings.ReconciliationMs) && refill.Receipt > now - Window; }
+    private static void CountRefill(Level level, Refill refill)
+    {
+        refill.Counted = true; level.IncludedRefills.Enqueue(refill);
+        level.Metrics.Replenished = checked(level.Metrics.Replenished + refill.Net);
+        if (refill.Net > 0) level.Metrics.Refills++;
+    }
+    private void IncludeWaitingRefills(Level level, long now)
+    {
+        foreach (Refill refill in level.AllRefills)
+            if (!refill.Counted && InRefillRange(level, refill, now)) CountRefill(level, refill);
+    }
+    private static void UncountRefill(Level level, Refill refill)
+    {
+        if (!refill.Counted) return;
+        level.Metrics.Replenished = checked(level.Metrics.Replenished - refill.Net);
+        if (refill.Net > 0) level.Metrics.Refills--;
+        refill.Counted = false;
+    }
+    private static void PushExtreme(LinkedList<Trade> entries, Trade trade, bool maximum)
+    {
+        while (entries.Last != null && (maximum ? entries.Last.Value.Price <= trade.Price : entries.Last.Value.Price >= trade.Price))
+            entries.RemoveLast();
+        entries.AddLast(trade);
+    }
+    private static void RefreshDirection(InitiativeMetrics m)
+    {
+        if (m.Trades.First == null)
+        { m.First = m.Last = long.MinValue; m.Extremes.Clear(); m.BreachAnchorId = 0; return; }
+        Trade first = m.Trades.First.Value, last = m.Trades.Last.Value;
+        m.First = first.Receipt; m.Last = last.Receipt; m.StartPrice = first.Price;
+        m.StartBid = first.Bid; m.StartAsk = first.Ask; m.EndPrice = last.Price;
+        while (m.Extremes.First != null && m.Extremes.First.Value.Id < first.Id) m.Extremes.RemoveFirst();
+    }
+    private void ObserveInitiativePrint(InitiativeMetrics m, bool buy, Trade trade)
+    {
+        if (m.Trades.First == null) return;
+        PushExtreme(m.Extremes, trade, buy);
+        // Choose the newest preceding price that proves a breach. An older global
+        // extreme must not hide a later local breach when that old extreme expires.
+        LinkedListNode<Trade> peak = m.Extremes.Last;
+        while (peak != null && (buy ? peak.Value.Price - trade.Price : trade.Price - peak.Value.Price) <= settings.MaximumAdverseTicks)
+            peak = peak.Previous;
+        if (peak != null) m.BreachAnchorId = Math.Max(m.BreachAnchorId, peak.Value.Id);
+    }
+    private void InvalidateInitiativePrint(Signal active, bool buy, Trade trade)
+    {
+        if (active == null || active.State != Stage.Qualified) return;
+        if (buy ? trade.Price > active.FavorablePrice : trade.Price < active.FavorablePrice) active.FavorablePrice = trade.Price;
+        if ((buy ? active.FavorablePrice - trade.Price : trade.Price - active.FavorablePrice) <= settings.MaximumAdverseTicks) return;
+        End(active, Stage.Invalidated, trade.Receipt, "Price retraced the initiative path");
+        if (buy) { buyInitiative = null; buyCooldown = trade.Receipt + Ms(settings.CooldownMs); }
+        else { sellInitiative = null; sellCooldown = trade.Receipt + Ms(settings.CooldownMs); }
+    }
+    private void RefreshLevels(long now)
+    {
+        foreach (KeyValuePair<Key, Level> pair in levels)
+        {
+            Level level = pair.Value; Metrics m = level.Metrics;
+            while (level.Passive.Count > 0 && level.Passive.Peek().Receipt <= now - Window)
+            {
+                Trade old = level.Passive.Dequeue(); m.Executed = checked(m.Executed - old.Volume);
+                if (old.Eligible) { m.Eligible = checked(m.Eligible - old.Volume); m.Matched = checked(m.Matched - old.Matched); }
+                old.Owner = null;
+            }
+            while (level.Opposite.Count > 0 && level.Opposite.Peek().Receipt <= now - Window)
+                m.Opposite = checked(m.Opposite - level.Opposite.Dequeue().Volume);
+            m.First = level.Passive.Count == 0 ? long.MinValue : level.Passive.Peek().Receipt;
+            if (level.Passive.Count == 0)
+            { m.Last = long.MinValue; level.Extremes.Clear(); }
+            else
+                while (level.Extremes.First != null && level.Extremes.First.Value.Id < level.Passive.Peek().Id) level.Extremes.RemoveFirst();
+            m.Adverse = level.Extremes.First == null ? 0 : Math.Max(0,
+                pair.Key.Side == Side.Bid ? pair.Key.Price - level.Extremes.First.Value.Price : level.Extremes.First.Value.Price - pair.Key.Price);
+            while (level.IncludedRefills.Count > 0 && !InRefillRange(level, level.IncludedRefills.Peek(), now))
+                UncountRefill(level, level.IncludedRefills.Dequeue());
+            while (level.AllRefills.Count > 0 && level.AllRefills.Peek().Receipt <= now - Window)
+                level.AllRefills.Dequeue();
+        }
+    }
+    private bool Room(long now)
+    {
+        if (tape.Count + refills.Count < settings.Capacity) return true;
+        Fail(now, "Evidence capacity exceeded; reset required"); return false;
+    }
+    private void Fail(long now, string reason)
+    {
+        Faulted = true; ready = false; SuppressAll(now, reason); Status = "Unavailable: " + reason;
+    }
+    private void SuppressAll(long now, string reason)
+    {
+        foreach (Level level in levels.Values)
+        {
+            if (level.Active == null) continue;
+            bool qualified = level.Active.State == Stage.Qualified;
+            End(level.Active, Stage.Suppressed, now, reason); level.Active = null;
+            if (qualified) level.CooldownUntil = now + Ms(settings.CooldownMs);
+        }
+        if (buyInitiative != null)
+        {
+            bool qualified = buyInitiative.State == Stage.Qualified;
+            End(buyInitiative, Stage.Suppressed, now, reason);
+            if (qualified) buyCooldown = now + Ms(settings.CooldownMs);
+        }
+        if (sellInitiative != null)
+        {
+            bool qualified = sellInitiative.State == Stage.Qualified;
+            End(sellInitiative, Stage.Suppressed, now, reason);
+            if (qualified) sellCooldown = now + Ms(settings.CooldownMs);
+        }
+        buyInitiative = sellInitiative = null;
+    }
+    // Rolling sums and monotonic extrema make event-time checks independent of retained tape size.
+    // Time-driven failures are visited before later expiry/maturity can restore support.
+    internal void BeginUpdate(long now)
+    { Advance(now); updateDepth++; }
+    internal void EndUpdate(long now)
+    {
+        if (updateDepth <= 0) throw new InvalidOperationException("No flow update to complete");
+        updateDepth--;
+        if (updateDepth == 0) ObserveContinuity(now);
+    }
+    internal void Advance(long now)
+    {
+        if (lastNow == long.MinValue) { lastNow = now; started = now; }
+        if (now < lastNow) { Reset(now, "Receipt clock rewind"); return; }
+        long cursor = lastNow;
+        while (true)
+        {
+            long boundary = long.MaxValue;
+            if (tape.Count > 0) boundary = Math.Min(boundary, tape.Peek().Receipt + Window);
+            if (windowRefills.Count > 0) boundary = Math.Min(boundary, windowRefills.Peek().Receipt + Window);
+            if (maturity.Count > 0) boundary = Math.Min(boundary, maturity.Peek().Receipt + Ms(settings.ReconciliationMs) + 1);
+            foreach (Level level in levels.Values)
+                if (level.Active != null && level.Active.State == Stage.Candidate && level.Metrics.Last != long.MinValue)
+                { long quiet = level.Metrics.Last + Ms(settings.QuietTimeoutMs) + 1; if (quiet > cursor) boundary = Math.Min(boundary, quiet); }
+            if (buyInitiative != null && buyInitiative.State == Stage.Candidate && buys.Last != long.MinValue)
+            { long quiet = buys.Last + Ms(settings.QuietTimeoutMs) + 1; if (quiet > cursor) boundary = Math.Min(boundary, quiet); }
+            if (sellInitiative != null && sellInitiative.State == Stage.Candidate && sells.Last != long.MinValue)
+            { long quiet = sells.Last + Ms(settings.QuietTimeoutMs) + 1; if (quiet > cursor) boundary = Math.Min(boundary, quiet); }
+            if (boundary > now) break;
+            lastNow = boundary; ExpireAndMature(boundary); ObserveContinuity(boundary); cursor = boundary;
+        }
+        lastNow = now; ExpireAndMature(now); ObserveContinuity(now);
+    }
+    private void ExpireAndMature(long now)
+    {
+        while (tape.Count > 0 && tape.Peek().Receipt <= now - Window)
+        {
+            Trade old = tape.Dequeue(); tradeIds.Remove(old.Id);
+            if (old.Direction == 0) unknown = checked(unknown - old.Volume);
+            else
+            {
+                classified = checked(classified - old.Volume);
+                InitiativeMetrics m = old.Direction == 1 ? buys : sells;
+                m.Executed = checked(m.Executed - old.Volume); m.Trades.Remove(old.DirectionNode); RefreshDirection(m);
+            }
+        }
+        RefreshLevels(now);
+        while (maturity.Count > 0 && now - maturity.Peek().Receipt > Ms(settings.ReconciliationMs))
+        { Trade trade = maturity.Dequeue(); if (tradeIds.ContainsKey(trade.Id)) MakeEligible(trade); }
+        while (windowRefills.Count > 0 && windowRefills.Peek().Receipt <= now - Window) windowRefills.Dequeue();
+        while (refills.Count > 0 && refills.Peek().Receipt <= now - Window - Ms(settings.ReconciliationMs))
+            refillIds.Remove(refills.Dequeue().Id);
+    }
+    private bool ClassifiedEnough()
+    { return unknown * 100.0 <= ((double)unknown + classified) * settings.MaximumUnknownPercent; }
+    private bool AbsorptionEnough(Level level, long now)
+    {
+        Metrics m = level.Metrics;
+        return QuoteReady && level.Available && now >= attributionBlockedUntil && m.Executed >= settings.MinimumVolume
+            && Share(m.Executed, m.Opposite) >= settings.MinimumDominancePercent
+            && m.Adverse <= settings.MaximumAdverseTicks && m.Last != long.MinValue && now - m.Last <= Ms(settings.QuietTimeoutMs);
+    }
+    private bool AbsorptionSupported(Level level, long now, bool quality)
+    {
+        Metrics m = level.Metrics;
+        return AbsorptionEnough(level, now) && IsWarm && quality
+            && m.Eligible >= settings.MinimumVolume && m.Matched * 100.0 >= m.Eligible * settings.MinimumMatchPercent
+            && m.Replenished >= settings.MinimumReplenishment && m.Refills >= settings.MinimumRefills
+            && (now - m.First) / TimeSpan.TicksPerMillisecond >= settings.MinimumHoldMs;
+    }
+    private bool InitiativeEnough(bool buy, InitiativeMetrics m, long opposite, long now)
+    {
+        long advance = buy ? m.EndPrice - m.StartPrice : m.StartPrice - m.EndPrice;
+        bool quotes = haveQuote && (buy
+            ? currentBid - m.StartBid >= settings.MinimumAdvanceTicks && currentAsk - m.StartAsk >= settings.MinimumAdvanceTicks
+            : m.StartBid - currentBid >= settings.MinimumAdvanceTicks && m.StartAsk - currentAsk >= settings.MinimumAdvanceTicks);
+        bool price = lastPrint != long.MinValue && (buy ? lastPrice >= m.EndPrice - settings.MaximumAdverseTicks
+            : lastPrice <= m.EndPrice + settings.MaximumAdverseTicks);
+        return QuoteReady && settings.Initiative && m.Executed >= settings.MinimumVolume && Share(m.Executed, opposite) >= settings.MinimumDominancePercent
+            && advance >= settings.MinimumAdvanceTicks && quotes && price && !m.PathBreached
+            && m.Last != long.MinValue && now - m.Last <= Ms(settings.QuietTimeoutMs);
+    }
+    private bool InitiativeSupported(bool buy, InitiativeMetrics m, long opposite, long now, bool quality)
+    { return InitiativeEnough(buy, m, opposite, now) && IsWarm && quality
+        && (now - m.First) / TimeSpan.TicksPerMillisecond >= settings.MinimumHoldMs; }
+    private void ObserveContinuity(long now)
+    {
+        if (updateDepth != 0) return; // Reconciliation observers are internal steps of one callback.
+        bool quality = ClassifiedEnough();
+        foreach (Level level in levels.Values)
+        {
+            Signal active = level.Active;
+            if (active == null) continue;
+            if (active.State == Stage.Candidate && !AbsorptionSupported(level, now, quality))
+                active.QualifyingSince = long.MinValue;
+            else if (active.State == Stage.Qualified && (!quality || (level.Metrics.Eligible >= settings.MinimumVolume
+                && level.Metrics.Matched * 100.0 < level.Metrics.Eligible * settings.MinimumMatchPercent)))
+            {
+                End(active, Stage.Suppressed, now, "Execution evidence quality deteriorated");
+                level.Active = null; level.CooldownUntil = now + Ms(settings.CooldownMs);
+            }
+        }
+        if (!quality)
+        {
+            if (buyInitiative != null && buyInitiative.State == Stage.Qualified)
+            { End(buyInitiative, Stage.Suppressed, now, "Trade classification deteriorated"); buyInitiative = null; buyCooldown = now + Ms(settings.CooldownMs); }
+            if (sellInitiative != null && sellInitiative.State == Stage.Qualified)
+            { End(sellInitiative, Stage.Suppressed, now, "Trade classification deteriorated"); sellInitiative = null; sellCooldown = now + Ms(settings.CooldownMs); }
+        }
+        if (buyInitiative != null && buyInitiative.State == Stage.Candidate && !InitiativeSupported(true, buys, sells.Executed, now, quality))
+            buyInitiative.QualifyingSince = long.MinValue;
+        if (sellInitiative != null && sellInitiative.State == Stage.Candidate && !InitiativeSupported(false, sells, buys.Executed, now, quality))
+            sellInitiative.QualifyingSince = long.MinValue;
+    }
+    internal void Evaluate(long now, bool force = false)
+    {
+        Advance(now);
+        if (Faulted || !ready) return;
+        // Rule state is checked on every completed callback. Only status text is throttled.
+        bool classifiedEnough = ClassifiedEnough();
+        if (QuoteReady && settings.Absorption)
+            foreach (KeyValuePair<Key, Level> pair in levels) Absorption(pair.Key, pair.Value, now, classifiedEnough);
+        if (QuoteReady)
+        { Initiative(true, buys, sells.Executed, now, classifiedEnough);
+            Initiative(false, sells, buys.Executed, now, classifiedEnough); }
+        prune.Clear();
+        foreach (KeyValuePair<Key, Level> pair in levels)
+            if (!pair.Value.Available && pair.Value.Active == null && now - pair.Value.LastSeen > Window) prune.Add(pair.Key);
+        foreach (Key key in prune) levels.Remove(key);
+        if (!force && lastEvaluation != long.MinValue && now - lastEvaluation < Ms(100)) return;
+        lastEvaluation = now;
+        Status = !QuoteReady ? "Experimental; quote observation paused: " + QuotePauseReason
+            : !IsWarm ? "Experimental; warming up" : "Experimental; observing";
+        if (!classifiedEnough) Status += "; trade classification incomplete";
+        if (now < attributionBlockedUntil) Status += "; absorption paused: source timing";
+        Status += "; buy/sell/unknown contracts " + buys.Executed + "/" + sells.Executed + "/" + unknown;
+        Status += "; qualified " + QualifiedCount + "; retained trades " + tape.Count
+            + "; dropped event records " + DroppedTransitionCount
+            + LifecycleDiagnostics();
+    }
+    private string LifecycleDiagnostics()
+    {
+        return "; flow resets " + ResetCount + "; last flow reset: " + LastResetReason
+            + "; quote pauses " + QuotePauseCount + "; quote ready " + QuoteReady
+            + "; warm elapsed ms " + WarmElapsedMs + "; last quote pause: " + QuotePauseReason
+            + "; last hard context failure: " + LastContextFailure;
+    }
+    private static int Share(long volume, long other)
+    { return (double)volume + other == 0 ? 0 : (int)(100.0 * volume / ((double)volume + other)); }
+    private void Absorption(Key key, Level level, long now, bool classifiedEnough)
+    {
+        Signal active = level.Active; Metrics m = level.Metrics; bool created = false;
+        if (active != null && active.State == Stage.Qualified)
+        {
+            if (!classifiedEnough || (m.Eligible >= settings.MinimumVolume
+                && m.Matched * 100.0 < m.Eligible * (double)settings.MinimumMatchPercent))
+                End(active, Stage.Suppressed, now, "Execution evidence quality deteriorated");
+            else if (!level.Available) End(active, Stage.Suppressed, now, "Coverage lost");
+            else if (haveQuote && lastPrint != long.MinValue
+                && (key.Side == Side.Bid ? key.Price - lastPrice : lastPrice - key.Price) > settings.MaximumAdverseTicks)
+                End(active, Stage.Invalidated, now, "Price crossed the held level");
+            else if (now - active.QualifiedAt >= Ms(settings.DisplayMs)) End(active, Stage.Expired, now, "Display lifetime elapsed");
+            if (active.State != Stage.Qualified) { level.Active = null; level.CooldownUntil = now + Ms(settings.CooldownMs); }
+            return;
+        }
+        bool enough = AbsorptionEnough(level, now);
+        if (!enough)
+        {
+            if (active != null)
+            { End(active, m.Adverse > settings.MaximumAdverseTicks ? Stage.Invalidated : Stage.Expired, now,
+                m.Adverse > settings.MaximumAdverseTicks ? "Price crossed the candidate level" : "Execution evidence no longer qualifies"); level.Active = null; }
+            return;
+        }
+        if (active == null)
+        {
+            if (now < level.CooldownUntil) return;
+            active = Start(key.Side == Side.Bid ? Kind.BuyerAbsorption : Kind.SellerAbsorption, key.Price, now);
+            level.Active = active; created = true;
+        }
+        active.Executed = m.Executed; active.Eligible = m.Eligible; active.Matched = m.Matched; active.Replenished = m.Replenished;
+        active.Refills = m.Refills; active.Dominance = Share(m.Executed, m.Opposite);
+        active.HeldMs = (now - m.First) / TimeSpan.TicksPerMillisecond;
+        bool supported = AbsorptionSupported(level, now, classifiedEnough);
+        active.Reason = supported ? "Executed volume, replenishment and price hold agree"
+            : "Awaiting warm-up, matched executions, replenishment or hold duration";
+        if (created) Emit(active);
+        Confirm(active, supported, now);
+    }
+    private void Initiative(bool buy, InitiativeMetrics m, long opposite, long now, bool classifiedEnough)
+    {
+        Signal active = buy ? buyInitiative : sellInitiative; bool created = false;
+        if (active != null && active.State == Stage.Qualified)
+        {
+            if (!classifiedEnough) End(active, Stage.Suppressed, now, "Trade classification deteriorated");
+            else if (lastPrint != long.MinValue && (buy ? active.Price - lastPrice : lastPrice - active.Price) > settings.MaximumAdverseTicks)
+                End(active, Stage.Invalidated, now, "Price retraced the initiative endpoint");
+            else if (now - active.QualifiedAt >= Ms(settings.DisplayMs)) End(active, Stage.Expired, now, "Display lifetime elapsed");
+            if (active.State != Stage.Qualified)
+            { if (buy) { buyInitiative = null; buyCooldown = now + Ms(settings.CooldownMs); }
+                else { sellInitiative = null; sellCooldown = now + Ms(settings.CooldownMs); } }
+            return;
+        }
+        long advance = buy ? m.EndPrice - m.StartPrice : m.StartPrice - m.EndPrice;
+        bool enough = InitiativeEnough(buy, m, opposite, now);
+        if (!enough)
+        {
+            if (active != null) End(active, m.PathBreached ? Stage.Invalidated : Stage.Expired, now,
+                m.PathBreached ? "Price retraced the initiative path" : "Initiative evidence no longer qualifies");
+            if (buy) buyInitiative = null; else sellInitiative = null; return;
+        }
+        if (active == null)
+        {
+            if (now < (buy ? buyCooldown : sellCooldown)) return;
+            active = Start(buy ? Kind.BuyInitiative : Kind.SellInitiative, m.EndPrice, now);
+            if (buy) buyInitiative = active; else sellInitiative = active; created = true;
+        }
+        active.Price = m.EndPrice; active.Executed = m.Executed; active.AdvanceTicks = advance;
+        active.Dominance = Share(m.Executed, opposite); active.HeldMs = (now - m.First) / TimeSpan.TicksPerMillisecond;
+        bool supported = InitiativeSupported(buy, m, opposite, now, classifiedEnough);
+        active.Reason = supported ? "Dominant executions, price advance and quote advance agree" : "Awaiting warm-up, classification or duration";
+        if (created) Emit(active);
+        Confirm(active, supported, now);
+    }
+    private Signal Start(Kind kind, long price, long now)
+    {
+        Signal signal = new Signal { Id = ++nextSignal, Pattern = kind, Price = price, State = Stage.Candidate,
+            Detected = now, Updated = now, Reason = "Initial execution evidence" };
+        return signal;
+    }
+    private void Confirm(Signal signal, bool supported, long now)
+    {
+        if (!supported) { signal.QualifyingSince = long.MinValue; return; }
+        if (signal.QualifyingSince == long.MinValue) signal.QualifyingSince = now;
+        if (now - signal.QualifyingSince < Ms(settings.ConfirmationMs)) return;
+        signal.State = Stage.Qualified; signal.FavorablePrice = signal.Price;
+        if (signal.Pattern == Kind.BuyInitiative && buys.Extremes.First != null)
+            signal.FavorablePrice = Math.Max(signal.Price, buys.Extremes.First.Value.Price);
+        else if (signal.Pattern == Kind.SellInitiative && sells.Extremes.First != null)
+            signal.FavorablePrice = Math.Min(signal.Price, sells.Extremes.First.Value.Price);
+        signal.QualifiedAt = now; signal.Updated = now; QualifiedCount++; Emit(signal);
+    }
+    private void End(Signal signal, Stage state, long now, string reason)
+    {
+        if (signal.State != Stage.Candidate && signal.State != Stage.Qualified) return;
+        signal.State = state; signal.Updated = now; signal.Reason = reason; Emit(signal);
+    }
+    private void Emit(Signal signal)
+    {
+        // Undrained diagnostic output must not grow without bound. The adapter
+        // drains each data callback, and caps output separately when disabled.
+        if (transitions.Count >= 256) { transitions.Dequeue(); DroppedTransitionCount++; }
+        transitions.Enqueue(signal.Copy());
+    }
+    internal Signal TakeTransition() { return transitions.Count == 0 ? null : transitions.Dequeue(); }
+    internal Signal At(Side displaySide, long price)
+    {
+        Key key = new Key(displaySide, price); Level level; Signal result = null;
+        if (levels.TryGetValue(key, out level) && level.Active != null) result = level.Active;
+        Signal initiative = displaySide == Side.Ask ? buyInitiative : sellInitiative;
+        if (initiative != null && initiative.Price == price && (result == null
+            || (initiative.State == Stage.Qualified && result.State != Stage.Qualified) || initiative.Updated > result.Updated)) result = initiative;
+        return result != null && (result.State == Stage.Candidate || result.State == Stage.Qualified) ? result.Copy() : null;
+    }
+}

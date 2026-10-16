@@ -1,0 +1,106 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using F=ExecutionOSFlowEvidenceV4;
+using Old=ExecutionOSFlowEvidencePrevious;
+internal static class Program
+{
+ static int passed;
+ static long T(double s){return (long)Math.Round(s*TimeSpan.TicksPerSecond);}
+ static void Check(bool v,string s){if(!v)throw new Exception(s);}
+ static void Eq(long a,long b,string s){Check(a==b,s+": "+a+" != "+b);}
+ static void Test(string s,Action a){a();passed++;Console.WriteLine("PASS "+s);}
+ static F New(F.Settings settings=null){F f=new F(settings??new F.Settings());f.DiagnosticsEnabled=true;f.Reset(0,"start");f.SetReady(true,0,"ready");f.BeginCoverage();f.Quantity(F.Side.Bid,100,200,0);f.Quantity(F.Side.Ask,101,200,0);f.EndCoverage(0);f.Quote(100,101);f.SetQuoteReady(true,0,"quotes ready");f.Evaluate(T(5));return f;}
+ static long Trade(F f,int d,long p,long q,double t,bool match=true,long bid=100,long ask=101){if(f.QuoteReady)f.Quote(bid,ask);long id=f.AddTrade(d,p,q,bid,ask,T(t));if(match)f.MatchTrade(id,q);f.Evaluate(T(t));return id;}
+ static List<F.Signal> Drain(F f){List<F.Signal> a=new List<F.Signal>();F.Signal s;while((s=f.TakeTransition())!=null)a.Add(s);return a;}
+ static void AbsPrepare(F f,bool ask=false){int d=ask?1:-1;long p=ask?101:100;F.Side side=ask?F.Side.Ask:F.Side.Bid;Trade(f,d,p,60,5.1);f.Contribution(1,side,p,60,T(5.12),T(5.12));Trade(f,d,p,60,5.5);f.Contribution(2,side,p,60,T(5.52),T(5.52));f.Evaluate(T(5.9));}
+ static void InitiativePrepare(F f,bool buy=true){int d=buy?1:-1;Trade(f,d,buy?101:103,50,5.1,false,buy?100:103,buy?101:104);Trade(f,d,102,50,5.5,false,buy?101:102,buy?102:103);Trade(f,d,buy?103:101,50,5.9,false,buy?102:101,buy?103:102);}
+ static void Stage(F f,F.Side side,long price,F.Stage stage){F.Signal s=f.At(side,price);Check(s!=null&&s.State==stage,"expected "+stage+" at "+price);}
+ static void No(F f,F.Side side,long price){Check(f.At(side,price)==null,"ended marker must stay removed");}
+ static F.DiagnosticSnapshot Snapshot(F f,F.Kind kind=F.Kind.BuyInitiative,long price=103,double t=5.95){return (F.DiagnosticSnapshot)typeof(F).GetMethod("CaptureDiagnostics",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(f,new object[]{new F.Signal{Pattern=kind,Price=price},T(t)});}
+ static bool Has(F.DiagnosticSnapshot d,F.RejectionChecks c){return (d.Checks&c)==c;}
+ static F.Signal Last(F f){var list=Drain(f);Check(list.Count>0,"transition required");return list[list.Count-1];}
+ public static int Main(){try{
+ foreach(bool ask in new[]{false,true}){bool a=ask;
+ Test("Fresh absorption snapshot identifies replenishment, duration and matching blockers side="+a,delegate{
+ F f=New();Trade(f,a?1:-1,a?101:100,100,5.1);f.Contribution(1,a?F.Side.Ask:F.Side.Bid,a?101:100,9,T(5.11),T(5.11));f.Evaluate(T(5.119));var d=Snapshot(f,a?F.Kind.SellerAbsorption:F.Kind.BuyerAbsorption,a?101:100,5.119);Check(Has(d,F.RejectionChecks.ReplenishmentBelowMinimum|F.RejectionChecks.RefillsBelowMinimum|F.RejectionChecks.ObservationTooShort),"all independent blockers");Eq(d.Replenished,9,"actual9");Eq(d.Rules.MinimumReplenishment,50,"required50");Eq(d.Executed,100,"actual volume");Eq(d.Matched,100,"matched volume");Check(!Has(d,F.RejectionChecks.MatchBelowMinimum),"matching is satisfied");
+ });
+ Test("Absorption terminal snapshot refreshes direct adverse print before cached metrics side="+a,delegate{
+ F f=New();AbsPrepare(f,a);f.Evaluate(T(6.4));Drain(f);Trade(f,a?1:-1,a?103:98,1,6.41,false);var e=Last(f);Check(e.State==F.Stage.Invalidated,"direct invalidation");Check(Has(e.Diagnostics,F.RejectionChecks.AdverseMovementExceeded),"snapshot sees actual extreme");Eq(e.Diagnostics.AdverseTicks,2,"two tick breach");Eq(e.Diagnostics.Receipt,T(6.41),"actual failure receipt");
+ });
+ Test("Absorption coverage loss captures omitted level before state clearing side="+a,delegate{
+ F f=New();AbsPrepare(f,a);Drain(f);f.BeginCoverage();f.EndCoverage(T(5.95));var all=Drain(f);var e=all.Find(delegate(F.Signal v){return v.Pattern==(a?F.Kind.SellerAbsorption:F.Kind.BuyerAbsorption);});Check(e!=null&&Has(e.Diagnostics,F.RejectionChecks.CoverageUnavailable),"missing seen flag recorded");Eq(e.Diagnostics.Executed,120,"evidence captured before clear");
+ });}
+ foreach(bool buy in new[]{false,true}){bool b=buy;
+ Test("Initiative dominance loss reports current counters despite older legacy fields buy="+b,delegate{
+ F f=New();InitiativePrepare(f,b);Drain(f);Trade(f,b?-1:1,b?103:101,65,5.95,false,b?102:101,b?103:102);var e=Last(f);Check(e.State==F.Stage.Expired,"expired");Check(Has(e.Diagnostics,F.RejectionChecks.DominanceBelowMinimum),"exact failed predicate");Eq(e.Diagnostics.Dominance,69,"integer gate69");Eq(e.Diagnostics.Executed,150,"current direction");Eq(e.Diagnostics.Opposite,65,"current opposite");Check(e.Dominance!=e.Diagnostics.Dominance,"original field preserved separately");Check(e.LastConfirmationInterruption!=null&&Has(e.LastConfirmationInterruption,F.RejectionChecks.DominanceBelowMinimum),"interruption snapshot preserved");
+ });
+ Test("Retained path breach identified in actual terminal snapshot buy="+b,delegate{
+ F f=New();InitiativePrepare(f,b);Drain(f);Trade(f,b?-1:1,b?100:104,1,5.95,false);var e=Last(f);Check(e.State==F.Stage.Invalidated&&Has(e.Diagnostics,F.RejectionChecks.RetainedPathBreached),"path breach explicit");
+ });
+ Test("Qualified peak retracement keeps trigger and numeric magnitude buy="+b,delegate{
+ F f=New();InitiativePrepare(f,b);f.Evaluate(T(6.4));Trade(f,b?1:-1,b?106:98,1,6.41,false,b?105:98,b?106:99);Drain(f);Trade(f,b?-1:1,b?104:100,1,6.42,false);var e=Last(f);Check(e.Reason=="Price retraced the initiative path","original exact trigger");Eq(e.Diagnostics.FavorableRetracementTicks,2,"qualified peak magnitude");
+ });}
+ foreach(bool bidOnly in new[]{false,true}){bool b=bidOnly;Test("Independent inside-quote advance blocker bidOnly="+b,delegate{
+ F f=New();InitiativePrepare(f);Drain(f);f.Quote(b?101:102,b?103:102);f.Evaluate(T(5.95));var e=Last(f);Check(Has(e.Diagnostics,b?F.RejectionChecks.BidAdvanceInsufficient:F.RejectionChecks.AskAdvanceInsufficient),"specific quote side");Check(!Has(e.Diagnostics,b?F.RejectionChecks.AskAdvanceInsufficient:F.RejectionChecks.BidAdvanceInsufficient),"other quote still supported");
+ });}
+ Test("Window expiry records new retained anchor and lost advance",delegate{
+ F f=New();Trade(f,1,101,100,5.1,false,100,101);Trade(f,1,103,100,5.5,false,102,103);Trade(f,1,103,100,9.9,false,102,103);Drain(f);f.Evaluate(T(10.1));var e=Last(f);Check(e.State==F.Stage.Expired&&Has(e.Diagnostics,F.RejectionChecks.PriceAdvanceInsufficient),"advance fails after anchor expires");Eq(e.Diagnostics.FirstTradeId,2,"new anchor ID");Eq(e.Diagnostics.FirstReceipt,T(5.5),"new anchor receipt");Eq(e.Diagnostics.Executed,200,"current remaining executions");Eq(e.Diagnostics.AdvanceTicks,0,"current zero advance");
+ });
+ Test("Quiet deadline reports sub-millisecond strict-boundary failure",delegate{
+ F f=New();InitiativePrepare(f);Drain(f);f.Evaluate(T(7.4)+1);var e=Last(f);Check(Has(e.Diagnostics,F.RejectionChecks.ExecutionStale),"strictly beyond quiet limit");Eq(e.Diagnostics.QuietTicks,15000001,"exact100ns beyond");Check(f.FormatDiagnostics(e,0).Contains("quiet-ms=1500.0001/max=1500"),"text cannot hide boundary by rounding");
+ });
+ Test("Confirmation reset captures failed support before recovery and remains immutable",delegate{
+ F f=New();AbsPrepare(f);Drain(f);f.Contribution(3,F.Side.Bid,100,-160,T(5.95),T(5.95));f.Evaluate(T(5.95));f.Contribution(4,F.Side.Bid,100,160,T(5.98),T(5.98));f.Evaluate(T(5.98));f.Evaluate(T(6.48));var e=Last(f);Check(e.State==F.Stage.Qualified,"qualification unchanged");Eq(e.ConfirmationInterruptions,1,"one real support interruption");Check(Has(e.LastConfirmationInterruption,F.RejectionChecks.ReplenishmentBelowMinimum),"failed replenishment retained");Eq(e.LastConfirmationInterruption.Replenished,-40,"failure time net");Eq(e.LastConfirmationInterruption.Receipt,T(5.95),"failure receipt");Eq(e.Diagnostics.Replenished,120,"recovered current net");
+ });
+ Test("Matching grace interruption records the exact maturity boundary",delegate{
+ F f=New();AbsPrepare(f);long id=f.AddTrade(-1,100,60,100,101,T(5.95));f.Evaluate(T(6.21));f.Advance(T(6.23));f.MatchTrade(id,60);f.Evaluate(T(6.23));f.Evaluate(T(6.73));var e=Last(f);Check(e.State==F.Stage.Qualified,"recovered signal qualifies");var d=e.LastConfirmationInterruption;Check(d!=null&&Has(d,F.RejectionChecks.MatchBelowMinimum),"unmatched maturity identified");Eq(d.Receipt,T(6.2)+1,"strict grace-plus-one-tick boundary");Eq(d.Eligible,180,"all mature volume");Eq(d.Matched,120,"only prior matched volume at failure");
+ });
+ Test("Unknown share, eligible and matching blockers are distinct",delegate{
+ F f=New();f.AddTrade(-1,100,120,100,101,T(5.1));f.AddTrade(0,100,100,100,101,T(5.11));f.Evaluate(T(5.12));var early=Snapshot(f,F.Kind.BuyerAbsorption,100,5.12);Check(Has(early,F.RejectionChecks.UnknownShareTooHigh|F.RejectionChecks.EligibleBelowMinimum),"early quality and grace");f.Evaluate(T(5.4));var late=Snapshot(f,F.Kind.BuyerAbsorption,100,5.4);Check(Has(late,F.RejectionChecks.MatchBelowMinimum)&&!Has(late,F.RejectionChecks.EligibleBelowMinimum),"mature unmatched distinguishable");Eq(late.Matched,0,"zero actual matched");Eq(late.Eligible,120,"eligible120");
+ });
+ Test("Queued candidate snapshots survive later trades and settings object mutation",delegate{
+ F.Settings cfg=new F.Settings();F f=New(cfg);InitiativePrepare(f);var e=Last(f);var d=e.Diagnostics;long volume=d.Executed;int threshold=d.Rules.MinimumVolume;f.AddTrade(1,103,500,102,103,T(5.95));cfg.MinimumVolume=500;Eq(d.Executed,volume,"snapshot volume immutable");Eq(d.Rules.MinimumVolume,threshold,"snapshot threshold immutable");
+ });
+ Test("Diagnostics disabled allocates no snapshots or confirmation records",delegate{
+ F f=New();f.DiagnosticsEnabled=false;AbsPrepare(f);f.Contribution(3,F.Side.Bid,100,-160,T(5.95),T(5.95));f.Contribution(4,F.Side.Bid,100,160,T(5.98),T(5.98));f.Evaluate(T(6.48));foreach(var e in Drain(f)){Check(e.Diagnostics==null&&e.LastConfirmationInterruption==null,"no diagnostic objects");Eq(e.ConfirmationInterruptions,0,"off has no diagnostic counters");}
+ });
+ Test("Formatting remains unambiguous under a comma-decimal culture",delegate{
+ var original=System.Threading.Thread.CurrentThread.CurrentCulture;try{System.Threading.Thread.CurrentThread.CurrentCulture=new System.Globalization.CultureInfo("de-DE");F f=New();InitiativePrepare(f);Drain(f);f.Evaluate(T(7.4)+1);string text=f.FormatDiagnostics(Last(f),0);Check(text.Contains("quiet-ms=1500.0001/max=1500"),"invariant fractional diagnostics");}finally{System.Threading.Thread.CurrentThread.CurrentCulture=original;}
+ });
+ Test("Diagnostic-only differential oracle against reviewed previous core",Differential);
+ Console.WriteLine("RESULT "+passed+" diagnostics core scenarios passed; 0 failed");return 0;
+ }catch(Exception ex){Console.Error.WriteLine("FAIL "+ex);return 1;}}
+ static object Invoke(object o,string name,params object[] args){var m=o.GetType().GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance);var ps=m.GetParameters();for(int i=0;i<args.Length;i++)if(ps[i].ParameterType.IsEnum)args[i]=Enum.ToObject(ps[i].ParameterType,Convert.ToInt32(args[i]));return m.Invoke(o,args);}
+ static object Prop(object o,string name){return o.GetType().GetProperty(name,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(o,null);}
+ static string Signature(object signal){if(signal==null)return "null";string[] names={"Id","Price","Detected","Updated","QualifiedAt","QualifyingSince","Pattern","State","Executed","Eligible","Matched","Replenished","HeldMs","AdvanceTicks","FavorablePrice","Refills","Dominance","Reason"};var parts=new List<string>();foreach(string n in names)parts.Add(signal.GetType().GetField(n,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(signal)+"");return string.Join("|",parts);}
+ static void Differential(){
+ object[] es={new Old(new Old.Settings()),new F(new F.Settings()){DiagnosticsEnabled=false},new F(new F.Settings()){DiagnosticsEnabled=true}};long now=0,id=0;Random rng=new Random(15415);long[] bids={100,100,100};long[] receipts=new long[30001];long[] prices=new long[30001];int transitions=0;
+ foreach(object e in es){Invoke(e,"Reset",0L,"start");Invoke(e,"SetReady",true,0L,"ready");Invoke(e,"SetQuoteReady",true,0L,"ready");Invoke(e,"BeginCoverage");Invoke(e,"Quantity",0,100L,200L,0L);Invoke(e,"Quantity",1,101L,200L,0L);Invoke(e,"EndCoverage",0L);Invoke(e,"Quote",100L,101L);Invoke(e,"Evaluate",T(5),false);}now=T(5);
+ foreach(object e in es){
+ long a=(long)Invoke(e,"AddTrade",-1,100L,60L,100L,101L,T(5.1),true,0L);Invoke(e,"MatchTrade",a,60L);Invoke(e,"Contribution",1L,0,100L,60L,T(5.12),T(5.12));
+ long b=(long)Invoke(e,"AddTrade",-1,100L,60L,100L,101L,T(5.5),true,0L);Invoke(e,"MatchTrade",b,60L);Invoke(e,"Contribution",2L,0,100L,60L,T(5.52),T(5.52));Invoke(e,"Evaluate",T(5.9),false);Invoke(e,"Evaluate",T(6.4),false);
+ }
+ while(true){object original=Invoke(es[0],"TakeTransition");string sig=Signature(original);for(int k=1;k<es.Length;k++)Check(sig==Signature(Invoke(es[k],"TakeTransition")),"seeded qualification transition parity");if(original==null)break;transitions++;}
+ Check((long)Prop(es[0],"QualifiedCount")==1,"parity includes a qualified signal");id=2;receipts[1]=T(5.12);receipts[2]=T(5.52);prices[1]=prices[2]=100;now=T(6.4);
+ for(int i=1;i<=30000;i++){
+ now+=rng.Next(0,26)*TimeSpan.TicksPerMillisecond;int op=rng.Next(12);int direction=(i/500)%3==0?-1:(i/500)%3==1?1:rng.Next(-1,2);long price=direction>0?101:100,volume=rng.Next(1,101);long tradeId=0;
+ if(op<5){foreach(object e in es){long got=(long)Invoke(e,"AddTrade",direction,price,volume,100L,101L,now,true,0L);if(tradeId==0)tradeId=got;else Eq(got,tradeId,"trade IDs");}if(rng.Next(2)==0)foreach(object e in es)Invoke(e,"MatchTrade",tradeId,volume);}
+ else if(op==5){id++;receipts[id]=now;prices[id]=price;foreach(object e in es)Invoke(e,"Contribution",id,price==100?0:1,price,(long)rngValue(i),now,now);}
+ else if(op==6&&id>0){long pick=rng.Next(1,(int)id+1);foreach(object e in es)Invoke(e,"Contribution",pick,prices[pick]==100?0:1,prices[pick],(long)rngValue(i+1),receipts[pick],now);}
+ else if(op==7){foreach(object e in es){Invoke(e,"BeginCoverage");if(i%3!=0)Invoke(e,"Quantity",0,100L,200L,now);Invoke(e,"Quantity",1,101L,200L,now);Invoke(e,"EndCoverage",now);}}
+ else if(op==8){bool q=i%2==0;foreach(object e in es){Invoke(e,"SetQuoteReady",q,now,"synthetic quote pause");if(q)Invoke(e,"Quote",100L,101L);}}
+ else if(op==9){foreach(object e in es){if(i%199==0)Invoke(e,"AttributionUncertain",now);else Invoke(e,"Advance",now);}}
+ else if(op==10){foreach(object e in es)Invoke(e,"ResetLevelEvidence",i%2,price,now,"synthetic level reset");}
+ else {foreach(object e in es)Invoke(e,"Quote",i%2==0?100L:99L,101L);}
+ if(i%997==0)foreach(object e in es){Invoke(e,"Reset",now,"synthetic reset");Invoke(e,"SetReady",true,now,"ready");Invoke(e,"SetQuoteReady",true,now,"ready");}
+ foreach(object e in es)Invoke(e,"Evaluate",now,false);
+ foreach(string n in new[]{"QualifiedCount","ResetCount","QuotePauseCount","DroppedTransitionCount","RetainedTrades","RetainedContributions","IsWarm","QuoteReady","Status"}){string expected=Prop(es[0],n)+"";for(int k=1;k<es.Length;k++)Check(expected==Prop(es[k],n)+"","differential state "+n+" event"+i);}
+ while(true){object original=Invoke(es[0],"TakeTransition");string sig=Signature(original);for(int k=1;k<es.Length;k++)Check(sig==Signature(Invoke(es[k],"TakeTransition")),"differential transition event"+i);if(original==null)break;transitions++;}
+ foreach(int side in new[]{0,1})foreach(long p in new[]{100L,101L}){string sig=Signature(Invoke(es[0],"At",side,p));for(int k=1;k<es.Length;k++)Check(sig==Signature(Invoke(es[k],"At",side,p)),"differential marker event"+i);}
+ }
+ Check(transitions>50,"oracle exercised real transitions; actual="+transitions);Console.WriteLine("ORACLE30000 identical input steps across reviewed core / diagnostics-off / diagnostics-on; "+transitions+" identical transitions; marker, confirmation, rule, reset and retention state matched after every step");
+ }
+ static int rngValue(int i){return (i*137)%201-100;}
+}

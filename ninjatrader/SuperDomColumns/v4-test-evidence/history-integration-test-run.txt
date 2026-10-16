@@ -1,0 +1,37 @@
+PASS Real qualification persists with event logging disabled
+PASS Candidates alone never create a persisted signal
+PASS Only the next qualification replaces the last record
+PASS Qualification snapshots cannot drift after later signal mutation
+PASS Terminal outcome retains original qualification: Suppressed
+PASS Terminal outcome retains original qualification: Invalidated
+PASS Terminal outcome retains original qualification: Expired
+PASS Unrelated IDs and patterns cannot terminate the stored event
+PASS Old-generation outcome cannot overwrite a new-generation record
+PASS History survives quote pauses and rolling evidence expiry
+PASS Already-ended history clears on feed disconnect
+PASS Column header reset clears the last signal
+PASS Playback rewind clears the last signal
+PASS Instrument switch clears stored event identity
+PASS Session transition clears last qualification
+PASS Disabling flow clears history even when logging is off
+PASS Threshold reconfiguration clears old qualified evidence
+PASS History options do not rebuild or reset detection
+PASS Optional timeout hides only marker and respects exact boundary
+PASS Paused playback leaves recorded age unchanged
+PASS Under-180 logical width draws measured compact history
+PASS Tiny width reports omission and preserves summary
+PASS History label does not overlap centered P/S number
+PASS Wide column draws full historical label with outcome
+PASS Historical marker stays at qualification price across side changes
+PASS Side-only display filters marker without erasing record
+PASS Off-ladder signal remains available in summary
+PASS Existing status cadence includes durable summary and real render width
+PASS Workspace serialization stores options but excludes session history
+PASS Termination clears memory and ignores late qualification callbacks
+PASS Real absorption retains correct side and transitions gray ask=False
+PASS Real absorption retains correct side and transitions gray ask=True
+PASS Real initiative retention and active/ended display buy=False
+PASS Real initiative retention and active/ended display buy=True
+PASS Off-screen record is accessible in column tooltip
+PASS Tooltip updates on outcome changes and clears without ticking-age churn
+RESULT 36 last-signal display integration scenarios passed; 0 failed

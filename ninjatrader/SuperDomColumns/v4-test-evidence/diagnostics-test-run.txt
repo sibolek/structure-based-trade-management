@@ -1,0 +1,25 @@
+PASS Fresh absorption snapshot identifies replenishment, duration and matching blockers side=False
+PASS Absorption terminal snapshot refreshes direct adverse print before cached metrics side=False
+PASS Absorption coverage loss captures omitted level before state clearing side=False
+PASS Fresh absorption snapshot identifies replenishment, duration and matching blockers side=True
+PASS Absorption terminal snapshot refreshes direct adverse print before cached metrics side=True
+PASS Absorption coverage loss captures omitted level before state clearing side=True
+PASS Initiative dominance loss reports current counters despite older legacy fields buy=False
+PASS Retained path breach identified in actual terminal snapshot buy=False
+PASS Qualified peak retracement keeps trigger and numeric magnitude buy=False
+PASS Initiative dominance loss reports current counters despite older legacy fields buy=True
+PASS Retained path breach identified in actual terminal snapshot buy=True
+PASS Qualified peak retracement keeps trigger and numeric magnitude buy=True
+PASS Independent inside-quote advance blocker bidOnly=False
+PASS Independent inside-quote advance blocker bidOnly=True
+PASS Window expiry records new retained anchor and lost advance
+PASS Quiet deadline reports sub-millisecond strict-boundary failure
+PASS Confirmation reset captures failed support before recovery and remains immutable
+PASS Matching grace interruption records the exact maturity boundary
+PASS Unknown share, eligible and matching blockers are distinct
+PASS Queued candidate snapshots survive later trades and settings object mutation
+PASS Diagnostics disabled allocates no snapshots or confirmation records
+PASS Formatting remains unambiguous under a comma-decimal culture
+ORACLE30000 identical input steps across reviewed core / diagnostics-off / diagnostics-on; 1263 identical transitions; marker, confirmation, rule, reset and retention state matched after every step
+PASS Diagnostic-only differential oracle against reviewed previous core
+RESULT 23 diagnostics core scenarios passed; 0 failed

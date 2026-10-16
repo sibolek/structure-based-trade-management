@@ -1,0 +1,14 @@
+PASS Ordered inside transition up=True lockedFirst=True
+PASS Ordered inside transition up=True lockedFirst=False
+PASS Ordered inside transition up=False lockedFirst=True
+PASS Ordered inside transition up=False lockedFirst=False
+PASS Crossed quote pause preserves tape and publishes both prices
+PASS Disconnect during pause clears history with exact reset reason
+PASS Hard reset fences older same-receipt correction IDs
+PASS Flow diagnostic includes reset count, pause count and warm clock
+PASS Zero ask queues pause detection while bid coverage survives
+PASS Trusted L2 confirmation is independent of stale trade snapshot buy=False stale=False
+PASS Trusted L2 confirmation is independent of stale trade snapshot buy=False stale=True
+PASS Trusted L2 confirmation is independent of stale trade snapshot buy=True stale=False
+PASS Trusted L2 confirmation is independent of stale trade snapshot buy=True stale=True
+RESULT 13 live readiness integration scenarios passed; 0 failed

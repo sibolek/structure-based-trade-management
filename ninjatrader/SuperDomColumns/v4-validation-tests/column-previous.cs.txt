@@ -1,0 +1,3876 @@
+// v4 EXP derived from continuity-repaired v3 build 2026-10-12.2; original baseline commit 99cd783.
+// Separate class/file; original and v3 remain unchanged. Flow rules are experimental, not predictive probabilities.
+// Rolling execution attribution is an estimate; see validation report.
+//
+// Copyright (C) 2026, NinjaTrader LLC <www.ninjatrader.com>.
+// NinjaTrader reserves the right to modify or overwrite this NinjaScript component with each release.
+//
+
+#region Using declarations
+using NinjaTrader.Core.FloatingPoint;
+using NinjaTrader.Data;
+using NinjaTrader.Gui.SuperDom;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Threading;
+using System.Windows;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Xml.Serialization;
+
+#endregion
+
+namespace NinjaTrader.NinjaScript.SuperDomColumns
+{
+    public partial class ExecutionOSPullingStacking_v4_Experimental_Previous : SuperDomColumn
+    {
+        private sealed class SpoofAlertState
+        {
+            public DateTime ExpiresUtc { get; set; }
+            public bool IsEscalated { get; set; }
+        }
+
+        private sealed class SpoofCandidate
+        {
+            public long ExecutedVolume { get; set; }
+            public long PeakStackVolume { get; set; }
+            public DateTime StartedUtc { get; set; }
+        }
+
+        private Dictionary<double, Timer> askNoDataResetTimers;
+        private Dictionary<double, Timer> bidNoDataResetTimers;
+        private Dictionary<double, Tuple<long, long>> askPriceDepthMap;
+        private Dictionary<double, Tuple<long, long>> bidPriceDepthMap;
+        private Timer bidAskResetTimer;
+
+        private readonly object collectionSync = new object();
+
+        private FontFamily fontFamily;
+        private FontStyle fontStyle;
+        private FontWeight fontWeight;
+        private Pen gridPen;
+        private double halfPenWidth;
+        private bool heightUpdateNeeded;
+        private Dictionary<string, double> mmAskPriceMap;
+        private Dictionary<string, double> mmBidPriceMap;
+        private double previousAsk = double.MinValue;
+        private double previousBid = double.MinValue;
+        private Dictionary<double, SpoofAlertState> askSpoofAlerts;
+        private Dictionary<double, SpoofAlertState> bidSpoofAlerts;
+        private Dictionary<double, SpoofCandidate> askSpoofCandidates;
+        private Dictionary<double, SpoofCandidate> bidSpoofCandidates;
+        private Queue<DateTime> askSpoofEvents;
+        private Queue<DateTime> bidSpoofEvents;
+        private DateTime lastSpoofSoundUtc = DateTime.MinValue;
+        private Timer spoofAlertRefreshTimer;
+        private double textHeight;
+        private Typeface typeFace;
+
+        public override void OnColumnLabelClicked(object sender, MouseButtonEventArgs e)
+        {
+            lock (collectionSync)
+            {
+                if (v3Terminated) return;
+                resetGeneration++;
+                DisposeLegacyResetTimers();
+                ResetRollingHistory();
+                askNoDataResetTimers.Clear();
+                bidNoDataResetTimers.Clear();
+                askPriceDepthMap.Clear();
+                bidPriceDepthMap.Clear();
+                mmAskPriceMap.Clear();
+                mmBidPriceMap.Clear();
+                ClearSpoofDetectionState();
+
+                if (SuperDom == null
+                    || SuperDom.MarketDepth == null
+                    || SuperDom.MarketDepth.Instrument == null)
+                {
+                    return;
+                }
+
+                lock (SuperDom.MarketDepth.Instrument.SyncMarketDepth)
+                {
+                    for (int i = 0; i < SuperDom.MarketDepth.Asks.Count; i++)
+                    {
+                        askPriceDepthMap.Add(
+                            SuperDom.MarketDepth.Asks[i].Price,
+                            Tuple.Create(
+                                SuperDom.MarketDepth.Asks[i].Volume,
+                                0L));
+                    }
+
+                    for (int i = 0; i < SuperDom.MarketDepth.Bids.Count; i++)
+                    {
+                        bidPriceDepthMap.Add(
+                            SuperDom.MarketDepth.Bids[i].Price,
+                            Tuple.Create(
+                                SuperDom.MarketDepth.Bids[i].Volume,
+                                0L));
+                    }
+                }
+
+                OnPropertyChanged();
+            }
+        }
+
+        protected override void OnMarketData(MarketDataEventArgs marketData)
+        {
+            lock (collectionSync)
+            {
+                if (v3Terminated || State != State.Active) return;
+                if ((!marketData.IsReset || marketData.Instrument != null)
+                    && !MatchesInstrument(marketData.Instrument)) return;
+                long now = EnsureV3Context();
+                if (marketData.IsReset)
+                {
+                    ResetV3FeedState(now);
+                    OnPropertyChanged();
+                    return;
+                }
+                if (CalculationMode == ExecutionOSPullingStackingCalculationModePrevious.RollingWindow || FlowDetectionEnabled)
+                    CheckRollingSession(now);
+                ProcessRollingTrade(marketData, now);
+
+                if (marketData.MarketDataType == MarketDataType.Last)
+                {
+                    lock (collectionSync)
+                    {
+                        Tuple<long, long> depthTuple;
+
+                        TrackSpoofExecutions(
+                            marketData.Price,
+                            marketData.Volume);
+
+                        if (askPriceDepthMap.TryGetValue(
+                            marketData.Price,
+                            out depthTuple))
+                        {
+                            askPriceDepthMap[marketData.Price] = Tuple.Create(
+                                depthTuple.Item1 - marketData.Volume,
+                                depthTuple.Item2 - marketData.Volume);
+                        }
+
+                        if (bidPriceDepthMap.TryGetValue(
+                            marketData.Price,
+                            out depthTuple))
+                        {
+                            bidPriceDepthMap[marketData.Price] = Tuple.Create(
+                                depthTuple.Item1 - marketData.Volume,
+                                depthTuple.Item2 - marketData.Volume);
+                        }
+                    }
+                }
+                else if (ResetWhen == PullingStackingResetWhen.BidAskChange)
+                {
+                    if (marketData.MarketDataType == MarketDataType.Ask
+                        && (previousAsk <= double.MinValue
+                            || previousAsk.ApproxCompare(marketData.Price) != 0))
+                    {
+                        if (previousAsk > double.MinValue)
+                        {
+                            if (bidAskResetTimer != null)
+                                bidAskResetTimer.Dispose();
+
+                            bidAskResetTimer = CreateGuardedTimer(
+                                OnBidAskResetTimerCallback,
+                                Tuple.Create(
+                                    marketData.Price,
+                                    marketData.MarketDataType),
+                                ResetTolerance,
+                                Timeout.Infinite);
+                        }
+
+                        previousAsk = marketData.Price;
+                    }
+                    else if (marketData.MarketDataType == MarketDataType.Bid
+                        && (previousBid <= double.MinValue
+                            || previousBid.ApproxCompare(marketData.Price) != 0))
+                    {
+                        if (previousBid > double.MinValue)
+                        {
+                            if (bidAskResetTimer != null)
+                                bidAskResetTimer.Dispose();
+
+                            bidAskResetTimer = CreateGuardedTimer(
+                                OnBidAskResetTimerCallback,
+                                Tuple.Create(
+                                    marketData.Price,
+                                    marketData.MarketDataType),
+                                ResetTolerance,
+                                Timeout.Infinite);
+                        }
+
+                        previousBid = marketData.Price;
+                    }
+                }
+
+                FinishFlowEvent(now);
+            }
+        }
+
+        protected override void OnMarketDepth(
+            MarketDepthEventArgs marketDepth)
+        {
+            lock (collectionSync)
+            {
+                if (v3Terminated || State != State.Active) return;
+                if ((!marketDepth.IsReset || marketDepth.Instrument != null)
+                    && !MatchesInstrument(marketDepth.Instrument)) return;
+                long now = EnsureV3Context();
+
+                if (marketDepth.IsReset)
+                {
+                    ResetV3FeedState(now);
+                    OnPropertyChanged();
+                    return;
+                }
+
+                if (SuperDom == null
+                    || SuperDom.MarketDepth == null
+                    || SuperDom.MarketDepth.Instrument == null)
+                {
+                    return;
+                }
+
+                if (CalculationMode == ExecutionOSPullingStackingCalculationModePrevious.RollingWindow || FlowDetectionEnabled)
+                    CheckRollingSession(now);
+                ProcessRollingDepth(marketDepth, now);
+
+                if (marketDepth.Position < 0 || marketDepth.Position >= SuperDom.DepthLevels)
+                    return;
+
+                lock (collectionSync)
+                {
+                    if (marketDepth.MarketDataType == MarketDataType.Ask)
+                    {
+                        ProcessAskDepth(marketDepth);
+                        TrackSpoofCandidate(marketDepth, true);
+                    }
+                    else if (marketDepth.MarketDataType == MarketDataType.Bid)
+                    {
+                        ProcessBidDepth(marketDepth);
+                        TrackSpoofCandidate(marketDepth, false);
+                    }
+                }
+
+                FinishFlowEvent(now);
+            }
+        }
+
+        private void ProcessAskDepth(
+            MarketDepthEventArgs marketDepth)
+        {
+            if (marketDepth.Operation == Cbi.Operation.Add)
+            {
+                if (marketDepth.Price.ApproxCompare(0) == 0
+                    && marketDepth.Volume == 0)
+                {
+                    return;
+                }
+
+                PriceRow row;
+                lock (SuperDom.MarketDepth.Instrument.SyncMarketDepth)
+                {
+                    row = SuperDom.Rows.FirstOrDefault(
+                        r => r.Price.ApproxCompare(
+                            marketDepth.Price) == 0);
+                }
+
+                if (!string.IsNullOrEmpty(
+                    marketDepth.MarketMaker))
+                {
+                    mmAskPriceMap[marketDepth.MarketMaker]
+                        = marketDepth.Price;
+                }
+
+                Tuple<long, long> existingDepth;
+                if (askPriceDepthMap.TryGetValue(
+                        marketDepth.Price,
+                        out existingDepth)
+                    && existingDepth.Item1 > 0)
+                {
+                    askPriceDepthMap[marketDepth.Price]
+                        = Tuple.Create(
+                            existingDepth.Item1,
+                            marketDepth.Volume
+                                - existingDepth.Item1);
+                }
+                else
+                {
+                    long baselineVolume = row != null
+                        ? row.AskVolume
+                        : marketDepth.Volume;
+
+                    askPriceDepthMap[marketDepth.Price]
+                        = Tuple.Create(
+                            baselineVolume,
+                            0L);
+                }
+
+                return;
+            }
+
+            if (marketDepth.Operation
+                == Cbi.Operation.Update)
+            {
+                Tuple<long, long> depthTuple;
+
+                if (askPriceDepthMap.TryGetValue(
+                    marketDepth.Price,
+                    out depthTuple))
+                {
+                    askPriceDepthMap[marketDepth.Price]
+                        = Tuple.Create(
+                            depthTuple.Item1,
+                            marketDepth.Volume
+                                - depthTuple.Item1);
+                }
+                else
+                {
+                    askPriceDepthMap[marketDepth.Price]
+                        = Tuple.Create(
+                            marketDepth.Volume,
+                            0L);
+                }
+
+                return;
+            }
+
+            if (ResetWhen
+                != PullingStackingResetWhen.NoMoreData)
+            {
+                return;
+            }
+
+            double price = marketDepth.Price;
+
+            if (!string.IsNullOrEmpty(
+                marketDepth.MarketMaker))
+            {
+                double mmPrice;
+
+                if (mmAskPriceMap.TryGetValue(
+                    marketDepth.MarketMaker,
+                    out mmPrice))
+                {
+                    price = mmPrice;
+                }
+            }
+
+            PriceRow noDataRow;
+            lock (SuperDom.MarketDepth.Instrument.SyncMarketDepth)
+            {
+                noDataRow = SuperDom.Rows.FirstOrDefault(
+                    r => r.Price.ApproxCompare(price) == 0);
+            }
+
+            if (noDataRow == null
+                || noDataRow.AskVolume > 0)
+            {
+                return;
+            }
+
+            Timer existingTimer;
+
+            if (askNoDataResetTimers.TryGetValue(
+                price,
+                out existingTimer))
+            {
+                existingTimer.Dispose();
+            }
+
+            askNoDataResetTimers[price] = CreateGuardedTimer(
+                OnNoDataResetTimerCallback,
+                Tuple.Create(
+                    price,
+                    MarketDataType.Ask),
+                ResetTolerance,
+                Timeout.Infinite);
+        }
+
+        private void ProcessBidDepth(
+            MarketDepthEventArgs marketDepth)
+        {
+            if (marketDepth.Operation == Cbi.Operation.Add)
+            {
+                if (marketDepth.Price.ApproxCompare(0) == 0
+                    && marketDepth.Volume == 0)
+                {
+                    return;
+                }
+
+                PriceRow row;
+                lock (SuperDom.MarketDepth.Instrument.SyncMarketDepth)
+                {
+                    row = SuperDom.Rows.FirstOrDefault(
+                        r => r.Price.ApproxCompare(
+                            marketDepth.Price) == 0);
+                }
+
+                if (!string.IsNullOrEmpty(
+                    marketDepth.MarketMaker))
+                {
+                    mmBidPriceMap[marketDepth.MarketMaker]
+                        = marketDepth.Price;
+                }
+
+                Tuple<long, long> existingDepth;
+
+                if (bidPriceDepthMap.TryGetValue(
+                        marketDepth.Price,
+                        out existingDepth)
+                    && existingDepth.Item1 > 0)
+                {
+                    bidPriceDepthMap[marketDepth.Price]
+                        = Tuple.Create(
+                            existingDepth.Item1,
+                            marketDepth.Volume
+                                - existingDepth.Item1);
+                }
+                else
+                {
+                    long baselineVolume = row != null
+                        ? row.BidVolume
+                        : marketDepth.Volume;
+
+                    bidPriceDepthMap[marketDepth.Price]
+                        = Tuple.Create(
+                            baselineVolume,
+                            0L);
+                }
+
+                return;
+            }
+
+            if (marketDepth.Operation
+                == Cbi.Operation.Update)
+            {
+                Tuple<long, long> depthTuple;
+
+                if (bidPriceDepthMap.TryGetValue(
+                    marketDepth.Price,
+                    out depthTuple))
+                {
+                    bidPriceDepthMap[marketDepth.Price]
+                        = Tuple.Create(
+                            depthTuple.Item1,
+                            marketDepth.Volume
+                                - depthTuple.Item1);
+                }
+                else
+                {
+                    bidPriceDepthMap[marketDepth.Price]
+                        = Tuple.Create(
+                            marketDepth.Volume,
+                            0L);
+                }
+
+                return;
+            }
+
+            if (ResetWhen
+                != PullingStackingResetWhen.NoMoreData)
+            {
+                return;
+            }
+
+            double price = marketDepth.Price;
+
+            if (!string.IsNullOrEmpty(
+                marketDepth.MarketMaker))
+            {
+                double mmPrice;
+
+                if (mmBidPriceMap.TryGetValue(
+                    marketDepth.MarketMaker,
+                    out mmPrice))
+                {
+                    price = mmPrice;
+                }
+            }
+
+            PriceRow noDataRow;
+            lock (SuperDom.MarketDepth.Instrument.SyncMarketDepth)
+            {
+                noDataRow = SuperDom.Rows.FirstOrDefault(
+                    r => r.Price.ApproxCompare(price) == 0);
+            }
+
+            if (noDataRow == null
+                || noDataRow.BidVolume > 0)
+            {
+                return;
+            }
+
+            Timer existingTimer;
+
+            if (bidNoDataResetTimers.TryGetValue(
+                price,
+                out existingTimer))
+            {
+                existingTimer.Dispose();
+            }
+
+            bidNoDataResetTimers[price] = CreateGuardedTimer(
+                OnNoDataResetTimerCallback,
+                Tuple.Create(
+                    price,
+                    MarketDataType.Bid),
+                ResetTolerance,
+                Timeout.Infinite);
+        }
+
+        private void TrackSpoofExecutions(
+            double price,
+            long volume)
+        {
+            if (!SpoofDetectionEnabled || volume <= 0)
+                return;
+
+            SpoofCandidate candidate;
+
+            if (askSpoofCandidates.TryGetValue(
+                price,
+                out candidate))
+            {
+                candidate.ExecutedVolume += volume;
+            }
+
+            if (bidSpoofCandidates.TryGetValue(
+                price,
+                out candidate))
+            {
+                candidate.ExecutedVolume += volume;
+            }
+        }
+
+        private void TrackSpoofCandidate(
+            MarketDepthEventArgs marketDepth,
+            bool isAsk)
+        {
+            if (!SpoofDetectionEnabled)
+                return;
+
+            Dictionary<double, Tuple<long, long>> depthMap
+                = isAsk
+                    ? askPriceDepthMap
+                    : bidPriceDepthMap;
+
+            Dictionary<double, SpoofCandidate> candidates
+                = isAsk
+                    ? askSpoofCandidates
+                    : bidSpoofCandidates;
+
+            DateTime now = DateTime.UtcNow;
+            SpoofCandidate candidate;
+
+            if (marketDepth.Operation
+                == Cbi.Operation.Remove)
+            {
+                if (candidates.TryGetValue(
+                        marketDepth.Price,
+                        out candidate)
+                    && (now - candidate.StartedUtc)
+                        .TotalMilliseconds
+                        <= SpoofMaximumLifetimeMilliseconds
+                    && candidate.ExecutedVolume
+                        <= (long)Math.Floor(
+                            candidate.PeakStackVolume
+                            * SpoofMaximumExecutedPercent
+                            / 100.0))
+                {
+                    TriggerSpoofAlert(
+                        marketDepth.Price,
+                        isAsk,
+                        now);
+                }
+
+                candidates.Remove(marketDepth.Price);
+                return;
+            }
+
+            if (marketDepth.Operation
+                    != Cbi.Operation.Add
+                && marketDepth.Operation
+                    != Cbi.Operation.Update)
+            {
+                return;
+            }
+
+            Tuple<long, long> depth;
+
+            if (!depthMap.TryGetValue(
+                marketDepth.Price,
+                out depth))
+            {
+                return;
+            }
+
+            if (candidates.TryGetValue(
+                marketDepth.Price,
+                out candidate))
+            {
+                double ageMilliseconds
+                    = (now - candidate.StartedUtc)
+                        .TotalMilliseconds;
+
+                if (ageMilliseconds
+                    > SpoofMaximumLifetimeMilliseconds)
+                {
+                    candidates.Remove(marketDepth.Price);
+                    candidate = null;
+                }
+                else
+                {
+                    if (depth.Item2
+                        > candidate.PeakStackVolume)
+                    {
+                        candidate.PeakStackVolume
+                            = depth.Item2;
+                    }
+
+                    long requiredPull
+                        = (long)Math.Ceiling(
+                            candidate.PeakStackVolume
+                            * SpoofPullPercent
+                            / 100.0);
+
+                    long pulledVolume
+                        = candidate.PeakStackVolume
+                            - depth.Item2;
+
+                    long maximumExecuted
+                        = (long)Math.Floor(
+                            candidate.PeakStackVolume
+                            * SpoofMaximumExecutedPercent
+                            / 100.0);
+
+                    if (pulledVolume >= requiredPull
+                        && candidate.ExecutedVolume
+                            <= maximumExecuted)
+                    {
+                        TriggerSpoofAlert(
+                            marketDepth.Price,
+                            isAsk,
+                            now);
+
+                        candidates.Remove(
+                            marketDepth.Price);
+
+                        return;
+                    }
+                }
+            }
+
+            if (candidate == null
+                && marketDepth.Position >= 0
+                && marketDepth.Position
+                    < SpoofMaximumDepthLevels
+                && depth.Item2
+                    >= SpoofMinimumStackVolume)
+            {
+                candidates[marketDepth.Price]
+                    = new SpoofCandidate
+                    {
+                        PeakStackVolume = depth.Item2,
+                        StartedUtc = now
+                    };
+            }
+        }
+
+        private void TriggerSpoofAlert(
+            double price,
+            bool isAsk,
+            DateTime now)
+        {
+            Queue<DateTime> events
+                = isAsk
+                    ? askSpoofEvents
+                    : bidSpoofEvents;
+
+            while (events.Count > 0
+                && (now - events.Peek())
+                    .TotalMilliseconds
+                    > SpoofRepeatWindowMilliseconds)
+            {
+                events.Dequeue();
+            }
+
+            events.Enqueue(now);
+
+            Dictionary<double, SpoofAlertState> alerts
+                = isAsk
+                    ? askSpoofAlerts
+                    : bidSpoofAlerts;
+
+            alerts[price] = new SpoofAlertState
+            {
+                ExpiresUtc = now.AddMilliseconds(
+                    SpoofAlertDisplayMilliseconds),
+
+                IsEscalated = events.Count >= 2
+            };
+
+            PlaySpoofAlertSound(now);
+            ScheduleSpoofAlertRefresh(now);
+            OnPropertyChanged();
+        }
+
+        private void PlaySpoofAlertSound(DateTime now)
+        {
+            if (!SpoofAudibleAlertEnabled
+                || string.IsNullOrEmpty(SpoofAlertSound)
+                || !System.IO.File.Exists(
+                    SpoofAlertSound)
+                || (now - lastSpoofSoundUtc)
+                    .TotalMilliseconds
+                    < SpoofSoundCooldownMilliseconds)
+            {
+                return;
+            }
+
+            lastSpoofSoundUtc = now;
+            Core.Globals.PlaySound(SpoofAlertSound);
+        }
+
+        private void ScheduleSpoofAlertRefresh(
+            DateTime now)
+        {
+            DateTime nextExpiration = DateTime.MaxValue;
+
+            foreach (SpoofAlertState alert
+                in askSpoofAlerts.Values)
+            {
+                if (alert.ExpiresUtc < nextExpiration)
+                    nextExpiration = alert.ExpiresUtc;
+            }
+
+            foreach (SpoofAlertState alert
+                in bidSpoofAlerts.Values)
+            {
+                if (alert.ExpiresUtc < nextExpiration)
+                    nextExpiration = alert.ExpiresUtc;
+            }
+
+            if (spoofAlertRefreshTimer != null)
+            {
+                spoofAlertRefreshTimer.Dispose();
+                spoofAlertRefreshTimer = null;
+            }
+
+            if (nextExpiration == DateTime.MaxValue)
+                return;
+
+            int dueTime = Math.Max(
+                1,
+                (int)Math.Ceiling(
+                    (nextExpiration - now)
+                    .TotalMilliseconds));
+
+            spoofAlertRefreshTimer = CreateGuardedTimer(
+                OnSpoofAlertRefreshTimerCallback,
+                null,
+                dueTime,
+                Timeout.Infinite);
+        }
+
+        private void OnSpoofAlertRefreshTimerCallback(
+            object state)
+        {
+            lock (collectionSync)
+            {
+                DateTime now = DateTime.UtcNow;
+
+                RemoveExpiredSpoofAlerts(
+                    askSpoofAlerts,
+                    now);
+
+                RemoveExpiredSpoofAlerts(
+                    bidSpoofAlerts,
+                    now);
+
+                ScheduleSpoofAlertRefresh(now);
+            }
+
+            OnPropertyChanged();
+        }
+
+        private void RemoveExpiredSpoofAlerts(
+            Dictionary<double, SpoofAlertState> alerts,
+            DateTime now)
+        {
+            List<double> expiredPrices = alerts
+                .Where(pair =>
+                    pair.Value.ExpiresUtc <= now)
+                .Select(pair => pair.Key)
+                .ToList();
+
+            foreach (double price in expiredPrices)
+                alerts.Remove(price);
+        }
+
+        private void ClearSpoofDetectionState()
+        {
+            askSpoofAlerts.Clear();
+            bidSpoofAlerts.Clear();
+            askSpoofCandidates.Clear();
+            bidSpoofCandidates.Clear();
+            askSpoofEvents.Clear();
+            bidSpoofEvents.Clear();
+            lastSpoofSoundUtc = DateTime.MinValue;
+
+            if (spoofAlertRefreshTimer != null)
+            {
+                spoofAlertRefreshTimer.Dispose();
+                spoofAlertRefreshTimer = null;
+            }
+        }
+
+        protected override void OnRender(
+            DrawingContext dc,
+            double renderWidth)
+        {
+            if (SuperDom == null || v3Terminated) return;
+            lock (collectionSync)
+            {
+                if (State == State.Active)
+                {
+                    long now = EnsureV3Context();
+                    if (CalculationMode == ExecutionOSPullingStackingCalculationModePrevious.RollingWindow || FlowDetectionEnabled)
+                        CheckRollingSession(now);
+                }
+            }
+
+            if (gridPen == null && UiWrapper != null)
+            {
+                PresentationSource source
+                    = PresentationSource.FromVisual(
+                        UiWrapper);
+
+                if (source != null
+                    && source.CompositionTarget != null)
+                {
+                    Matrix matrix
+                        = source.CompositionTarget
+                            .TransformToDevice;
+
+                    double dpiFactor
+                        = 1.0 / matrix.M11;
+
+                    gridPen = new Pen(
+                        Application.Current.TryFindResource(
+                            "BorderThinBrush") as Brush,
+                        1.0 * dpiFactor);
+
+                    halfPenWidth
+                        = gridPen.Thickness * 0.5;
+                }
+            }
+
+            if (!Equals(
+                    fontFamily,
+                    SuperDom.Font.Family)
+                || (SuperDom.Font.Italic
+                    && fontStyle != FontStyles.Italic)
+                || (!SuperDom.Font.Italic
+                    && fontStyle == FontStyles.Italic)
+                || (SuperDom.Font.Bold
+                    && fontWeight != FontWeights.Bold)
+                || (!SuperDom.Font.Bold
+                    && fontWeight == FontWeights.Bold))
+            {
+                fontFamily = SuperDom.Font.Family;
+
+                fontStyle = SuperDom.Font.Italic
+                    ? FontStyles.Italic
+                    : FontStyles.Normal;
+
+                fontWeight = SuperDom.Font.Bold
+                    ? FontWeights.Bold
+                    : FontWeights.Normal;
+
+                typeFace = new Typeface(
+                    fontFamily,
+                    fontStyle,
+                    fontWeight,
+                    FontStretches.Normal);
+
+                heightUpdateNeeded = true;
+            }
+
+            double verticalOffset = gridPen == null
+                ? 0.0
+                : -gridPen.Thickness;
+
+            double pixelsPerDip = UiWrapper == null
+                ? 1.0
+                : VisualTreeHelper
+                    .GetDpi(UiWrapper)
+                    .PixelsPerDip;
+
+            lock (SuperDom.Rows)
+            {
+                foreach (PriceRow row in SuperDom.Rows)
+                {
+                    if (renderWidth - halfPenWidth < 0)
+                        continue;
+
+                    Rect rect = new Rect(
+                        -halfPenWidth,
+                        verticalOffset,
+                        renderWidth - halfPenWidth,
+                        SuperDom.ActualRowHeight);
+
+                    GuidelineSet guidelines
+                        = new GuidelineSet();
+
+                    guidelines.GuidelinesX.Add(
+                        rect.Left + halfPenWidth);
+
+                    guidelines.GuidelinesX.Add(
+                        rect.Right + halfPenWidth);
+
+                    guidelines.GuidelinesY.Add(
+                        rect.Top + halfPenWidth);
+
+                    guidelines.GuidelinesY.Add(
+                        rect.Bottom + halfPenWidth);
+
+                    dc.PushGuidelineSet(guidelines);
+
+                    if (DisplayType
+                        == PullingStackingDisplayType.BidAsk)
+                    {
+                        Rect bidRect = new Rect(
+                            -halfPenWidth,
+                            verticalOffset,
+                            renderWidth / 2.0
+                                - halfPenWidth,
+                            SuperDom.ActualRowHeight);
+
+                        Rect askRect = new Rect(
+                            renderWidth / 2.0
+                                - halfPenWidth,
+                            verticalOffset,
+                            renderWidth / 2.0
+                                - halfPenWidth,
+                            SuperDom.ActualRowHeight);
+
+                        dc.DrawRectangle(
+                            BidBackColor,
+                            null,
+                            bidRect);
+
+                        dc.DrawRectangle(
+                            AskBackColor,
+                            null,
+                            askRect);
+                    }
+                    else if (DisplayType
+                        == PullingStackingDisplayType.Ask)
+                    {
+                        dc.DrawRectangle(
+                            AskBackColor,
+                            null,
+                            rect);
+                    }
+                    else if (DisplayType
+                        == PullingStackingDisplayType.Bid)
+                    {
+                        dc.DrawRectangle(
+                            BidBackColor,
+                            null,
+                            rect);
+                    }
+
+                    if (gridPen != null)
+                    {
+                        dc.DrawLine(
+                            gridPen,
+                            new Point(
+                                -gridPen.Thickness,
+                                rect.Bottom),
+                            new Point(
+                                renderWidth
+                                    - halfPenWidth,
+                                rect.Bottom));
+
+                        dc.DrawLine(
+                            gridPen,
+                            new Point(
+                                rect.Right,
+                                verticalOffset),
+                            new Point(
+                                rect.Right,
+                                rect.Bottom));
+                    }
+
+                    if (SuperDom.IsConnected
+                        && !SuperDom.IsReloading
+                        && State == State.Active)
+                    {
+                        lock (collectionSync)
+                        {
+                            DrawBidValue(
+                                dc,
+                                row,
+                                renderWidth,
+                                verticalOffset,
+                                pixelsPerDip);
+
+                            DrawAskValue(
+                                dc,
+                                row,
+                                renderWidth,
+                                verticalOffset,
+                                pixelsPerDip);
+
+                            DrawFlowEvidence(dc, row, renderWidth, verticalOffset, pixelsPerDip);
+
+                            DrawSpoofAlert(
+                                dc,
+                                row,
+                                renderWidth,
+                                verticalOffset,
+                                pixelsPerDip,
+                                false);
+
+                            DrawSpoofAlert(
+                                dc,
+                                row,
+                                renderWidth,
+                                verticalOffset,
+                                pixelsPerDip,
+                                true);
+                        }
+                    }
+
+                    dc.Pop();
+
+                    verticalOffset
+                        += SuperDom.ActualRowHeight;
+                }
+            }
+        }
+
+        private void DrawBidValue(
+            DrawingContext dc,
+            PriceRow row,
+            double renderWidth,
+            double verticalOffset,
+            double pixelsPerDip)
+        {
+            if (DisplayType
+                    != PullingStackingDisplayType.BidAsk
+                && DisplayType
+                    != PullingStackingDisplayType.Bid)
+            {
+                return;
+            }
+
+            bool isRolling = CalculationMode == ExecutionOSPullingStackingCalculationModePrevious.RollingWindow;
+            Tuple<long, long> bidVolume = null;
+
+            if ((!isRolling && !bidPriceDepthMap.TryGetValue(
+                    row.Price,
+                    out bidVolume))
+                || row.BidVolume <= 0
+                || renderWidth / 2.0 - 6.0 <= 0)
+            {
+                return;
+            }
+
+            Typeface currentTypeface = new Typeface(
+                SuperDom.Font.Family,
+                SuperDom.Font.Italic
+                    ? FontStyles.Italic
+                    : FontStyles.Normal,
+                SuperDom.Font.Bold
+                    ? FontWeights.Bold
+                    : FontWeights.Normal,
+                FontStretches.Normal);
+
+            long bidValue = isRolling ? 0 : bidVolume.Item2;
+            bool valueAvailable = !isRolling || TryRollingValue(row.Price, false, out bidValue);
+
+            Brush bidValueBrush = bidValue > 0
+                ? Brushes.LimeGreen
+                : bidValue < 0
+                    ? Brushes.Red
+                    : BidForeColor;
+
+            FormattedText bidText = new FormattedText(
+                valueAvailable ? bidValue.ToString(
+                    Core.Globals.GeneralOptions
+                        .CurrentCulture) : "—",
+                Core.Globals.GeneralOptions
+                    .CurrentCulture,
+                FlowDirection.LeftToRight,
+                currentTypeface,
+                SuperDom.Font.Size,
+                bidValueBrush,
+                pixelsPerDip);
+
+            bidText.MaxLineCount = 1;
+
+            bidText.MaxTextWidth
+                = renderWidth / 2.0 - 6.0;
+
+            bidText.TextAlignment
+                = TextAlignment.Center;
+
+            bidText.Trimming
+                = TextTrimming.CharacterEllipsis;
+
+            if (heightUpdateNeeded)
+            {
+                textHeight = bidText.Height;
+                heightUpdateNeeded = false;
+            }
+
+            dc.DrawText(
+                bidText,
+                new Point(
+                    3.0,
+                    verticalOffset
+                        + (SuperDom.ActualRowHeight
+                            - textHeight)
+                        / 2.0));
+        }
+
+        private void DrawAskValue(
+            DrawingContext dc,
+            PriceRow row,
+            double renderWidth,
+            double verticalOffset,
+            double pixelsPerDip)
+        {
+            if (DisplayType
+                    != PullingStackingDisplayType.BidAsk
+                && DisplayType
+                    != PullingStackingDisplayType.Ask)
+            {
+                return;
+            }
+
+            bool isRolling = CalculationMode == ExecutionOSPullingStackingCalculationModePrevious.RollingWindow;
+            Tuple<long, long> askVolume = null;
+
+            if ((!isRolling && !askPriceDepthMap.TryGetValue(
+                    row.Price,
+                    out askVolume))
+                || row.AskVolume <= 0
+                || renderWidth / 2.0 - 6.0 <= 0)
+            {
+                return;
+            }
+
+            Typeface currentTypeface = new Typeface(
+                SuperDom.Font.Family,
+                SuperDom.Font.Italic
+                    ? FontStyles.Italic
+                    : FontStyles.Normal,
+                SuperDom.Font.Bold
+                    ? FontWeights.Bold
+                    : FontWeights.Normal,
+                FontStretches.Normal);
+
+            long askValue = isRolling ? 0 : askVolume.Item2;
+            bool valueAvailable = !isRolling || TryRollingValue(row.Price, true, out askValue);
+
+            Brush askValueBrush = askValue > 0
+                ? Brushes.Red
+                : askValue < 0
+                    ? Brushes.LimeGreen
+                    : AskForeColor;
+
+            FormattedText askText = new FormattedText(
+                valueAvailable ? askValue.ToString(
+                    Core.Globals.GeneralOptions
+                        .CurrentCulture) : "—",
+                Core.Globals.GeneralOptions
+                    .CurrentCulture,
+                FlowDirection.LeftToRight,
+                currentTypeface,
+                SuperDom.Font.Size,
+                askValueBrush,
+                pixelsPerDip);
+
+            askText.MaxLineCount = 1;
+
+            askText.MaxTextWidth
+                = renderWidth / 2.0 - 6.0;
+
+            askText.TextAlignment
+                = TextAlignment.Center;
+
+            askText.Trimming
+                = TextTrimming.CharacterEllipsis;
+
+            if (heightUpdateNeeded)
+            {
+                textHeight = askText.Height;
+                heightUpdateNeeded = false;
+            }
+
+            dc.DrawText(
+                askText,
+                new Point(
+                    renderWidth / 2.0 + 3.0,
+                    verticalOffset
+                        + (SuperDom.ActualRowHeight
+                            - textHeight)
+                        / 2.0));
+        }
+
+        private void DrawSpoofAlert(
+            DrawingContext dc,
+            PriceRow row,
+            double renderWidth,
+            double verticalOffset,
+            double pixelsPerDip,
+            bool isAsk)
+        {
+            if (!SpoofDetectionEnabled
+                || renderWidth / 2.0 - 4.0 <= 0)
+            {
+                return;
+            }
+
+            Dictionary<double, SpoofAlertState> alerts
+                = isAsk
+                    ? askSpoofAlerts
+                    : bidSpoofAlerts;
+
+            SpoofAlertState alert;
+
+            if (!alerts.TryGetValue(
+                    row.Price,
+                    out alert)
+                || alert.ExpiresUtc <= DateTime.UtcNow)
+            {
+                return;
+            }
+
+            Brush alertBrush = alert.IsEscalated
+                ? Brushes.DarkOrange
+                : Brushes.Goldenrod;
+
+            double halfWidth = renderWidth / 2.0;
+
+            Rect alertRect = new Rect(
+                (isAsk ? halfWidth : 0.0) + 1.0,
+                verticalOffset + 1.0,
+                halfWidth - 2.0,
+                Math.Max(
+                    0.0,
+                    SuperDom.ActualRowHeight - 2.0));
+
+            dc.DrawRectangle(
+                null,
+                new Pen(
+                    alertBrush,
+                    alert.IsEscalated ? 2.0 : 1.0),
+                alertRect);
+
+            FormattedText alertText = new FormattedText(
+                alert.IsEscalated ? "S!" : "S?",
+                Core.Globals.GeneralOptions
+                    .CurrentCulture,
+                FlowDirection.LeftToRight,
+                typeFace,
+                Math.Max(
+                    8.0,
+                    SuperDom.Font.Size * 0.7),
+                alertBrush,
+                pixelsPerDip);
+
+            double textX = isAsk
+                ? renderWidth
+                    - alertText.Width
+                    - 3.0
+                : 3.0;
+
+            dc.DrawText(
+                alertText,
+                new Point(
+                    textX,
+                    verticalOffset
+                        + (SuperDom.ActualRowHeight
+                            - alertText.Height)
+                        / 2.0));
+        }
+
+        protected override void OnStateChange()
+        {
+            if (State == State.SetDefaults)
+            {
+                Name = "ExecutionOS P/S + Flow v4 EXP";
+
+                Description = Gui.Resource
+                    .NinjaScriptSuperdomColumnPullingStackingDescription;
+
+                DefaultWidth = 240;
+                PreviousWidth = -1;
+                IsDataSeriesRequired = false;
+
+                AskBackColor
+                    = Application.Current.TryFindResource(
+                        "brushPriceColumnBackground")
+                        as Brush;
+
+                AskForeColor
+                    = Application.Current.TryFindResource(
+                        "brushVolumeColumnForeground")
+                        as SolidColorBrush;
+
+                BidBackColor
+                    = Application.Current.TryFindResource(
+                        "brushPriceColumnBackground")
+                        as Brush;
+
+                BidForeColor
+                    = Application.Current.TryFindResource(
+                        "brushVolumeColumnForeground")
+                        as SolidColorBrush;
+
+                askNoDataResetTimers
+                    = new Dictionary<double, Timer>();
+
+                bidNoDataResetTimers
+                    = new Dictionary<double, Timer>();
+
+                askPriceDepthMap
+                    = new Dictionary<
+                        double,
+                        Tuple<long, long>>();
+
+                bidPriceDepthMap
+                    = new Dictionary<
+                        double,
+                        Tuple<long, long>>();
+
+                mmAskPriceMap
+                    = new Dictionary<string, double>();
+
+                mmBidPriceMap
+                    = new Dictionary<string, double>();
+
+                askSpoofAlerts
+                    = new Dictionary<
+                        double,
+                        SpoofAlertState>();
+
+                bidSpoofAlerts
+                    = new Dictionary<
+                        double,
+                        SpoofAlertState>();
+
+                askSpoofCandidates
+                    = new Dictionary<
+                        double,
+                        SpoofCandidate>();
+
+                bidSpoofCandidates
+                    = new Dictionary<
+                        double,
+                        SpoofCandidate>();
+
+                askSpoofEvents
+                    = new Queue<DateTime>();
+
+                bidSpoofEvents
+                    = new Queue<DateTime>();
+
+                DisplayType
+                    = PullingStackingDisplayType.BidAsk;
+
+                ResetWhen
+                    = PullingStackingResetWhen.BidAskChange;
+
+                ResetTolerance = 2500;
+                CalculationMode = ExecutionOSPullingStackingCalculationModePrevious.LegacyBaseline;
+                RollingWindowSeconds = 5;
+                ApplyLegacyResetsToRolling = true;
+                ExecutionReconciliationMilliseconds = 250;
+                LogRollingDiagnostics = false;
+                FlowDetectionEnabled = true;
+                DetectAbsorption = true;
+                DetectInitiative = true;
+                ShowFlowCandidates = true;
+                LogFlowEvents = false;
+                FlowWindowSeconds = 5;
+                FlowMinimumVolume = 100;
+                FlowMinimumReplenishment = 50;
+                FlowMinimumMatchPercent = 80;
+                FlowMinimumDominancePercent = 70;
+                FlowMinimumHoldMilliseconds = 750;
+                FlowConfirmationMilliseconds = 500;
+                FlowMaximumAdverseTicks = 1;
+                FlowMinimumAdvanceTicks = 2;
+                FlowDepthLevels = 3;
+                FlowDisplayMilliseconds = 3000;
+                FlowCooldownMilliseconds = 5000;
+
+                SpoofDetectionEnabled = false;
+                SpoofMinimumStackVolume = 100;
+                SpoofMaximumDepthLevels = 3;
+                SpoofPullPercent = 80;
+
+                SpoofMaximumLifetimeMilliseconds
+                    = 1500;
+
+                SpoofMaximumExecutedPercent = 10;
+
+                SpoofRepeatWindowMilliseconds
+                    = 10000;
+
+                SpoofAlertDisplayMilliseconds
+                    = 3000;
+
+                SpoofAudibleAlertEnabled = true;
+
+                SpoofAlertSound
+                    = System.IO.Path.Combine(
+                        Core.Globals.InstallDir,
+                        "sounds",
+                        "Alert2.wav");
+
+                SpoofSoundCooldownMilliseconds
+                    = 3000;
+            }
+            else if (State == State.Configure)
+            {
+                if (UiWrapper != null)
+                {
+                    PresentationSource source
+                        = PresentationSource.FromVisual(
+                            UiWrapper);
+
+                    if (source != null
+                        && source.CompositionTarget != null)
+                    {
+                        Matrix matrix
+                            = source.CompositionTarget
+                                .TransformToDevice;
+
+                        double dpiFactor
+                            = 1.0 / matrix.M11;
+
+                        gridPen = new Pen(
+                            Application.Current
+                                .TryFindResource(
+                                    "BorderThinBrush")
+                                as Brush,
+                            1.0 * dpiFactor);
+
+                        halfPenWidth
+                            = gridPen.Thickness * 0.5;
+                    }
+                }
+            }
+            else if (State == State.Active)
+            {
+                StartV3();
+            }
+            else if (State == State.Terminated)
+            {
+                StopV3();
+                if (bidAskResetTimer != null)
+                {
+                    bidAskResetTimer.Dispose();
+                    bidAskResetTimer = null;
+                }
+
+                if (spoofAlertRefreshTimer != null)
+                {
+                    spoofAlertRefreshTimer.Dispose();
+                    spoofAlertRefreshTimer = null;
+                }
+            }
+        }
+
+        private void OnBidAskResetTimerCallback(
+            object state)
+        {
+            lock (collectionSync)
+            {
+                if (SuperDom == null
+                    || SuperDom.Instrument == null
+                    || SuperDom.Instrument.MarketData
+                        == null
+                    || SuperDom.Instrument.MarketData.Ask
+                        == null
+                    || SuperDom.Instrument.MarketData.Bid
+                        == null)
+                {
+                    if (ApplyLegacyResetsToRolling) ResetRollingHistory("Legacy quote reset");
+                    askPriceDepthMap.Clear();
+                    bidPriceDepthMap.Clear();
+                    mmAskPriceMap.Clear();
+                    mmBidPriceMap.Clear();
+                    askSpoofCandidates.Clear();
+                    bidSpoofCandidates.Clear();
+                    return;
+                }
+
+                Tuple<double, MarketDataType> priorPrice
+                    = (Tuple<double, MarketDataType>)state;
+
+                if (priorPrice.Item2
+                    == MarketDataType.Ask)
+                {
+                    if (priorPrice.Item1.ApproxCompare(
+                        SuperDom.Instrument.MarketData
+                            .Ask.Price) == 0)
+                    {
+                        return;
+                    }
+                }
+                else if (priorPrice.Item2
+                    == MarketDataType.Bid)
+                {
+                    if (priorPrice.Item1.ApproxCompare(
+                        SuperDom.Instrument.MarketData
+                            .Bid.Price) == 0)
+                    {
+                        return;
+                    }
+                }
+
+                if (ApplyLegacyResetsToRolling) ResetRollingHistory("Legacy quote reset");
+                askPriceDepthMap.Clear();
+                bidPriceDepthMap.Clear();
+                mmAskPriceMap.Clear();
+                mmBidPriceMap.Clear();
+                askSpoofCandidates.Clear();
+                bidSpoofCandidates.Clear();
+
+                if (SuperDom.MarketDepth == null)
+                    return;
+
+                lock (SuperDom.MarketDepth.Instrument
+                    .SyncMarketDepth)
+                {
+                    for (int i = 0;
+                        i < SuperDom.MarketDepth.Asks.Count;
+                        i++)
+                    {
+                        askPriceDepthMap[
+                            SuperDom.MarketDepth.Asks[i].Price]
+                            = Tuple.Create(
+                                SuperDom.MarketDepth.Asks[i]
+                                    .Volume,
+                                0L);
+                    }
+
+                    for (int i = 0;
+                        i < SuperDom.MarketDepth.Bids.Count;
+                        i++)
+                    {
+                        bidPriceDepthMap[
+                            SuperDom.MarketDepth.Bids[i].Price]
+                            = Tuple.Create(
+                                SuperDom.MarketDepth.Bids[i]
+                                    .Volume,
+                                0L);
+                    }
+                }
+            }
+        }
+
+        private void OnNoDataResetTimerCallback(
+            object state)
+        {
+            if (SuperDom == null
+                || SuperDom.MarketDepth == null
+                || SuperDom.MarketDepth.Instrument == null)
+            {
+                return;
+            }
+
+            lock (collectionSync)
+            {
+                Tuple<double, MarketDataType> priorPrice
+                    = (Tuple<double, MarketDataType>)state;
+
+                lock (SuperDom.MarketDepth.Instrument
+                    .SyncMarketDepth)
+                {
+                    if (priorPrice.Item2
+                        == MarketDataType.Ask)
+                    {
+                        MarketDepthRow row
+                            = SuperDom.MarketDepth.Asks
+                                .FirstOrDefault(
+                                    a => a.Price.ApproxCompare(
+                                        priorPrice.Item1) == 0);
+
+                        if (row == null || row.Volume == 0)
+                        {
+                            askPriceDepthMap[
+                                priorPrice.Item1]
+                                = Tuple.Create(0L, 0L);
+
+                            ResetRollingLevel(priorPrice.Item1, true);
+                            askSpoofCandidates.Remove(
+                                priorPrice.Item1);
+                        }
+                    }
+                    else if (priorPrice.Item2
+                        == MarketDataType.Bid)
+                    {
+                        MarketDepthRow row
+                            = SuperDom.MarketDepth.Bids
+                                .FirstOrDefault(
+                                    a => a.Price.ApproxCompare(
+                                        priorPrice.Item1) == 0);
+
+                        if (row == null || row.Volume == 0)
+                        {
+                            bidPriceDepthMap[
+                                priorPrice.Item1]
+                                = Tuple.Create(0L, 0L);
+
+                            ResetRollingLevel(priorPrice.Item1, false);
+                            bidSpoofCandidates.Remove(
+                                priorPrice.Item1);
+                        }
+                    }
+                }
+            }
+        }
+
+        #region Properties
+
+        #region Setup
+
+        [Display(
+            ResourceType = typeof(Custom.Resource),
+            Name = "NinjaScriptRecentColumnDiplay",
+            GroupName = "NinjaScriptSetup",
+            Order = 100)]
+        public PullingStackingDisplayType DisplayType
+        {
+            get;
+            set;
+        }
+
+        [Display(
+            ResourceType = typeof(Custom.Resource),
+            Name = "NinjaScriptRecentColumnResetWhen",
+            GroupName = "NinjaScriptSetup",
+            Order = 110)]
+        public PullingStackingResetWhen ResetWhen
+        {
+            get;
+            set;
+        }
+
+        [Display(
+            ResourceType = typeof(Custom.Resource),
+            Name = "NinjaScriptRecentColumnResetTolerance",
+            GroupName = "NinjaScriptSetup",
+            Order = 115)]
+        [Range(1, int.MaxValue)]
+        public int ResetTolerance
+        {
+            get;
+            set;
+        }
+
+        #endregion
+
+        #region Spoof-like alerts
+
+        [Display(
+            Name = "Enabled",
+            GroupName = "Spoof-like alerts",
+            Order = 200)]
+        public bool SpoofDetectionEnabled
+        {
+            get;
+            set;
+        }
+
+        [Range(1, int.MaxValue)]
+        [Display(
+            Name = "Minimum stack volume",
+            GroupName = "Spoof-like alerts",
+            Order = 210)]
+        public int SpoofMinimumStackVolume
+        {
+            get;
+            set;
+        }
+
+        [Range(1, 20)]
+        [Display(
+            Name = "Maximum depth levels",
+            GroupName = "Spoof-like alerts",
+            Order = 220)]
+        public int SpoofMaximumDepthLevels
+        {
+            get;
+            set;
+        }
+
+        [Range(1, 100)]
+        [Display(
+            Name = "Minimum pull percent",
+            GroupName = "Spoof-like alerts",
+            Order = 230)]
+        public int SpoofPullPercent
+        {
+            get;
+            set;
+        }
+
+        [Range(1, int.MaxValue)]
+        [Display(
+            Name = "Maximum lifetime (ms)",
+            GroupName = "Spoof-like alerts",
+            Order = 240)]
+        public int SpoofMaximumLifetimeMilliseconds
+        {
+            get;
+            set;
+        }
+
+        [Range(0, 100)]
+        [Display(
+            Name = "Maximum executed percent",
+            GroupName = "Spoof-like alerts",
+            Order = 250)]
+        public int SpoofMaximumExecutedPercent
+        {
+            get;
+            set;
+        }
+
+        [Range(1, int.MaxValue)]
+        [Display(
+            Name = "Repeat window (ms)",
+            GroupName = "Spoof-like alerts",
+            Order = 260)]
+        public int SpoofRepeatWindowMilliseconds
+        {
+            get;
+            set;
+        }
+
+        [Range(1, int.MaxValue)]
+        [Display(
+            Name = "Alert display (ms)",
+            GroupName = "Spoof-like alerts",
+            Order = 270)]
+        public int SpoofAlertDisplayMilliseconds
+        {
+            get;
+            set;
+        }
+
+        [Display(
+            Name = "Audible alert",
+            GroupName = "Spoof-like alerts",
+            Order = 280)]
+        public bool SpoofAudibleAlertEnabled
+        {
+            get;
+            set;
+        }
+
+        [Gui.PropertyEditor(
+            "NinjaTrader.Gui.Tools.FilePathPicker",
+            Filter = "WAV Files (*.wav)|*.wav")]
+        [Display(
+            Name = "Alert sound",
+            GroupName = "Spoof-like alerts",
+            Order = 290)]
+        public string SpoofAlertSound
+        {
+            get;
+            set;
+        }
+
+        [Range(0, int.MaxValue)]
+        [Display(
+            Name = "Sound cooldown (ms)",
+            GroupName = "Spoof-like alerts",
+            Order = 300)]
+        public int SpoofSoundCooldownMilliseconds
+        {
+            get;
+            set;
+        }
+
+        #endregion
+
+        #region Colors
+
+        [XmlIgnore]
+        [Display(
+            ResourceType = typeof(Custom.Resource),
+            Name = "NinjaScriptRecentColumnAskBackground",
+            GroupName = "PropertyCategoryVisual",
+            Order = 105)]
+        public Brush AskBackColor
+        {
+            get;
+            set;
+        }
+
+        [Browsable(false)]
+        public string AskBackgroundBrushSerialize
+        {
+            get
+            {
+                return Gui.Serialize.BrushToString(
+                    AskBackColor,
+                    "brushAskPriceColumnBackground");
+            }
+
+            set
+            {
+                AskBackColor = Gui.Serialize.StringToBrush(
+                    value,
+                    "brushAskPriceColumnBackground");
+            }
+        }
+
+        [XmlIgnore]
+        [Display(
+            ResourceType = typeof(Custom.Resource),
+            Name = "NinjaScriptRecentColumnAskForeground",
+            GroupName = "PropertyCategoryVisual",
+            Order = 111)]
+        public Brush AskForeColor
+        {
+            get;
+            set;
+        }
+
+        [Browsable(false)]
+        public string AskForeColorSerialize
+        {
+            get
+            {
+                return Gui.Serialize.BrushToString(
+                    AskForeColor);
+            }
+
+            set
+            {
+                AskForeColor
+                    = Gui.Serialize.StringToBrush(value);
+            }
+        }
+
+        [XmlIgnore]
+        [Display(
+            ResourceType = typeof(Custom.Resource),
+            Name = "NinjaScriptRecentColumnBidBackground",
+            GroupName = "PropertyCategoryVisual",
+            Order = 116)]
+        public Brush BidBackColor
+        {
+            get;
+            set;
+        }
+
+        [Browsable(false)]
+        public string BidBackgroundBrushSerialize
+        {
+            get
+            {
+                return Gui.Serialize.BrushToString(
+                    BidBackColor,
+                    "brushBidPriceColumnBackground");
+            }
+
+            set
+            {
+                BidBackColor = Gui.Serialize.StringToBrush(
+                    value,
+                    "brushBidPriceColumnBackground");
+            }
+        }
+
+        [XmlIgnore]
+        [Display(
+            ResourceType = typeof(Custom.Resource),
+            Name = "NinjaScriptRecentColumnBidForeground",
+            GroupName = "PropertyCategoryVisual",
+            Order = 121)]
+        public Brush BidForeColor
+        {
+            get;
+            set;
+        }
+
+        [Browsable(false)]
+        public string BidForeColorSerialize
+        {
+            get
+            {
+                return Gui.Serialize.BrushToString(
+                    BidForeColor);
+            }
+
+            set
+            {
+                BidForeColor
+                    = Gui.Serialize.StringToBrush(value);
+            }
+        }
+
+        #endregion
+
+        #endregion
+
+        [TypeConverter(
+            "NinjaTrader.Custom.ResourceEnumConverter")]
+        public enum PullingStackingDisplayType
+        {
+            Ask,
+            Bid,
+            BidAsk
+        }
+
+        [TypeConverter(
+            "NinjaTrader.Custom.ResourceEnumConverter")]
+        public enum PullingStackingResetWhen
+        {
+            NoMoreData,
+            BidAskChange
+        }
+    }
+
+
+    #region v4 Rolling adapter
+    // Additional v3 state is isolated from the copied legacy calculation/alerts.
+    public enum ExecutionOSPullingStackingCalculationModePrevious { LegacyBaseline, RollingWindow }
+
+    public partial class ExecutionOSPullingStacking_v4_Experimental_Previous
+    {
+        private const string RollingBuildId = "2026-10-14.1 EXP";
+        private ExecutionOSRollingLiquidityPrevious rolling;
+        private Timer rollingRefreshTimer;
+        private BarsRequest rollingSessionRequest;
+        private SessionIterator rollingSessionIterator;
+        private Cbi.Instrument rollingInstrument;
+        private bool v3Terminated;
+        private bool connectionSubscribed;
+        private long resetGeneration;
+        private bool clockInitialized;
+        private bool usingPlaybackClock;
+        private long lastClockTicks;
+        private bool wasConnected;
+        private bool connectionInitialized;
+        private int appliedWindowSeconds, appliedReconciliationMs, appliedDepthLevels;
+        private ExecutionOSPullingStackingCalculationModePrevious appliedCalculationMode;
+        private DateTime rollingSessionBegin = DateTime.MinValue;
+        private DateTime rollingSessionEnd = DateTime.MinValue;
+        private bool rollingSessionOpen;
+        private string rollingCalendarError;
+        private string rollingRuntimeError;
+        private bool rollingNeedsSnapshot = true;
+        private long rollingSourceFence;
+        private long latestRollingSource;
+        private string rollingLastResetReason = "Starting";
+        private long lastDiagnosticTicks = long.MinValue;
+
+        [Display(Name = "Log live rolling diagnostics", GroupName = "Rolling diagnostics", Order = 510)]
+        public bool LogRollingDiagnostics { get; set; }
+
+        [XmlIgnore]
+        [ReadOnly(true)]
+        [Display(Name = "Build", GroupName = "Rolling diagnostics", Order = 490)]
+        public string RollingBuild { get { return RollingBuildId; } }
+
+        [Display(Name = "Calculation mode", GroupName = "Rolling calculation", Order = 400)]
+        public ExecutionOSPullingStackingCalculationModePrevious CalculationMode { get; set; }
+
+        [Range(1, 30)]
+        [Display(Name = "Rolling window (seconds)", GroupName = "Rolling calculation", Order = 410)]
+        public int RollingWindowSeconds { get; set; }
+
+        [Display(Name = "Apply legacy resets to rolling", GroupName = "Rolling calculation", Order = 420)]
+        public bool ApplyLegacyResetsToRolling { get; set; }
+
+        [Range(0, 1000)]
+        [Display(Name = "Execution reconciliation (ms)", GroupName = "Rolling calculation", Order = 430)]
+        public int ExecutionReconciliationMilliseconds { get; set; }
+
+        [XmlIgnore]
+        [ReadOnly(true)]
+        [Display(Name = "Status", GroupName = "Rolling diagnostics", Order = 500)]
+        public string RollingStatus
+        {
+            get
+            {
+                lock (collectionSync)
+                {
+                    if (CalculationMode != ExecutionOSPullingStackingCalculationModePrevious.RollingWindow)
+                        return "Legacy baseline";
+                    if (State != State.Active || v3Terminated)
+                        return "Settings view; enable live diagnostics for runtime status";
+                    if (rollingRuntimeError != null) return "Unavailable: " + rollingRuntimeError;
+                    if (rollingCalendarError != null) return "Unavailable: " + rollingCalendarError;
+                    if (rollingSessionIterator == null) return "Waiting for instrument session calendar";
+                    if (!rollingSessionOpen) return "Outside instrument trading session";
+                    if (rolling == null) return "Waiting for depth";
+                    if (rolling.Faulted) return "Unavailable: history capacity exceeded; click header to reset";
+                    return (rolling.IsWarm ? "Estimated" : "Estimated; warming up")
+                        + (rolling.IsProvisional ? "; reconciling" : "")
+                        + "; matched " + rolling.MatchedVolume
+                        + "; unmatched " + rolling.UnmatchedVolume
+                        + "; unclassified " + rolling.UnclassifiedVolume
+                        + "; continuity breaks " + rolling.ContinuityBreakCount
+                        + "; invalid depth " + rolling.InvalidDepthCount
+                        + "; source regressions " + rolling.TimestampRegressionCount
+                        + "; unstamped depth " + rolling.UnstampedDepthCount
+                        + "; known bid/ask " + rolling.KnownLevelCount(ExecutionOSRollingLiquidityPrevious.Side.Bid)
+                        + "/" + rolling.KnownLevelCount(ExecutionOSRollingLiquidityPrevious.Side.Ask)
+                        + "; resets " + rolling.ResetCount + "; last reset: " + rollingLastResetReason;
+                }
+            }
+        }
+
+        private long RawClockTicks()
+        {
+            if (Cbi.Connection.PlaybackConnection != null)
+                return Cbi.Connection.PlaybackConnection.Now.Ticks;
+            return (long)(System.Diagnostics.Stopwatch.GetTimestamp()
+                * ((double)TimeSpan.TicksPerSecond / System.Diagnostics.Stopwatch.Frequency));
+        }
+        private DateTime SessionClockNow()
+        {
+            return Cbi.Connection.PlaybackConnection != null
+                ? Cbi.Connection.PlaybackConnection.Now : Core.Globals.Now;
+        }
+
+        // Caller owns collectionSync. Receipt time is read *inside* this lock so
+        // competing callback threads cannot manufacture a false clock rewind.
+        private long EnsureV3Context()
+        {
+            long now = RawClockTicks();
+            bool playback = Cbi.Connection.PlaybackConnection != null;
+            if (clockInitialized && (playback != usingPlaybackClock || now < lastClockTicks))
+                ResetV3FeedState(now, true);
+            clockInitialized = true; usingPlaybackClock = playback; lastClockTicks = now;
+
+            Cbi.Instrument instrument = SuperDom == null ? null : SuperDom.Instrument;
+            if (!ReferenceEquals(instrument, rollingInstrument))
+            {
+                ResetV3FeedState(now, true);
+                DisposeRollingCalendar(); rollingInstrument = instrument;
+            }
+            bool connected = SuperDom != null && SuperDom.IsConnected && !SuperDom.IsReloading;
+            if (connectionInitialized && connected != wasConnected) ResetV3FeedState(now);
+            wasConnected = connected; connectionInitialized = true;
+
+            int levels = SuperDom == null ? 1 : Math.Max(1, Math.Min(4096, SuperDom.DepthLevels));
+            if (rolling == null || appliedCalculationMode != CalculationMode
+                || appliedWindowSeconds != RollingWindowSeconds
+                || appliedReconciliationMs != ExecutionReconciliationMilliseconds
+                || appliedDepthLevels != levels)
+            {
+                appliedCalculationMode = CalculationMode;
+                appliedWindowSeconds = RollingWindowSeconds;
+                appliedReconciliationMs = ExecutionReconciliationMilliseconds;
+                appliedDepthLevels = levels;
+                rolling = new ExecutionOSRollingLiquidityPrevious(RollingWindowSeconds,
+                    ExecutionReconciliationMilliseconds, levels, 500000);
+                rollingSourceFence = latestRollingSource;
+                rolling.Reset(now); rolling.SetSourceFence(rollingSourceFence);
+                rollingNeedsSnapshot = true; rollingRuntimeError = null;
+                rollingLastResetReason = "Calculation settings changed";
+                if (CalculationMode != ExecutionOSPullingStackingCalculationModePrevious.RollingWindow && !FlowDetectionEnabled)
+                    DisposeRollingCalendar();
+            }
+            rolling.Advance(now);
+            EnsureFlowContext(now);
+            return now;
+        }
+
+        private bool MatchesInstrument(Cbi.Instrument instrument)
+        {
+            return SuperDom != null && SuperDom.Instrument != null
+                && instrument != null && instrument.FullName == SuperDom.Instrument.FullName;
+        }
+
+        private static bool TryPriceTick(double price, double tickSize, out long tick)
+        {
+            tick = 0;
+            if (double.IsNaN(price) || double.IsInfinity(price)
+                || double.IsNaN(tickSize) || double.IsInfinity(tickSize) || tickSize <= 0) return false;
+            double normalized = Math.Round(price / tickSize, MidpointRounding.AwayFromZero);
+            if (normalized <= long.MinValue || normalized >= long.MaxValue
+                || Math.Abs(price / tickSize - normalized) > 0.000001) return false;
+            tick = (long)normalized; return true;
+        }
+        private bool TryRollingPrice(double price, out long tick)
+        {
+            tick = 0;
+            return SuperDom != null && SuperDom.Instrument != null
+                && TryPriceTick(price, SuperDom.Instrument.MasterInstrument.TickSize, out tick);
+        }
+
+        private void RecordRollingSource(DateTime source)
+        {
+            if (source != DateTime.MinValue && source.Ticks > latestRollingSource)
+                latestRollingSource = source.Ticks;
+        }
+
+        private void ProcessRollingDepth(MarketDepthEventArgs depth, long now)
+        {
+            if ((CalculationMode != ExecutionOSPullingStackingCalculationModePrevious.RollingWindow && !FlowDetectionEnabled)
+                || rolling == null || rollingRuntimeError != null) return;
+            if (depth.MarketDataType != MarketDataType.Bid && depth.MarketDataType != MarketDataType.Ask) return;
+            RecordRollingSource(depth.Time);
+            if (depth.Operation == Cbi.Operation.Add && depth.Price.ApproxCompare(0) == 0 && depth.Volume == 0) return;
+            long tick = 0;
+            // Remove is addressed by the stored position, not its optional price.
+            if (depth.Operation != Cbi.Operation.Remove && !TryRollingPrice(depth.Price, out tick))
+            {
+                rolling.Depth(depth.MarketDataType == MarketDataType.Ask
+                    ? ExecutionOSRollingLiquidityPrevious.Side.Ask : ExecutionOSRollingLiquidityPrevious.Side.Bid,
+                    ExecutionOSRollingLiquidityPrevious.DepthAction.Update, -1, 0, 0, 0, now);
+                rollingNeedsSnapshot = true; ResetFlowEvidence(now, "Invalid depth price");
+                return;
+            }
+            ExecutionOSRollingLiquidityPrevious.DepthAction action;
+            if (depth.Operation == Cbi.Operation.Add) action = ExecutionOSRollingLiquidityPrevious.DepthAction.Add;
+            else if (depth.Operation == Cbi.Operation.Update) action = ExecutionOSRollingLiquidityPrevious.DepthAction.Update;
+            else if (depth.Operation == Cbi.Operation.Remove) action = ExecutionOSRollingLiquidityPrevious.DepthAction.Remove;
+            else return;
+            try
+            {
+                if (rollingNeedsSnapshot)
+                {
+                    SeedRollingSnapshot(now, depth, tick);
+                    return;
+                }
+                bool accepted;
+                ExecutionOSFlowEvidencePreviousAdapter transaction = flow;
+                if (transaction != null) transaction.BeginUpdate(now);
+                try { accepted = rolling.Depth(depth.MarketDataType == MarketDataType.Ask
+                    ? ExecutionOSRollingLiquidityPrevious.Side.Ask : ExecutionOSRollingLiquidityPrevious.Side.Bid,
+                    action, depth.Position, tick, depth.Volume,
+                    depth.Time == DateTime.MinValue ? 0 : depth.Time.Ticks, now); }
+                finally { if (transaction != null) transaction.EndUpdate(now); }
+                if (!accepted)
+                {
+                    if (!rolling.Faulted) { rollingNeedsSnapshot = true; rollingLastResetReason = "Depth continuity lost: " + rolling.LastContinuityFailure; }
+                    ResetFlowEvidence(now, rolling.Faulted ? "Depth evidence capacity fault" : rollingLastResetReason);
+                }
+            }
+            catch (OverflowException) { rollingRuntimeError = "quantity overflow; click header to reset"; }
+        }
+        private bool SeedRollingSnapshot(long now, MarketDepthEventArgs trigger, long triggerPrice)
+        {
+            if (SuperDom == null || SuperDom.MarketDepth == null
+                || SuperDom.MarketDepth.Instrument == null) return false;
+            lock (SuperDom.MarketDepth.Instrument.SyncMarketDepth)
+            {
+                bool alreadyReflected = false;
+                rolling.Reset(now);
+                for (int side = 0; side < 2; side++)
+                {
+                    var rows = side == 0 ? SuperDom.MarketDepth.Bids : SuperDom.MarketDepth.Asks;
+                    // Keep the available positional book beyond the configured
+                    // display depth; deeper callbacks must not look like a gap.
+                    if (rows.Count > 4096)
+                    { rollingRuntimeError = "depth snapshot exceeds book capacity"; return false; }
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        long price;
+                        if (!TryRollingPrice(rows[i].Price, out price))
+                        { rollingRuntimeError = "invalid depth snapshot"; return false; }
+                        if (i == trigger.Position && price == triggerPrice && rows[i].Volume == trigger.Volume
+                            && ((side == 0 && trigger.MarketDataType == MarketDataType.Bid)
+                                || (side == 1 && trigger.MarketDataType == MarketDataType.Ask))) alreadyReflected = true;
+                        rolling.Depth(side == 0 ? ExecutionOSRollingLiquidityPrevious.Side.Bid
+                            : ExecutionOSRollingLiquidityPrevious.Side.Ask,
+                            ExecutionOSRollingLiquidityPrevious.DepthAction.Add, i, price, rows[i].Volume, 0, now, true);
+                    }
+                }
+                rollingSourceFence = latestRollingSource;
+                rolling.PrepareSnapshot(now, rollingSourceFence);
+                ExecutionOSRollingLiquidityPrevious.Side triggerSide = trigger.MarketDataType == MarketDataType.Ask
+                    ? ExecutionOSRollingLiquidityPrevious.Side.Ask : ExecutionOSRollingLiquidityPrevious.Side.Bid;
+                if (trigger.Operation != Cbi.Operation.Remove)
+                {
+                    if (alreadyReflected)
+                        rolling.ConfirmSnapshotLevel(triggerSide, triggerPrice,
+                            trigger.Time == DateTime.MinValue ? 0 : trigger.Time.Ticks);
+                    else
+                        // Callback/snapshot ordering is unknown for this row only.
+                        rolling.RequireFreshLevel(triggerSide, triggerPrice);
+                }
+                rollingNeedsSnapshot = false;
+                return alreadyReflected;
+            }
+        }
+        private void ProcessRollingTrade(MarketDataEventArgs trade, long now)
+        {
+            if ((CalculationMode != ExecutionOSPullingStackingCalculationModePrevious.RollingWindow && !FlowDetectionEnabled)
+                || rolling == null || rollingRuntimeError != null
+                || !rollingSessionOpen || trade.MarketDataType != MarketDataType.Last || trade.Volume <= 0) return;
+            RecordRollingSource(trade.Time);
+            SynchronizeFlowCoverage(now);
+            long price = 0, bid = 0, ask = 0;
+            if (!TryRollingPrice(trade.Price, out price)
+                || !TryRollingPrice(trade.Bid, out bid) || !TryRollingPrice(trade.Ask, out ask)
+                || bid >= ask || trade.Bid == double.MinValue || trade.Ask == double.MinValue)
+            { rolling.Unclassified(trade.Volume); RecordFlowTrade(trade, now, 0, price, bid, ask); return; }
+            ExecutionOSRollingLiquidityPrevious.Side side;
+            if (price >= ask) side = ExecutionOSRollingLiquidityPrevious.Side.Ask;
+            else if (price <= bid) side = ExecutionOSRollingLiquidityPrevious.Side.Bid;
+            else { rolling.Unclassified(trade.Volume); RecordFlowTrade(trade, now, 0, price, bid, ask); return; }
+            ExecutionOSFlowEvidencePreviousAdapter transaction = flow;
+            if (transaction != null) transaction.BeginUpdate(now);
+            try
+            {
+            long evidenceId = RecordFlowTrade(trade, now, side == ExecutionOSRollingLiquidityPrevious.Side.Ask ? 1 : -1, price, bid, ask);
+            try { rolling.Trade(side, price, trade.Volume,
+                trade.Time == DateTime.MinValue ? 0 : trade.Time.Ticks, now, evidenceId); }
+            catch (OverflowException) { rollingRuntimeError = "quantity overflow; click header to reset"; }
+            }
+            finally { if (transaction != null) transaction.EndUpdate(now); }
+        }
+        private bool TryRollingValue(double price, bool isAsk, out long value)
+        {
+            value = 0; long tick;
+            return rolling != null && rollingSessionIterator != null && rollingSessionOpen
+                && rollingCalendarError == null && rollingRuntimeError == null
+                && TryRollingPrice(price, out tick)
+                && rolling.TryValue(isAsk ? ExecutionOSRollingLiquidityPrevious.Side.Ask
+                    : ExecutionOSRollingLiquidityPrevious.Side.Bid, tick, out value);
+        }
+        private void ResetRollingHistory(string reason = "Header reset")
+        {
+            rollingLastResetReason = reason;
+            rollingSourceFence = latestRollingSource;
+            if (rolling != null) rolling.ResetHistory(RawClockTicks(), rollingSourceFence);
+            rollingRuntimeError = null;
+            ResetFlowEvidence(RawClockTicks(), reason);
+        }
+        private void ResetRollingLevel(double price, bool isAsk)
+        {
+            if (!ApplyLegacyResetsToRolling || rolling == null) return;
+            long tick;
+            if (TryRollingPrice(price, out tick)) rolling.ResetLevel(isAsk
+                ? ExecutionOSRollingLiquidityPrevious.Side.Ask : ExecutionOSRollingLiquidityPrevious.Side.Bid, tick);
+            if (flow != null && TryRollingPrice(price, out tick))
+            { flow.ResetLevelEvidence(isAsk ? ExecutionOSFlowEvidencePreviousAdapter.Side.Ask : ExecutionOSFlowEvidencePreviousAdapter.Side.Bid, tick, RawClockTicks(), "Legacy level reset"); DrainFlowTransitions(); }
+            rollingLastResetReason = "Legacy no-data reset";
+        }
+
+        private void DisposeLegacyResetTimers()
+        {
+            if (bidAskResetTimer != null) { bidAskResetTimer.Dispose(); bidAskResetTimer = null; }
+            if (askNoDataResetTimers != null)
+            { foreach (Timer timer in askNoDataResetTimers.Values) timer.Dispose(); askNoDataResetTimers.Clear(); }
+            if (bidNoDataResetTimers != null)
+            { foreach (Timer timer in bidNoDataResetTimers.Values) timer.Dispose(); bidNoDataResetTimers.Clear(); }
+        }
+        private void ResetV3FeedState(long now, bool newSourceEpoch = false)
+        {
+            rollingLastResetReason = "Feed, connection, instrument or playback reset";
+            resetGeneration++; DisposeLegacyResetTimers();
+            if (askPriceDepthMap != null) askPriceDepthMap.Clear();
+            if (bidPriceDepthMap != null) bidPriceDepthMap.Clear();
+            if (mmAskPriceMap != null) mmAskPriceMap.Clear();
+            if (mmBidPriceMap != null) mmBidPriceMap.Clear();
+            if (askSpoofAlerts != null) ClearSpoofDetectionState();
+            previousAsk = double.MinValue; previousBid = double.MinValue;
+            if (newSourceEpoch) latestRollingSource = 0;
+            rollingSourceFence = latestRollingSource; rollingNeedsSnapshot = true;
+            if (rolling != null) { rolling.Reset(now); rolling.SetSourceFence(rollingSourceFence); }
+            ResetFlowEvidence(now, rollingLastResetReason);
+            rollingRuntimeError = null; rollingSessionBegin = DateTime.MinValue;
+            rollingSessionEnd = DateTime.MinValue; rollingSessionOpen = false;
+        }
+        private Timer CreateGuardedTimer(TimerCallback callback, object state, int due, int period)
+        {
+            long generation = resetGeneration;
+            Timer timer = null;
+            timer = new Timer(delegate(object ignored)
+            {
+                lock (collectionSync)
+                {
+                    if (v3Terminated || generation != resetGeneration) return;
+                    if (callback == OnBidAskResetTimerCallback && !ReferenceEquals(timer, bidAskResetTimer)) return;
+                    if (callback == OnSpoofAlertRefreshTimerCallback && !ReferenceEquals(timer, spoofAlertRefreshTimer)) return;
+                    if (callback == OnNoDataResetTimerCallback)
+                    {
+                        Tuple<double, MarketDataType> key = (Tuple<double, MarketDataType>)state;
+                        Dictionary<double, Timer> timers = key.Item2 == MarketDataType.Ask
+                            ? askNoDataResetTimers : bidNoDataResetTimers;
+                        Timer current;
+                        if (!timers.TryGetValue(key.Item1, out current) || !ReferenceEquals(current, timer)) return;
+                        timers.Remove(key.Item1); timer.Dispose();
+                    }
+                    callback(state);
+                }
+            }, null, due, period);
+            return timer;
+        }
+
+        private void StartV3()
+        {
+            lock (collectionSync)
+            {
+                v3Terminated = false;
+                if (!connectionSubscribed)
+                { Cbi.Connection.ConnectionStatusUpdate += OnV3ConnectionStatus; connectionSubscribed = true; }
+                EnsureV3Context();
+                if (rollingRefreshTimer == null)
+                    rollingRefreshTimer = new Timer(OnRollingRefresh, null, 100, 100);
+            }
+        }
+        private void StopV3()
+        {
+            lock (collectionSync)
+            {
+                v3Terminated = true; resetGeneration++;
+                StopFlowEvidence();
+                if (connectionSubscribed)
+                { Cbi.Connection.ConnectionStatusUpdate -= OnV3ConnectionStatus; connectionSubscribed = false; }
+                if (rollingRefreshTimer != null) { rollingRefreshTimer.Dispose(); rollingRefreshTimer = null; }
+                DisposeLegacyResetTimers(); DisposeRollingCalendar();
+                if (rolling != null) rolling.Reset(RawClockTicks());
+            }
+        }
+        private void OnV3ConnectionStatus(object sender, Cbi.ConnectionStatusEventArgs e)
+        {
+            // Conservative invalidation across price-feed interruptions; order-only
+            // connection changes do not reset the column.
+            Cbi.ConnectionStatus priceStatus = e.PriceStatus;
+            if (priceStatus == e.PreviousPriceStatus) return;
+            lock (collectionSync)
+            {
+                if (v3Terminated || State != State.Active) return;
+                ResetV3FeedState(RawClockTicks());
+                rollingCalendarError = null;
+            }
+            OnPropertyChanged();
+        }
+        private void DisposeRollingCalendar()
+        {
+            if (rollingSessionRequest != null) { rollingSessionRequest.Dispose(); rollingSessionRequest = null; }
+            rollingSessionIterator = null; rollingCalendarError = null;
+            rollingSessionBegin = DateTime.MinValue; rollingSessionEnd = DateTime.MinValue; rollingSessionOpen = false;
+        }
+        private void RequestRollingCalendar()
+        {
+            if (rollingSessionRequest != null || rollingSessionIterator != null || rollingCalendarError != null
+                || rollingInstrument == null || SuperDom == null || !SuperDom.IsConnected) return;
+            Cbi.Instrument instrument = rollingInstrument;
+            // A one-bar request supplies NinjaTrader's holiday/DST-aware calendar;
+            // no depth is synthesized from historical bars.
+            rollingSessionRequest = new BarsRequest(instrument, 1)
+            {
+                BarsPeriod = new BarsPeriod { BarsPeriodType = BarsPeriodType.Minute, Value = 1 },
+                TradingHours = instrument.MasterInstrument.TradingHours
+            };
+            BarsRequest owner = rollingSessionRequest;
+            owner.Request(delegate(BarsRequest request, Cbi.ErrorCode code, string message)
+            {
+                lock (collectionSync)
+                {
+                    if (v3Terminated || !ReferenceEquals(request, rollingSessionRequest)
+                        || !ReferenceEquals(instrument, rollingInstrument)) return;
+                    if (code != Cbi.ErrorCode.NoError || request.Bars == null)
+                    { rollingCalendarError = "session calendar request failed; reconnect or switch mode to retry";
+                        request.Dispose(); rollingSessionRequest = null; return; }
+                    try
+                    {
+                        rollingSessionIterator = new SessionIterator(request.Bars);
+                        CheckRollingSession(RawClockTicks());
+                    }
+                    catch (Exception) { rollingCalendarError = "session calendar initialization failed"; }
+                }
+                OnPropertyChanged();
+            });
+        }
+        private void CheckRollingSession(long nowTicks)
+        {
+            if (rollingSessionIterator == null || rollingCalendarError != null || rolling == null) return;
+            DateTime now = SessionClockNow();
+            bool initializing = rollingSessionBegin == DateTime.MinValue;
+            bool changed = false;
+            if (rollingSessionBegin == DateTime.MinValue || now < rollingSessionBegin || now >= rollingSessionEnd)
+            {
+                rollingSessionIterator.GetNextSession(now, false);
+                DateTime begin = rollingSessionIterator.ActualSessionBegin;
+                DateTime end = rollingSessionIterator.ActualSessionEnd;
+                if (begin != rollingSessionBegin || end != rollingSessionEnd)
+                    changed = true;
+                rollingSessionBegin = begin; rollingSessionEnd = end;
+            }
+            bool open = now >= rollingSessionBegin && now < rollingSessionEnd;
+            if (changed || open != rollingSessionOpen)
+            {
+                rollingSourceFence = latestRollingSource;
+                // Initial calendar arrival validates the current session, without
+                // invalidating a fresh startup snapshot taken in that session.
+                if (initializing && open) rolling.ResetHistory(nowTicks, rollingSourceFence);
+                else rolling.ResetObservations(nowTicks, rollingSourceFence);
+                rollingLastResetReason = initializing ? "Session calendar ready" : "Session transition";
+                ResetFlowEvidence(nowTicks, rollingLastResetReason);
+            }
+            rollingSessionOpen = open;
+        }
+        private void OnRollingRefresh(object ignored)
+        {
+            bool refresh = false;
+            string diagnostic = null;
+            lock (collectionSync)
+            {
+                if (v3Terminated || State != State.Active) return;
+                try
+                {
+                    long now = EnsureV3Context();
+                    if (CalculationMode == ExecutionOSPullingStackingCalculationModePrevious.RollingWindow || FlowDetectionEnabled)
+                    {
+                        RequestRollingCalendar(); CheckRollingSession(now);
+                        FinishFlowEvent(now);
+                        PrintFlowStatusSample();
+                        // One coalesced 10 Hz refresh also covers quiet-market expiry.
+                        refresh = true;
+                    }
+                }
+                catch (Exception ex) { rollingRuntimeError = "refresh failure (" + ex.GetType().Name + ")"; refresh = true; }
+                long diagnosticNow = (long)(System.Diagnostics.Stopwatch.GetTimestamp()
+                    * ((double)TimeSpan.TicksPerSecond / System.Diagnostics.Stopwatch.Frequency));
+                if (LogRollingDiagnostics && CalculationMode == ExecutionOSPullingStackingCalculationModePrevious.RollingWindow
+                    && (lastDiagnosticTicks == long.MinValue || diagnosticNow - lastDiagnosticTicks >= 5 * TimeSpan.TicksPerSecond))
+                {
+                    lastDiagnosticTicks = diagnosticNow;
+                    diagnostic = "ExecutionOS P/S v4 EXP [" + (rollingInstrument == null ? "no instrument" : rollingInstrument.FullName)
+                        + "] build " + RollingBuildId + "; " + RollingStatus;
+                }
+            }
+            if (diagnostic != null && !v3Terminated) Print(diagnostic);
+            if (refresh && !v3Terminated) OnPropertyChanged();
+        }
+    }
+    #endregion
+
+    #region v4 Flow adapter
+    // Experimental flow adapter. Callers hold collectionSync; no order submission.
+    public partial class ExecutionOSPullingStacking_v4_Experimental_Previous
+    {
+        private ExecutionOSFlowEvidencePreviousAdapter flow;
+        private ExecutionOSRollingLiquidityPrevious flowBookOwner;
+        private long flowSettingsKey;
+        private string flowRuntimeError;
+        private long flowSourceRegressions;
+        private long flowGeneration, flowLogOrigin, nextFlowTradeId;
+        private long flowContributionFloor;
+        private long lastFlowStatusPrint = long.MinValue;
+
+        [Display(Name = "Enabled", GroupName = "Flow detection (experimental)", Order = 600)]
+        public bool FlowDetectionEnabled { get; set; }
+        [Display(Name = "Absorption", GroupName = "Flow detection (experimental)", Order = 610)]
+        public bool DetectAbsorption { get; set; }
+        [Display(Name = "Initiative", GroupName = "Flow detection (experimental)", Order = 620)]
+        public bool DetectInitiative { get; set; }
+        [Display(Name = "Show candidates", GroupName = "Flow detection (experimental)", Order = 630)]
+        public bool ShowFlowCandidates { get; set; }
+        [Display(Name = "Log flow events", GroupName = "Flow detection (experimental)", Order = 640)]
+        public bool LogFlowEvents { get; set; }
+        [Range(1, 30)]
+        [Display(Name = "Evidence window (seconds)", GroupName = "Flow thresholds (trial)", Order = 650)]
+        public int FlowWindowSeconds { get; set; }
+        [Range(1, 1000000)]
+        [Display(Name = "Minimum executed contracts", GroupName = "Flow thresholds (trial)", Order = 660)]
+        public int FlowMinimumVolume { get; set; }
+        [Range(1, 1000000)]
+        [Display(Name = "Minimum net replenishment", GroupName = "Flow thresholds (trial)", Order = 670)]
+        public int FlowMinimumReplenishment { get; set; }
+        [Range(1, 100)]
+        [Display(Name = "Minimum matched executions (%)", GroupName = "Flow thresholds (trial)", Order = 680)]
+        public int FlowMinimumMatchPercent { get; set; }
+        [Range(51, 100)]
+        [Display(Name = "Minimum execution dominance (%)", GroupName = "Flow thresholds (trial)", Order = 690)]
+        public int FlowMinimumDominancePercent { get; set; }
+        [Range(0, 10000)]
+        [Display(Name = "Minimum observation (ms)", GroupName = "Flow thresholds (trial)", Order = 700)]
+        public int FlowMinimumHoldMilliseconds { get; set; }
+        [Range(0, 5000)]
+        [Display(Name = "Confirmation duration (ms)", GroupName = "Flow thresholds (trial)", Order = 710)]
+        public int FlowConfirmationMilliseconds { get; set; }
+        [Range(0, 10)]
+        [Display(Name = "Maximum adverse movement (ticks)", GroupName = "Flow thresholds (trial)", Order = 720)]
+        public int FlowMaximumAdverseTicks { get; set; }
+        [Range(1, 20)]
+        [Display(Name = "Minimum initiative advance (ticks)", GroupName = "Flow thresholds (trial)", Order = 730)]
+        public int FlowMinimumAdvanceTicks { get; set; }
+        [Range(1, 10)]
+        [Display(Name = "Absorption depth levels", GroupName = "Flow thresholds (trial)", Order = 740)]
+        public int FlowDepthLevels { get; set; }
+        [Range(100, 10000)]
+        [Display(Name = "Marker display (ms)", GroupName = "Flow display", Order = 750)]
+        public int FlowDisplayMilliseconds { get; set; }
+        [Range(0, 30000)]
+        [Display(Name = "Repeat cooldown (ms)", GroupName = "Flow display", Order = 760)]
+        public int FlowCooldownMilliseconds { get; set; }
+        [XmlIgnore]
+        [ReadOnly(true)]
+        [Display(Name = "Status", GroupName = "Flow detection (experimental)", Order = 770)]
+        public string FlowStatus
+        {
+            get
+            {
+                lock (collectionSync)
+                {
+                    if (!FlowDetectionEnabled) return "Disabled";
+                    if (State != State.Active || v3Terminated) return "Settings view; runtime evidence is in Output";
+                    if (flowRuntimeError != null) return "Unavailable: " + flowRuntimeError;
+                    return flow == null ? "Waiting for flow context" : flow.Status;
+                }
+            }
+        }
+        private long FlowConfigurationKey()
+        {
+            unchecked
+            {
+                long key = 17;
+                key = key * 397 ^ FlowWindowSeconds;
+                key = key * 397 ^ FlowMinimumVolume;
+                key = key * 397 ^ FlowMinimumReplenishment;
+                key = key * 397 ^ FlowMinimumMatchPercent;
+                key = key * 397 ^ FlowMinimumDominancePercent;
+                key = key * 397 ^ FlowMinimumHoldMilliseconds;
+                key = key * 397 ^ FlowConfirmationMilliseconds;
+                key = key * 397 ^ FlowMaximumAdverseTicks;
+                key = key * 397 ^ FlowMinimumAdvanceTicks;
+                key = key * 397 ^ FlowDepthLevels;
+                key = key * 397 ^ FlowDisplayMilliseconds;
+                key = key * 397 ^ FlowCooldownMilliseconds;
+                key = key * 397 ^ ExecutionReconciliationMilliseconds;
+                key = key * 397 ^ (DetectAbsorption ? 1 : 0);
+                key = key * 397 ^ (DetectInitiative ? 1 : 0);
+                return key;
+            }
+        }
+        private void EnsureFlowContext(long now)
+        {
+            if (!FlowDetectionEnabled)
+            {
+                if (flow != null) flow.Reset(now, "Detection disabled");
+                DrainFlowTransitions(); DetachFlowBook(); flow = null; flowRuntimeError = null; return;
+            }
+            long key = FlowConfigurationKey();
+            if (flow == null || key != flowSettingsKey)
+            {
+                if (flow != null) { flow.Reset(now, "Detector settings changed"); DrainFlowTransitions(); }
+                DetachFlowBook(); flowGeneration++; flowLogOrigin = now; flowSettingsKey = key; flowRuntimeError = null;
+                try
+                {
+                flow = new ExecutionOSFlowEvidencePreviousAdapter(new ExecutionOSFlowEvidencePreviousAdapter.Settings
+                {
+                    WindowSeconds = FlowWindowSeconds, MinimumVolume = FlowMinimumVolume,
+                    MinimumReplenishment = FlowMinimumReplenishment, MinimumMatchPercent = FlowMinimumMatchPercent,
+                    MinimumDominancePercent = FlowMinimumDominancePercent, MinimumHoldMs = FlowMinimumHoldMilliseconds,
+                    ConfirmationMs = FlowConfirmationMilliseconds, MaximumAdverseTicks = FlowMaximumAdverseTicks,
+                    MinimumAdvanceTicks = FlowMinimumAdvanceTicks, DisplayMs = FlowDisplayMilliseconds,
+                    CooldownMs = FlowCooldownMilliseconds, ReconciliationMs = ExecutionReconciliationMilliseconds,
+                    Absorption = DetectAbsorption, Initiative = DetectInitiative
+                });
+                }
+                catch (ArgumentException)
+                { flow = null; flowRuntimeError = "Invalid flow thresholds; correct the settings"; return; }
+                flow.Reset(now, "New detector configuration");
+            }
+            if (ReferenceEquals(rolling, flowBookOwner)) return;
+            DetachFlowBook(); flowBookOwner = rolling; flow.Reset(now, "New depth engine context");
+            flowContributionFloor = rolling == null ? 0 : rolling.LatestContributionId;
+            flowSourceRegressions = rolling == null ? 0 : rolling.TimestampRegressionCount;
+            if (rolling == null) return;
+            rolling.ContributionObserver = delegate(ExecutionOSRollingLiquidityPrevious.Side side, long price, long id, long receipt, long net)
+            {
+                if (flow != null && !v3Terminated && id > flowContributionFloor)
+                    flow.Contribution(id, side == ExecutionOSRollingLiquidityPrevious.Side.Bid
+                        ? ExecutionOSFlowEvidencePreviousAdapter.Side.Bid : ExecutionOSFlowEvidencePreviousAdapter.Side.Ask,
+                        price, net, receipt, lastClockTicks);
+            };
+            rolling.ExecutionMatchedObserver = delegate(long id, long volume)
+            { if (flow != null && !v3Terminated) flow.MatchTrade(id, volume); };
+        }
+        private void DetachFlowBook()
+        {
+            if (flowBookOwner != null)
+            { flowBookOwner.ContributionObserver = null; flowBookOwner.ExecutionMatchedObserver = null; }
+            flowBookOwner = null;
+        }
+        private void ResetFlowEvidence(long now, string reason)
+        {
+            if (flow != null)
+            { flow.Reset(now, reason); DrainFlowTransitions(); flowGeneration++; flowLogOrigin = now;
+                flowContributionFloor = rolling == null ? 0 : rolling.LatestContributionId;
+                flowSourceRegressions = rolling == null ? 0 : rolling.TimestampRegressionCount; }
+        }
+        private void StopFlowEvidence()
+        {
+            if (flow != null) flow.Reset(RawClockTicks(), "Column terminated");
+            DetachFlowBook();
+        }
+        private void SynchronizeFlowCoverage(long now)
+        {
+            if (flow == null) return;
+            string failure = State != State.Active || v3Terminated ? "Column inactive"
+                : SuperDom == null ? "SuperDOM unavailable"
+                : !SuperDom.IsConnected ? "Feed disconnected"
+                : SuperDom.IsReloading ? "SuperDOM reloading"
+                : rolling == null ? "Depth engine unavailable"
+                : rolling.Faulted ? "Depth engine faulted"
+                : rollingNeedsSnapshot ? "Depth snapshot required"
+                : rollingSessionIterator == null ? "Waiting for instrument session calendar"
+                : rollingCalendarError != null ? rollingCalendarError
+                : !rollingSessionOpen ? "Outside instrument session"
+                : rollingRuntimeError != null ? rollingRuntimeError
+                : flowRuntimeError;
+            bool context = failure == null;
+            long resetsBefore = flow.ResetCount;
+            flow.SetReady(context, now, failure ?? "Context ready");
+            if (flow.ResetCount != resetsBefore)
+                flowContributionFloor = rolling == null ? 0 : rolling.LatestContributionId;
+            long bid = 0, ask = 0, quantity;
+            bool bidKnown = context && rolling.TryInsideDepth(ExecutionOSRollingLiquidityPrevious.Side.Bid, out bid, out quantity);
+            bool askKnown = context && rolling.TryInsideDepth(ExecutionOSRollingLiquidityPrevious.Side.Ask, out ask, out quantity);
+            bool quotes = bidKnown && askKnown && bid < ask;
+            string quoteReason = !bidKnown && !askKnown ? "Inside bid and ask unconfirmed"
+                : !bidKnown ? "Inside bid unconfirmed" : !askKnown ? "Inside ask unconfirmed"
+                : bid == ask ? "Inside quotes locked (tick " + bid + ")"
+                : "Inside quotes crossed (bid tick " + bid + ", ask tick " + ask + ")";
+            flow.SetQuoteReady(context && quotes, now, quoteReason);
+            flow.BeginCoverage();
+            if (context)
+            {
+                if (quotes) flow.Quote(bid, ask);
+                for (int side = 0; side < 2; side++)
+                    for (int position = 0; position < Math.Min(FlowDepthLevels, appliedDepthLevels); position++)
+                    {
+                        long price;
+                        if (rolling.TryDepthAt(side == 0 ? ExecutionOSRollingLiquidityPrevious.Side.Bid
+                            : ExecutionOSRollingLiquidityPrevious.Side.Ask, position, out price, out quantity))
+                            flow.Quantity(side == 0 ? ExecutionOSFlowEvidencePreviousAdapter.Side.Bid : ExecutionOSFlowEvidencePreviousAdapter.Side.Ask,
+                                price, quantity, now);
+                    }
+            }
+            flow.EndCoverage(now);
+            if (rolling != null && rolling.TimestampRegressionCount != flowSourceRegressions)
+            { flowSourceRegressions = rolling.TimestampRegressionCount; flow.AttributionUncertain(now); }
+        }
+        private long RecordFlowTrade(MarketDataEventArgs trade, long now, int direction, long price, long bid, long ask)
+        {
+            if (flow == null || flowRuntimeError != null || trade.Volume <= 0) return 0;
+            long actualPrice; bool hasPrice = TryRollingPrice(trade.Price, out actualPrice);
+            return flow.AddTrade(direction, price, trade.Volume, bid, ask, now, hasPrice, ++nextFlowTradeId);
+        }
+        private void FinishFlowEvent(long now)
+        {
+            if (flow == null) return;
+            try
+            {
+                SynchronizeFlowCoverage(now); flow.Evaluate(now);
+                DrainFlowTransitions();
+            }
+            catch (Exception ex)
+            { flowRuntimeError = "Flow evaluation failure (" + ex.GetType().Name + ")"; flow.SetReady(false, now, flowRuntimeError); }
+        }
+        private void DrainFlowTransitions()
+        {
+            if (flow == null) return;
+            ExecutionOSFlowEvidencePreviousAdapter.Signal signal;
+                while ((signal = flow.TakeTransition()) != null)
+                {
+                    if (!LogFlowEvents || v3Terminated) continue;
+                    double tickSize = SuperDom.Instrument.MasterInstrument.TickSize;
+                    Print("ExecutionOS Flow v4 [" + SuperDom.Instrument.FullName + "] build 2026-10-14.1 EXP; "
+                        + "NT-local " + SessionClockNow().ToString("yyyy-MM-dd HH:mm:ss.fff")
+                        + "; generation " + flowGeneration + "; id " + signal.Id
+                        + "; event receipt ms " + ((signal.Updated - flowLogOrigin) / TimeSpan.TicksPerMillisecond)
+                        + "; detected receipt ms " + ((signal.Detected - flowLogOrigin) / TimeSpan.TicksPerMillisecond) + "; " + signal.Pattern + "; " + signal.State
+                        + "; price " + (signal.Price * tickSize).ToString(Core.Globals.GeneralOptions.CurrentCulture)
+                        + "; executed " + signal.Executed + "; eligible for matching " + signal.Eligible + "; matched " + signal.Matched
+                        + "; net replenishment " + signal.Replenished + "; refill observations " + signal.Refills
+                        + "; dominance " + signal.Dominance + "%; observation ms " + signal.HeldMs
+                        + "; advance ticks " + signal.AdvanceTicks + "; " + signal.Reason);
+                }
+        }
+        private void PrintFlowStatusSample()
+        {
+            if (!LogFlowEvents || v3Terminated) return;
+            long realNow = (long)(System.Diagnostics.Stopwatch.GetTimestamp()
+                * ((double)TimeSpan.TicksPerSecond / System.Diagnostics.Stopwatch.Frequency));
+            if (lastFlowStatusPrint != long.MinValue && realNow - lastFlowStatusPrint < 5 * TimeSpan.TicksPerSecond) return;
+            lastFlowStatusPrint = realNow;
+            Print("ExecutionOS Flow v4 [" + (rollingInstrument == null ? "no instrument" : rollingInstrument.FullName)
+                + "] build 2026-10-14.1 EXP; STATUS; " + FlowStatus);
+        }
+        private void DrawFlowEvidence(DrawingContext dc, PriceRow row, double renderWidth, double verticalOffset, double dpi)
+        {
+            if (!FlowDetectionEnabled || flow == null || flowRuntimeError != null || renderWidth < 180) return;
+            long price; if (!TryRollingPrice(row.Price, out price)) return;
+            for (int side = 0; side < 2; side++)
+            {
+                if ((side == 0 && DisplayType == PullingStackingDisplayType.Ask)
+                    || (side == 1 && DisplayType == PullingStackingDisplayType.Bid)) continue;
+                ExecutionOSFlowEvidencePreviousAdapter.Signal signal = flow.At(side == 0
+                    ? ExecutionOSFlowEvidencePreviousAdapter.Side.Bid : ExecutionOSFlowEvidencePreviousAdapter.Side.Ask, price);
+                if (signal == null || (signal.State == ExecutionOSFlowEvidencePreviousAdapter.Stage.Candidate && !ShowFlowCandidates)) continue;
+                string label = signal.Pattern == ExecutionOSFlowEvidencePreviousAdapter.Kind.BuyerAbsorption ? "BABS"
+                    : signal.Pattern == ExecutionOSFlowEvidencePreviousAdapter.Kind.SellerAbsorption ? "SABS"
+                    : signal.Pattern == ExecutionOSFlowEvidencePreviousAdapter.Kind.BuyInitiative ? "BUY↑" : "SELL↓";
+                bool qualified = signal.State == ExecutionOSFlowEvidencePreviousAdapter.Stage.Qualified;
+                if (!qualified) label += "?";
+                Brush brush = !qualified ? Brushes.Goldenrod
+                    : (signal.Pattern == ExecutionOSFlowEvidencePreviousAdapter.Kind.BuyerAbsorption
+                        || signal.Pattern == ExecutionOSFlowEvidencePreviousAdapter.Kind.BuyInitiative) ? Brushes.LimeGreen : Brushes.Red;
+                FormattedText text = new FormattedText(label, Core.Globals.GeneralOptions.CurrentCulture,
+                    FlowDirection.LeftToRight, typeFace, Math.Max(8.0, Math.Min(10.0, SuperDom.Font.Size * 0.65)), brush, dpi);
+                double half = DisplayType == PullingStackingDisplayType.BidAsk ? renderWidth / 2.0 : renderWidth;
+                double left = DisplayType == PullingStackingDisplayType.BidAsk && side == 1 ? half : 0;
+                Rect clip = new Rect(left, verticalOffset, half, SuperDom.ActualRowHeight);
+                dc.PushClip(new RectangleGeometry(clip));
+                double x = side == 0 ? Math.Max(3, clip.Right - text.Width - 3) : clip.Left + 3;
+                dc.DrawText(text, new Point(x, verticalOffset + (SuperDom.ActualRowHeight - text.Height) / 2.0));
+                dc.Pop();
+            }
+        }
+    }
+    #endregion
+
+    #region v4 Rolling calculation core
+    // This core is embedded verbatim in ExecutionOSPullingStacking_v3.cs.
+    // It owns no NinjaTrader objects, clocks, locks, timers, or UI resources.
+    internal sealed class ExecutionOSRollingLiquidityPrevious
+    {
+        internal enum Side { Bid, Ask }
+        internal enum DepthAction { Add, Update, Remove }
+
+        private struct BookRow
+        {
+            internal long Price;
+            internal long Quantity;
+            internal BookRow(long price, long quantity) { Price = price; Quantity = quantity; }
+        }
+        private sealed class Contribution
+        {
+            internal long Receipt, StartSource, EndSource, Value, Id, Price;
+            internal Side Side;
+            internal bool Expired;
+        }
+        private struct Execution
+        {
+            internal long Receipt, Source, Volume, Id;
+            internal Execution(long receipt, long source, long volume, long id)
+            { Receipt = receipt; Source = source; Volume = volume; Id = id; }
+        }
+        private sealed class Level
+        {
+            internal bool Observed, RequireFreshObservation;
+            internal long Quantity, Source, Sum;
+            internal readonly Queue<Contribution> History = new Queue<Contribution>();
+            internal readonly LinkedList<Contribution> Recent = new LinkedList<Contribution>();
+            internal readonly Queue<Execution> Pending = new Queue<Execution>();
+        }
+        private sealed class Book
+        {
+            internal long LastSource;
+            internal readonly List<BookRow> Rows = new List<BookRow>();
+            internal readonly Dictionary<long, Level> Levels = new Dictionary<long, Level>();
+        }
+
+        private readonly Book bids = new Book();
+        private readonly Book asks = new Book();
+        private readonly List<long> prunePrices = new List<long>();
+        private long lastNow = long.MinValue;
+        private long started;
+        private long nextContribution;
+        internal long LatestContributionId { get { return nextContribution; } }
+        internal Action<Side, long, long, long, long> ContributionObserver;
+        internal Action<long, long> ExecutionMatchedObserver;
+        private long sourceFence;
+        private readonly long windowTicks;
+        private readonly long graceTicks;
+        private readonly int depthLimit;
+        private readonly int capacity;
+        internal int EntryCount { get; private set; }
+        internal int PendingCount { get; private set; }
+        internal long MatchedVolume { get; private set; }
+        internal long UnmatchedVolume { get; private set; }
+        internal long UnclassifiedVolume { get; private set; }
+        internal long TimestampRegressionCount { get; private set; }
+        internal long InvalidDepthCount { get; private set; }
+        internal long ContinuityBreakCount { get; private set; }
+        internal string LastContinuityFailure { get; private set; }
+        internal long UnstampedDepthCount { get; private set; }
+        internal long ResetCount { get; private set; }
+        internal bool Faulted { get; private set; }
+        internal bool IsWarm { get { return lastNow != long.MinValue && lastNow - started >= windowTicks; } }
+
+        internal ExecutionOSRollingLiquidityPrevious(int seconds, int graceMilliseconds, int levels, int maximumEntries = 200000)
+        {
+            if (seconds < 1 || seconds > 30) throw new ArgumentOutOfRangeException("seconds");
+            if (graceMilliseconds < 0 || graceMilliseconds > 1000) throw new ArgumentOutOfRangeException("graceMilliseconds");
+            if (levels < 1 || levels > 4096) throw new ArgumentOutOfRangeException("levels");
+            if (maximumEntries < 1) throw new ArgumentOutOfRangeException("maximumEntries");
+            windowTicks = seconds * TimeSpan.TicksPerSecond;
+            graceTicks = graceMilliseconds * TimeSpan.TicksPerMillisecond;
+            depthLimit = levels;
+            capacity = maximumEntries;
+        }
+
+        private Book GetBook(Side side) { return side == Side.Bid ? bids : asks; }
+        internal void Reset(long now)
+        {
+            bids.Rows.Clear(); bids.Levels.Clear(); bids.LastSource = 0;
+            asks.Rows.Clear(); asks.Levels.Clear(); asks.LastSource = 0;
+            EntryCount = 0; PendingCount = 0; Faulted = false;
+            lastNow = now; started = now; sourceFence = 0; ResetCount++;
+        }
+
+        // Explicit/manual/legacy reset of the measurement retains the known book.
+        // Pending credits and all pre-reset contribution references are discarded.
+        internal void SetSourceFence(long source) { if (source > sourceFence) sourceFence = source; }
+        internal void ResetHistory(long now, long sourceCutoff = 0)
+        {
+            Advance(now);
+            ResetBookHistory(bids); ResetBookHistory(asks);
+            Faulted = false; started = now; ResetCount++;
+            SetSourceFence(sourceCutoff);
+        }
+        // Session transitions retain positional identity but cannot compare an
+        // old session's quantities with the first observation of the new session.
+        internal void ResetObservations(long now, long sourceCutoff = 0)
+        {
+            ResetHistory(now, sourceCutoff);
+            foreach (Level level in bids.Levels.Values)
+            { level.Observed = false; level.RequireFreshObservation = true; }
+            foreach (Level level in asks.Levels.Values)
+            { level.Observed = false; level.RequireFreshObservation = true; }
+        }
+        private void ResetBookHistory(Book book)
+        {
+            foreach (Level level in book.Levels.Values)
+            {
+                DropHistory(level);
+                // A measurement reset supplies no fresh provider timestamp for
+                // these retained quantities. Never match across its boundary.
+                level.Sum = 0; level.Source = 0;
+            }
+        }
+        private void DropHistory(Level level)
+        {
+            EntryCount -= level.History.Count;
+            PendingCount -= level.Pending.Count;
+            foreach (Contribution entry in level.History) entry.Expired = true;
+            level.History.Clear(); level.Recent.Clear(); level.Pending.Clear(); level.Sum = 0;
+        }
+        internal void ResetLevel(Side side, long price)
+        {
+            Level level;
+            if (GetBook(side).Levels.TryGetValue(price, out level))
+            { DropHistory(level); level.Source = 0; }
+        }
+        private void Invalidate(Level level)
+        {
+            DropHistory(level); level.Observed = false; level.RequireFreshObservation = false; level.Source = 0;
+        }
+        private void BreakContinuity(Book book, string reason)
+        {
+            foreach (Level level in book.Levels.Values) DropHistory(level);
+            book.Rows.Clear(); book.Levels.Clear(); book.LastSource = 0;
+            ContinuityBreakCount++;
+            LastContinuityFailure = reason;
+        }
+
+        internal bool Advance(long now)
+        {
+            if (lastNow == long.MinValue) { lastNow = now; started = now; }
+            if (now < lastNow) { Reset(now); return true; }
+            lastNow = now;
+            bool changed = ExpireBook(bids, now) | ExpireBook(asks, now);
+            return changed;
+        }
+        private bool ExpireBook(Book book, long now)
+        {
+            bool changed = false;
+            long cutoff = now - windowTicks;
+            long reconcileCutoff = now - graceTicks;
+            prunePrices.Clear();
+            foreach (KeyValuePair<long, Level> pair in book.Levels)
+            {
+                Level level = pair.Value;
+                while (level.History.Count > 0 && level.History.Peek().Receipt <= cutoff)
+                {
+                    Contribution entry = level.History.Dequeue();
+                    level.Sum -= entry.Value; entry.Expired = true; EntryCount--; changed = true;
+                }
+                while (level.Recent.First != null && level.Recent.First.Value.Receipt < reconcileCutoff)
+                    level.Recent.RemoveFirst();
+                while (level.Pending.Count > 0 && level.Pending.Peek().Receipt < reconcileCutoff)
+                {
+                    UnmatchedVolume += level.Pending.Dequeue().Volume;
+                    PendingCount--; changed = true;
+                }
+                if (level.History.Count == 0 && level.Recent.Count == 0 && level.Pending.Count == 0
+                    && !ContainsPrice(book, pair.Key)) prunePrices.Add(pair.Key);
+            }
+            foreach (long price in prunePrices) book.Levels.Remove(price);
+            return changed;
+        }
+        private bool ContainsPrice(Book book, long price)
+        {
+            foreach (BookRow row in book.Rows) if (row.Price == price) return true;
+            return false;
+        }
+        private bool Visible(Book book, long price)
+        {
+            int count = Math.Min(depthLimit, book.Rows.Count);
+            for (int i = 0; i < count; i++) if (book.Rows[i].Price == price) return true;
+            return false;
+        }
+        private long Quantity(Book book, long price)
+        {
+            long result = 0;
+            for (int i = 0; i < Math.Min(depthLimit, book.Rows.Count); i++)
+                if (book.Rows[i].Price == price) result = checked(result + book.Rows[i].Quantity);
+            return result;
+        }
+        private Level GetLevel(Book book, long price)
+        {
+            Level level;
+            if (!book.Levels.TryGetValue(price, out level))
+            { level = new Level(); book.Levels.Add(price, level); }
+            return level;
+        }
+        private void Seed(Level level, long quantity, long source)
+        {
+            DropHistory(level); level.Quantity = quantity; level.Source = source;
+            level.Observed = true; level.RequireFreshObservation = false;
+        }
+        // A caller that atomically captured the existing DOM may confirm the
+        // triggering price without applying its already-reflected Add twice.
+        internal void ConfirmSnapshotLevel(Side side, long price, long source)
+        {
+            Book book = GetBook(side);
+            if (source > 0 && source < sourceFence) return;
+            if (!Visible(book, price)) return;
+            Seed(GetLevel(book, price), Quantity(book, price), source);
+            if (source > book.LastSource) book.LastSource = source;
+        }
+
+        // A current, atomic DOM snapshot observes every captured quantity. Its
+        // rows have no individual event timestamps, so the first delta cannot
+        // receive execution credit through a fabricated source-time interval.
+        internal void PrepareSnapshot(long now, long sourceCutoff)
+        {
+            ResetHistory(now, sourceCutoff);
+            bids.LastSource = 0; asks.LastSource = 0;
+            foreach (Level level in bids.Levels.Values) level.Source = 0;
+            foreach (Level level in asks.Levels.Values) level.Source = 0;
+        }
+        internal void RequireFreshLevel(Side side, long price)
+        {
+            Level level;
+            if (!GetBook(side).Levels.TryGetValue(price, out level)) return;
+            DropHistory(level); level.Observed = false;
+            level.RequireFreshObservation = true; level.Source = 0;
+        }
+        internal int KnownLevelCount(Side side)
+        {
+            Book book = GetBook(side); int count = 0;
+            foreach (KeyValuePair<long, Level> pair in book.Levels)
+                if (pair.Value.Observed && Visible(book, pair.Key)) count++;
+            return count;
+        }
+
+        internal bool Depth(Side side, DepthAction action, int position, long price, long quantity, long source, long now,
+            bool isSnapshot = false)
+        {
+            Advance(now);
+            if (Faulted) return false;
+            Book book = GetBook(side);
+            if (quantity < 0 || position < 0 || position > book.Rows.Count
+                || (action == DepthAction.Remove && position == book.Rows.Count)
+                || (action == DepthAction.Add && book.Rows.Count >= 4096))
+            {
+                InvalidDepthCount++;
+                BreakContinuity(book, side + " " + action + " position " + position
+                    + " / stored rows " + book.Rows.Count + "; quantity " + quantity);
+                return false;
+            }
+            // NinjaTrader guarantees depth callback sequence, not that every
+            // provider timestamp equals or exceeds the local receipt clock.
+            // Regressing source times make attribution uncertain, not the book's
+            // ordered quantities. Keep history, discard ambiguous trade matches.
+            if (source > 0 && book.LastSource > 0 && source < book.LastSource)
+            {
+                TimestampRegressionCount++;
+                foreach (Level level in book.Levels.Values)
+                {
+                    while (level.Pending.Count > 0)
+                    { UnmatchedVolume += level.Pending.Dequeue().Volume; PendingCount--; }
+                    level.Recent.Clear(); level.Source = 0;
+                }
+                source = 0;
+            }
+            else if (source > 0) book.LastSource = source;
+            else if (!isSnapshot) UnstampedDepthCount++;
+
+            long oldPrice = price;
+            bool hasOld = action != DepthAction.Add && position < book.Rows.Count;
+            bool outerRemoval = action == DepthAction.Remove
+                && position >= Math.Min(depthLimit, book.Rows.Count) - 1;
+            if (hasOld) oldPrice = book.Rows[position].Price;
+            if (action == DepthAction.Add)
+                book.Rows.Insert(position, new BookRow(price, quantity));
+            else if (action == DepthAction.Remove)
+                book.Rows.RemoveAt(position);
+            else if (hasOld)
+                book.Rows[position] = new BookRow(price, quantity);
+            else
+                book.Rows.Add(new BookRow(price, quantity)); // Bootstrap Update at the next position.
+
+            if (hasOld && (action == DepthAction.Remove || oldPrice != price))
+            {
+                Level oldLevel;
+                if (book.Levels.TryGetValue(oldPrice, out oldLevel))
+                {
+                    if (outerRemoval || (!Visible(book, oldPrice) && ContainsPrice(book, oldPrice)))
+                        Invalidate(oldLevel);
+                    else Observe(oldLevel, Quantity(book, oldPrice), source, now, side, oldPrice);
+                }
+            }
+            if (action != DepthAction.Remove && Visible(book, price))
+                Observe(GetLevel(book, price), Quantity(book, price), source, now, side, price);
+
+            // Shifts can take a previously visible level out of subscription coverage,
+            // or bring one back without an event directly addressing that price.
+            foreach (KeyValuePair<long, Level> pair in book.Levels)
+            {
+                if (pair.Value.Observed && ContainsPrice(book, pair.Key) && !Visible(book, pair.Key))
+                    Invalidate(pair.Value);
+            }
+            for (int i = 0; i < Math.Min(depthLimit, book.Rows.Count); i++)
+            {
+                long visiblePrice = book.Rows[i].Price;
+                Level level = GetLevel(book, visiblePrice);
+                if (!level.Observed && !level.RequireFreshObservation)
+                    Seed(level, Quantity(book, visiblePrice), source);
+            }
+            return !Faulted;
+        }
+        private void Observe(Level level, long quantity, long source, long now, Side side, long price)
+        {
+            if (!level.Observed) { Seed(level, quantity, source); return; }
+            if (EntryCount + PendingCount >= capacity) { Faulted = true; return; }
+            Contribution entry = new Contribution
+            {
+                Receipt = now, StartSource = level.Source, EndSource = source,
+                Id = ++nextContribution, Side = side, Price = price,
+                Value = checked(quantity - level.Quantity)
+            };
+            level.History.Enqueue(entry); level.Recent.AddLast(entry); EntryCount++;
+            level.Sum = checked(level.Sum + entry.Value);
+            level.Quantity = quantity; level.Source = source;
+
+            int count = level.Pending.Count;
+            for (int i = 0; i < count; i++)
+            {
+                Execution trade = level.Pending.Dequeue();
+                if (CanAllocate(trade, entry))
+                { Allocate(level, entry, trade); PendingCount--; }
+                else level.Pending.Enqueue(trade);
+            }
+            NotifyContribution(entry);
+        }
+        private bool CanAllocate(Execution trade, Contribution entry)
+        {
+            return !entry.Expired && trade.Source > 0 && entry.StartSource > 0 && entry.EndSource > 0
+                && trade.Source >= entry.StartSource && trade.Source <= entry.EndSource
+                && Math.Abs(trade.Receipt - entry.Receipt) <= graceTicks;
+        }
+        private void Allocate(Level level, Contribution entry, Execution trade)
+        {
+            // No cap to the negative depth change: executions plus net-unchanged
+            // depth imply replenishment, and additions may coexist with executions.
+            entry.Value = checked(entry.Value + trade.Volume);
+            level.Sum = checked(level.Sum + trade.Volume);
+            MatchedVolume = checked(MatchedVolume + trade.Volume);
+            NotifyContribution(entry);
+            if (ExecutionMatchedObserver != null) ExecutionMatchedObserver(trade.Id, trade.Volume);
+        }
+        private void NotifyContribution(Contribution entry)
+        {
+            if (ContributionObserver != null)
+                ContributionObserver(entry.Side, entry.Price, entry.Id, entry.Receipt, entry.Value);
+        }
+        internal bool TryDepthAt(Side side, int position, out long price, out long quantity)
+        {
+            price = quantity = 0; Book book = GetBook(side); Level level;
+            if (Faulted || position < 0 || position >= Math.Min(depthLimit, book.Rows.Count)) return false;
+            price = book.Rows[position].Price;
+            if (!book.Levels.TryGetValue(price, out level) || !level.Observed) return false;
+            quantity = level.Quantity; return quantity > 0;
+        }
+        internal bool TryInsideDepth(Side side, out long price, out long quantity)
+        {
+            price = quantity = 0; Book book = GetBook(side); Level level;
+            if (Faulted) return false;
+            for (int i = 0; i < Math.Min(depthLimit, book.Rows.Count); i++)
+            {
+                price = book.Rows[i].Price;
+                if (!book.Levels.TryGetValue(price, out level) || !level.Observed) return false;
+                quantity = level.Quantity;
+                if (quantity > 0) return true;
+            }
+            return false;
+        }
+        internal void Unclassified(long volume) { if (volume > 0) UnclassifiedVolume += volume; }
+        internal void Trade(Side side, long price, long volume, long source, long now, long evidenceId = 0)
+        {
+            Advance(now);
+            if (Faulted || volume <= 0) return;
+            Book book = GetBook(side);
+            Level level;
+            if (source <= 0 || (sourceFence > 0 && source <= sourceFence)
+                || !book.Levels.TryGetValue(price, out level) || !level.Observed)
+            { UnmatchedVolume += volume; return; }
+            Execution trade = new Execution(now, source, volume, evidenceId);
+            foreach (Contribution entry in level.Recent)
+            {
+                if (CanAllocate(trade, entry)) { Allocate(level, entry, trade); return; }
+            }
+            if (EntryCount + PendingCount >= capacity) { Faulted = true; return; }
+            level.Pending.Enqueue(trade); PendingCount++;
+        }
+        internal bool TryValue(Side side, long price, out long value)
+        {
+            value = 0;
+            Level level;
+            if (Faulted || !GetBook(side).Levels.TryGetValue(price, out level) || !level.Observed) return false;
+            value = level.Sum; return true;
+        }
+        internal bool IsProvisional
+        {
+            get
+            {
+                if (PendingCount > 0) return true;
+                foreach (Level level in bids.Levels.Values) if (level.Recent.Count > 0) return true;
+                foreach (Level level in asks.Levels.Values) if (level.Recent.Count > 0) return true;
+                return false;
+            }
+        }
+    }
+    #endregion
+
+    #region v4 Flow evidence core
+    // Pure, experimental event-evidence engine. No NinjaTrader, UI, IO or timers.
+    internal sealed class ExecutionOSFlowEvidencePreviousAdapter
+    {
+        internal enum Side { Bid, Ask }
+        internal enum Kind { BuyerAbsorption, SellerAbsorption, BuyInitiative, SellInitiative }
+        internal enum Stage { Candidate, Qualified, Expired, Invalidated, Suppressed }
+        internal sealed class Settings
+        {
+            internal int WindowSeconds = 5, MinimumVolume = 100, MinimumReplenishment = 50;
+            internal int MinimumRefills = 2, MinimumHoldMs = 750, ConfirmationMs = 500;
+            internal int MaximumAdverseTicks = 1, MinimumMatchPercent = 80, MinimumDominancePercent = 70;
+            internal int MinimumAdvanceTicks = 2, MaximumUnknownPercent = 10, QuietTimeoutMs = 1500;
+            internal int DisplayMs = 3000, CooldownMs = 5000, ReconciliationMs = 250;
+            internal int Capacity = 100000;
+            internal bool Absorption = true, Initiative = true;
+            internal void Validate()
+            {
+                if (WindowSeconds < 1 || WindowSeconds > 30 || MinimumVolume < 1 || MinimumReplenishment < 1
+                    || MinimumRefills < 1 || MinimumHoldMs < 0 || ConfirmationMs < 0 || MaximumAdverseTicks < 0
+                    || MinimumMatchPercent < 1 || MinimumMatchPercent > 100 || MinimumDominancePercent < 51
+                    || MinimumDominancePercent > 100 || MinimumAdvanceTicks < 1 || MaximumUnknownPercent < 0
+                    || MaximumUnknownPercent > 100 || QuietTimeoutMs < 1 || DisplayMs < 1 || CooldownMs < 0
+                    || ReconciliationMs < 0 || ReconciliationMs > 1000 || Capacity < 1)
+                    throw new ArgumentOutOfRangeException("Flow settings");
+            }
+        }
+        internal sealed class Signal
+        {
+            internal long Id, Price, Detected, Updated, QualifiedAt, QualifyingSince = long.MinValue;
+            internal Kind Pattern;
+            internal Stage State;
+            internal long Executed, Eligible, Matched, Replenished, HeldMs, AdvanceTicks, FavorablePrice;
+            internal int Refills, Dominance;
+            internal string Reason;
+            internal Signal Copy() { return (Signal)MemberwiseClone(); }
+        }
+        private struct Key : IEquatable<Key>
+        {
+            internal Side Side; internal long Price;
+            internal Key(Side side, long price) { Side = side; Price = price; }
+            public bool Equals(Key other) { return Side == other.Side && Price == other.Price; }
+            public override bool Equals(object value) { return value is Key && Equals((Key)value); }
+            public override int GetHashCode() { return Price.GetHashCode() ^ ((int)Side * 397); }
+        }
+        private sealed class Trade
+        {
+            internal long Id, Receipt, Price, Volume, Matched, Bid, Ask;
+            internal bool HasPrice, Eligible;
+            internal Level Owner; internal long OwnerVersion;
+            internal LinkedListNode<Trade> DirectionNode;
+            internal int Direction; // 1 = ask-classified buy; -1 = bid-classified sell; 0 = unknown.
+        }
+        private sealed class Refill
+        {
+            internal long Id, Receipt, Net;
+            internal Key Key;
+            internal Level Owner; internal long OwnerVersion; internal bool Counted;
+        }
+        private sealed class Metrics
+        {
+            internal long Executed, Eligible, Matched, Opposite, First = long.MinValue, Last = long.MinValue;
+            internal long Replenished, Adverse; internal int Refills;
+            internal void Clear()
+            { Executed = Eligible = Matched = Opposite = Replenished = Adverse = 0; Refills = 0; First = Last = long.MinValue; }
+        }
+        private sealed class Level
+        {
+            internal bool Available, Seen;
+            internal long Quantity, Epoch, LastSeen, CooldownUntil;
+            internal readonly Metrics Metrics = new Metrics();
+            internal Signal Active;
+            internal long Version;
+            internal readonly Queue<Trade> Passive = new Queue<Trade>(), Opposite = new Queue<Trade>();
+            internal readonly LinkedList<Trade> Extremes = new LinkedList<Trade>();
+            internal readonly Queue<Refill> AllRefills = new Queue<Refill>(), IncludedRefills = new Queue<Refill>();
+            internal void ClearEvidence()
+            {
+                Version++; Metrics.Clear(); Passive.Clear(); Opposite.Clear(); Extremes.Clear();
+                AllRefills.Clear(); IncludedRefills.Clear();
+            }
+        }
+        private sealed class InitiativeMetrics
+        {
+            internal long Executed, First = long.MinValue, Last = long.MinValue, StartPrice, EndPrice, StartBid, StartAsk;
+            internal long BreachAnchorId;
+            internal readonly LinkedList<Trade> Trades = new LinkedList<Trade>(), Extremes = new LinkedList<Trade>();
+            internal bool PathBreached { get { return Trades.First != null && BreachAnchorId >= Trades.First.Value.Id; } }
+            internal void Clear()
+            { Executed = StartPrice = EndPrice = StartBid = StartAsk = BreachAnchorId = 0;
+                First = Last = long.MinValue; Trades.Clear(); Extremes.Clear(); }
+        }
+        private readonly Settings settings;
+        private readonly Dictionary<Key, Level> levels = new Dictionary<Key, Level>();
+        private readonly Queue<Trade> tape = new Queue<Trade>();
+        private readonly Queue<Trade> maturity = new Queue<Trade>();
+        private readonly Queue<Refill> windowRefills = new Queue<Refill>();
+        private readonly Dictionary<long, Trade> tradeIds = new Dictionary<long, Trade>();
+        private readonly Queue<Refill> refills = new Queue<Refill>();
+        private readonly Dictionary<long, Refill> refillIds = new Dictionary<long, Refill>();
+        private readonly Queue<Signal> transitions = new Queue<Signal>();
+        private readonly List<Key> prune = new List<Key>();
+        private readonly InitiativeMetrics buys = new InitiativeMetrics(), sells = new InitiativeMetrics();
+        private Signal buyInitiative, sellInitiative;
+        private long nextTrade, nextSignal, started, lastNow = long.MinValue, lastEvaluation = long.MinValue;
+        private long currentBid, currentAsk, lastPrice, lastPrint = long.MinValue;
+        private long buyCooldown, sellCooldown, attributionBlockedUntil, unknown, classified;
+        private bool ready, haveQuote;
+        private bool quoteGateEnabled, quoteReady, quoteInitialized;
+        private long contextStarted;
+        internal long QuotePauseCount { get; private set; }
+        internal string QuotePauseReason { get; private set; }
+        internal string LastResetReason { get; private set; }
+        internal string LastContextFailure { get; private set; }
+        internal bool QuoteReady { get { return !quoteGateEnabled || quoteReady; } }
+        internal long WarmElapsedMs { get { return ready && (!quoteGateEnabled || quoteInitialized)
+            ? Math.Max(0, lastNow - started) / TimeSpan.TicksPerMillisecond : 0; } }
+        private int updateDepth;
+        internal bool Faulted { get; private set; }
+        internal long QualifiedCount { get; private set; }
+        internal long ResetCount { get; private set; }
+        internal long DroppedTransitionCount { get; private set; }
+        internal string Status { get; private set; }
+        internal int RetainedTrades { get { return tape.Count; } }
+        internal int RetainedContributions { get { return refills.Count; } }
+        internal int QueuedTransitions { get { return transitions.Count; } }
+        internal bool IsWarm { get { return ready && (!quoteGateEnabled || quoteInitialized) && lastNow != long.MinValue && lastNow - started >= Window; } }
+        private long Window { get { return settings.WindowSeconds * TimeSpan.TicksPerSecond; } }
+        private static long Ms(int milliseconds) { return milliseconds * TimeSpan.TicksPerMillisecond; }
+
+        internal ExecutionOSFlowEvidencePreviousAdapter(Settings configuration)
+        {
+            configuration.Validate(); settings = configuration; Status = "Waiting for trusted depth";
+        }
+        internal void Reset(long now, string reason)
+        {
+            SuppressAll(now, reason);
+            tape.Clear(); tradeIds.Clear(); maturity.Clear(); refills.Clear(); windowRefills.Clear(); refillIds.Clear(); levels.Clear();
+            buys.Clear(); sells.Clear(); unknown = classified = 0;
+            Faulted = false; ready = false; haveQuote = false; quoteReady = quoteInitialized = false; started = contextStarted = now; lastNow = now;
+            LastResetReason = reason; QuotePauseReason = "Waiting for first trusted inside quotes";
+            lastEvaluation = long.MinValue; lastPrint = long.MinValue; attributionBlockedUntil = 0;
+            buyCooldown = sellCooldown = 0; latestRefillReceipt = long.MinValue; ResetCount++; Status = "Waiting: " + reason;
+        }
+        internal void SetReady(bool value, long now, string reason)
+        {
+            Advance(now);
+            if (Faulted) return;
+            if (!value)
+            {
+                if (ready) Reset(now, reason);
+                LastContextFailure = reason; Status = "Unavailable: " + reason + LifecycleDiagnostics(); return;
+            }
+            if (!ready) { ready = true; started = contextStarted = now; lastEvaluation = long.MinValue; }
+        }
+        // Quote transitions are an observation pause, not a new feed/session context.
+        // The explicit L2 gate cannot be reopened by an L1 trade snapshot.
+        internal void SetQuoteReady(bool value, long now, string reason)
+        {
+            Advance(now);
+            if (!quoteGateEnabled) { quoteGateEnabled = true; quoteReady = quoteInitialized = false; }
+            if (Faulted || !ready) { quoteReady = false; return; }
+            if (!value)
+            {
+                if (quoteReady) { QuotePauseCount++; SuppressAll(now, reason); }
+                quoteReady = false; haveQuote = false; QuotePauseReason = reason;
+                return;
+            }
+            if (!quoteInitialized) { quoteInitialized = true; started = now; }
+            quoteReady = true;
+        }
+        internal void BeginCoverage() { foreach (Level level in levels.Values) level.Seen = false; }
+        internal void Quantity(Side side, long price, long quantity, long now)
+        {
+            if (quantity < 0) { Fail(now, "Negative quantity"); return; }
+            Key key = new Key(side, price); Level level;
+            if (!levels.TryGetValue(key, out level)) { level = new Level(); levels.Add(key, level); }
+            if (!level.Available) { level.Epoch = now; level.Active = null; level.CooldownUntil = 0; level.ClearEvidence(); }
+            level.Available = quantity > 0; level.Seen = true; level.Quantity = quantity; level.LastSeen = now;
+        }
+        internal void EndCoverage(long now)
+        {
+            foreach (Level level in levels.Values)
+            {
+                if (level.Seen && level.Available) continue;
+                if (level.Active != null) End(level.Active, Stage.Suppressed, now, "Observation coverage lost");
+                level.Active = null; level.Available = false; level.Epoch = now; level.ClearEvidence();
+            }
+        }
+        internal void ResetLevelEvidence(Side side, long price, long now, string reason)
+        {
+            Level level;
+            if (!levels.TryGetValue(new Key(side, price), out level)) return;
+            if (level.Active != null) End(level.Active, Stage.Suppressed, now, reason);
+            level.Active = null; level.Epoch = now; level.ClearEvidence();
+        }
+        internal void Quote(long bid, long ask) { currentBid = bid; currentAsk = ask; haveQuote = bid < ask; }
+        internal void AttributionUncertain(long now)
+        {
+            attributionBlockedUntil = now + Window;
+            foreach (Level level in levels.Values)
+            {
+                if (level.Active != null) End(level.Active, Stage.Suppressed, now, "Depth source timing uncertain");
+                level.Active = null;
+            }
+        }
+        internal long AddTrade(int direction, long price, long volume, long bid, long ask, long now, bool hasPrice = true, long evidenceId = 0)
+        {
+            Advance(now);
+            if (Faulted || volume <= 0) return 0;
+            if (direction != -1 && direction != 0 && direction != 1) throw new ArgumentOutOfRangeException("direction");
+            if (!Room(now)) return 0;
+            if (evidenceId != 0)
+            { if (evidenceId <= nextTrade) throw new ArgumentException("Execution IDs must increase"); nextTrade = evidenceId; }
+            else nextTrade++;
+            Trade trade = new Trade { Id = nextTrade, Receipt = now, Direction = direction,
+                Price = price, Volume = volume, Bid = bid, Ask = ask, HasPrice = hasPrice };
+            tape.Enqueue(trade); tradeIds.Add(trade.Id, trade); maturity.Enqueue(trade);
+            if (direction == 0) unknown = checked(unknown + volume);
+            else
+            {
+                classified = checked(classified + volume);
+                InitiativeMetrics m = direction == 1 ? buys : sells;
+                trade.DirectionNode = m.Trades.AddLast(trade); m.Executed = checked(m.Executed + volume);
+                RefreshDirection(m);
+            }
+            // Once the adapter supplies trusted L2 quotes, an L1 execution snapshot
+            // cannot change quote support inside this callback transaction.
+            if (!quoteGateEnabled && bid < ask) Quote(bid, ask);
+            if (hasPrice)
+            {
+                lastPrice = price; lastPrint = now;
+                foreach (KeyValuePair<Key, Level> pair in levels)
+                {
+                    Level level = pair.Value; Metrics m = level.Metrics;
+                    if (!level.Available || now < level.Epoch) continue;
+                    int passive = pair.Key.Side == Side.Ask ? 1 : -1;
+                    if (direction == passive && price == pair.Key.Price)
+                    {
+                        bool first = level.Passive.Count == 0;
+                        level.Passive.Enqueue(trade); trade.Owner = level; trade.OwnerVersion = level.Version;
+                        m.Executed = checked(m.Executed + volume);
+                        m.First = level.Passive.Peek().Receipt; m.Last = now;
+                        if (first) IncludeWaitingRefills(level, now);
+                    }
+                    else if (direction != 0 && direction != passive && Math.Abs(price - pair.Key.Price) <= 1)
+                    { level.Opposite.Enqueue(trade); m.Opposite = checked(m.Opposite + volume); }
+                    if (level.Passive.Count > 0) PushExtreme(level.Extremes, trade, pair.Key.Side == Side.Ask);
+                    Signal active = level.Active;
+                    if (active != null && (pair.Key.Side == Side.Bid ? pair.Key.Price - price : price - pair.Key.Price) > settings.MaximumAdverseTicks)
+                    {
+                        bool qualified = active.State == Stage.Qualified;
+                        End(active, Stage.Invalidated, now, "Price crossed the held level"); level.Active = null;
+                        if (qualified) level.CooldownUntil = now + Ms(settings.CooldownMs);
+                    }
+                }
+                ObserveInitiativePrint(buys, true, trade);
+                ObserveInitiativePrint(sells, false, trade);
+                InvalidateInitiativePrint(buyInitiative, true, trade);
+                InvalidateInitiativePrint(sellInitiative, false, trade);
+            }
+            RefreshLevels(now); return trade.Id;
+        }
+        internal void MatchTrade(long id, long volume)
+        {
+            Trade trade;
+            if (volume <= 0 || id == 0 || !tradeIds.TryGetValue(id, out trade)) return;
+            long before = trade.Matched;
+            trade.Matched = volume >= trade.Volume - before ? trade.Volume : before + volume;
+            Level level = TradeOwner(trade);
+            if (trade.Eligible && level != null) level.Metrics.Matched = checked(level.Metrics.Matched + trade.Matched - before);
+            if (!trade.Eligible && trade.Matched == trade.Volume) MakeEligible(trade);
+        }
+        internal void Contribution(long id, Side side, long price, long net, long receipt, long now)
+        {
+            Advance(now);
+            if (Faulted || receipt <= now - Window - Ms(settings.ReconciliationMs)) return;
+            Refill refill;
+            if (refillIds.TryGetValue(id, out refill))
+            {
+                if (refill.Counted && RefillOwner(refill) != null)
+                {
+                    Metrics m = refill.Owner.Metrics;
+                    m.Replenished = checked(m.Replenished + net - refill.Net);
+                    m.Refills += (net > 0 ? 1 : 0) - (refill.Net > 0 ? 1 : 0);
+                }
+                refill.Net = net; return;
+            }
+            if (receipt < contextStarted) return; // First-seen pre-context corrections cannot seed new flow evidence.
+            if (!Room(now)) return;
+            refill = new Refill { Id = id, Key = new Key(side, price), Net = net, Receipt = receipt };
+            // New contributions carry their own depth receipt time. Corrections retain that time.
+            // Production depth receipts are monotonic; fail closed if that contract is violated.
+            if (refills.Count > 0 && receipt < latestRefillReceipt)
+            { Fail(now, "New contribution receipt order regressed; reset required"); return; }
+            latestRefillReceipt = receipt;
+            refills.Enqueue(refill); windowRefills.Enqueue(refill); refillIds.Add(id, refill);
+            Level level;
+            if (levels.TryGetValue(refill.Key, out level) && level.Available && receipt >= level.Epoch)
+            {
+                refill.Owner = level; refill.OwnerVersion = level.Version; level.AllRefills.Enqueue(refill);
+                if (InRefillRange(level, refill, now)) CountRefill(level, refill);
+            }
+        }
+        private long latestRefillReceipt = long.MinValue;
+        private Level TradeOwner(Trade trade)
+        { return trade.Owner != null && trade.Owner.Available && trade.OwnerVersion == trade.Owner.Version ? trade.Owner : null; }
+        private Level RefillOwner(Refill refill)
+        { return refill.Owner != null && refill.Owner.Available && refill.OwnerVersion == refill.Owner.Version ? refill.Owner : null; }
+        private void MakeEligible(Trade trade)
+        {
+            if (trade.Eligible) return;
+            trade.Eligible = true; Level level = TradeOwner(trade);
+            if (level != null)
+            { level.Metrics.Eligible = checked(level.Metrics.Eligible + trade.Volume);
+                level.Metrics.Matched = checked(level.Metrics.Matched + trade.Matched); }
+        }
+        private bool InRefillRange(Level level, Refill refill, long now)
+        { return level.Metrics.First != long.MinValue && refill.Receipt >= level.Epoch
+            && refill.Receipt >= level.Metrics.First - Ms(settings.ReconciliationMs) && refill.Receipt > now - Window; }
+        private static void CountRefill(Level level, Refill refill)
+        {
+            refill.Counted = true; level.IncludedRefills.Enqueue(refill);
+            level.Metrics.Replenished = checked(level.Metrics.Replenished + refill.Net);
+            if (refill.Net > 0) level.Metrics.Refills++;
+        }
+        private void IncludeWaitingRefills(Level level, long now)
+        {
+            foreach (Refill refill in level.AllRefills)
+                if (!refill.Counted && InRefillRange(level, refill, now)) CountRefill(level, refill);
+        }
+        private static void UncountRefill(Level level, Refill refill)
+        {
+            if (!refill.Counted) return;
+            level.Metrics.Replenished = checked(level.Metrics.Replenished - refill.Net);
+            if (refill.Net > 0) level.Metrics.Refills--;
+            refill.Counted = false;
+        }
+        private static void PushExtreme(LinkedList<Trade> entries, Trade trade, bool maximum)
+        {
+            while (entries.Last != null && (maximum ? entries.Last.Value.Price <= trade.Price : entries.Last.Value.Price >= trade.Price))
+                entries.RemoveLast();
+            entries.AddLast(trade);
+        }
+        private static void RefreshDirection(InitiativeMetrics m)
+        {
+            if (m.Trades.First == null)
+            { m.First = m.Last = long.MinValue; m.Extremes.Clear(); m.BreachAnchorId = 0; return; }
+            Trade first = m.Trades.First.Value, last = m.Trades.Last.Value;
+            m.First = first.Receipt; m.Last = last.Receipt; m.StartPrice = first.Price;
+            m.StartBid = first.Bid; m.StartAsk = first.Ask; m.EndPrice = last.Price;
+            while (m.Extremes.First != null && m.Extremes.First.Value.Id < first.Id) m.Extremes.RemoveFirst();
+        }
+        private void ObserveInitiativePrint(InitiativeMetrics m, bool buy, Trade trade)
+        {
+            if (m.Trades.First == null) return;
+            PushExtreme(m.Extremes, trade, buy);
+            // Choose the newest preceding price that proves a breach. An older global
+            // extreme must not hide a later local breach when that old extreme expires.
+            LinkedListNode<Trade> peak = m.Extremes.Last;
+            while (peak != null && (buy ? peak.Value.Price - trade.Price : trade.Price - peak.Value.Price) <= settings.MaximumAdverseTicks)
+                peak = peak.Previous;
+            if (peak != null) m.BreachAnchorId = Math.Max(m.BreachAnchorId, peak.Value.Id);
+        }
+        private void InvalidateInitiativePrint(Signal active, bool buy, Trade trade)
+        {
+            if (active == null || active.State != Stage.Qualified) return;
+            if (buy ? trade.Price > active.FavorablePrice : trade.Price < active.FavorablePrice) active.FavorablePrice = trade.Price;
+            if ((buy ? active.FavorablePrice - trade.Price : trade.Price - active.FavorablePrice) <= settings.MaximumAdverseTicks) return;
+            End(active, Stage.Invalidated, trade.Receipt, "Price retraced the initiative path");
+            if (buy) { buyInitiative = null; buyCooldown = trade.Receipt + Ms(settings.CooldownMs); }
+            else { sellInitiative = null; sellCooldown = trade.Receipt + Ms(settings.CooldownMs); }
+        }
+        private void RefreshLevels(long now)
+        {
+            foreach (KeyValuePair<Key, Level> pair in levels)
+            {
+                Level level = pair.Value; Metrics m = level.Metrics;
+                while (level.Passive.Count > 0 && level.Passive.Peek().Receipt <= now - Window)
+                {
+                    Trade old = level.Passive.Dequeue(); m.Executed = checked(m.Executed - old.Volume);
+                    if (old.Eligible) { m.Eligible = checked(m.Eligible - old.Volume); m.Matched = checked(m.Matched - old.Matched); }
+                    old.Owner = null;
+                }
+                while (level.Opposite.Count > 0 && level.Opposite.Peek().Receipt <= now - Window)
+                    m.Opposite = checked(m.Opposite - level.Opposite.Dequeue().Volume);
+                m.First = level.Passive.Count == 0 ? long.MinValue : level.Passive.Peek().Receipt;
+                if (level.Passive.Count == 0)
+                { m.Last = long.MinValue; level.Extremes.Clear(); }
+                else
+                    while (level.Extremes.First != null && level.Extremes.First.Value.Id < level.Passive.Peek().Id) level.Extremes.RemoveFirst();
+                m.Adverse = level.Extremes.First == null ? 0 : Math.Max(0,
+                    pair.Key.Side == Side.Bid ? pair.Key.Price - level.Extremes.First.Value.Price : level.Extremes.First.Value.Price - pair.Key.Price);
+                while (level.IncludedRefills.Count > 0 && !InRefillRange(level, level.IncludedRefills.Peek(), now))
+                    UncountRefill(level, level.IncludedRefills.Dequeue());
+                while (level.AllRefills.Count > 0 && level.AllRefills.Peek().Receipt <= now - Window)
+                    level.AllRefills.Dequeue();
+            }
+        }
+        private bool Room(long now)
+        {
+            if (tape.Count + refills.Count < settings.Capacity) return true;
+            Fail(now, "Evidence capacity exceeded; reset required"); return false;
+        }
+        private void Fail(long now, string reason)
+        {
+            Faulted = true; ready = false; SuppressAll(now, reason); Status = "Unavailable: " + reason;
+        }
+        private void SuppressAll(long now, string reason)
+        {
+            foreach (Level level in levels.Values)
+            {
+                if (level.Active == null) continue;
+                bool qualified = level.Active.State == Stage.Qualified;
+                End(level.Active, Stage.Suppressed, now, reason); level.Active = null;
+                if (qualified) level.CooldownUntil = now + Ms(settings.CooldownMs);
+            }
+            if (buyInitiative != null)
+            {
+                bool qualified = buyInitiative.State == Stage.Qualified;
+                End(buyInitiative, Stage.Suppressed, now, reason);
+                if (qualified) buyCooldown = now + Ms(settings.CooldownMs);
+            }
+            if (sellInitiative != null)
+            {
+                bool qualified = sellInitiative.State == Stage.Qualified;
+                End(sellInitiative, Stage.Suppressed, now, reason);
+                if (qualified) sellCooldown = now + Ms(settings.CooldownMs);
+            }
+            buyInitiative = sellInitiative = null;
+        }
+        // Rolling sums and monotonic extrema make event-time checks independent of retained tape size.
+        // Time-driven failures are visited before later expiry/maturity can restore support.
+        internal void BeginUpdate(long now)
+        { Advance(now); updateDepth++; }
+        internal void EndUpdate(long now)
+        {
+            if (updateDepth <= 0) throw new InvalidOperationException("No flow update to complete");
+            updateDepth--;
+            if (updateDepth == 0) ObserveContinuity(now);
+        }
+        internal void Advance(long now)
+        {
+            if (lastNow == long.MinValue) { lastNow = now; started = now; }
+            if (now < lastNow) { Reset(now, "Receipt clock rewind"); return; }
+            long cursor = lastNow;
+            while (true)
+            {
+                long boundary = long.MaxValue;
+                if (tape.Count > 0) boundary = Math.Min(boundary, tape.Peek().Receipt + Window);
+                if (windowRefills.Count > 0) boundary = Math.Min(boundary, windowRefills.Peek().Receipt + Window);
+                if (maturity.Count > 0) boundary = Math.Min(boundary, maturity.Peek().Receipt + Ms(settings.ReconciliationMs) + 1);
+                foreach (Level level in levels.Values)
+                    if (level.Active != null && level.Active.State == Stage.Candidate && level.Metrics.Last != long.MinValue)
+                    { long quiet = level.Metrics.Last + Ms(settings.QuietTimeoutMs) + 1; if (quiet > cursor) boundary = Math.Min(boundary, quiet); }
+                if (buyInitiative != null && buyInitiative.State == Stage.Candidate && buys.Last != long.MinValue)
+                { long quiet = buys.Last + Ms(settings.QuietTimeoutMs) + 1; if (quiet > cursor) boundary = Math.Min(boundary, quiet); }
+                if (sellInitiative != null && sellInitiative.State == Stage.Candidate && sells.Last != long.MinValue)
+                { long quiet = sells.Last + Ms(settings.QuietTimeoutMs) + 1; if (quiet > cursor) boundary = Math.Min(boundary, quiet); }
+                if (boundary > now) break;
+                lastNow = boundary; ExpireAndMature(boundary); ObserveContinuity(boundary); cursor = boundary;
+            }
+            lastNow = now; ExpireAndMature(now); ObserveContinuity(now);
+        }
+        private void ExpireAndMature(long now)
+        {
+            while (tape.Count > 0 && tape.Peek().Receipt <= now - Window)
+            {
+                Trade old = tape.Dequeue(); tradeIds.Remove(old.Id);
+                if (old.Direction == 0) unknown = checked(unknown - old.Volume);
+                else
+                {
+                    classified = checked(classified - old.Volume);
+                    InitiativeMetrics m = old.Direction == 1 ? buys : sells;
+                    m.Executed = checked(m.Executed - old.Volume); m.Trades.Remove(old.DirectionNode); RefreshDirection(m);
+                }
+            }
+            RefreshLevels(now);
+            while (maturity.Count > 0 && now - maturity.Peek().Receipt > Ms(settings.ReconciliationMs))
+            { Trade trade = maturity.Dequeue(); if (tradeIds.ContainsKey(trade.Id)) MakeEligible(trade); }
+            while (windowRefills.Count > 0 && windowRefills.Peek().Receipt <= now - Window) windowRefills.Dequeue();
+            while (refills.Count > 0 && refills.Peek().Receipt <= now - Window - Ms(settings.ReconciliationMs))
+                refillIds.Remove(refills.Dequeue().Id);
+        }
+        private bool ClassifiedEnough()
+        { return unknown * 100.0 <= ((double)unknown + classified) * settings.MaximumUnknownPercent; }
+        private bool AbsorptionEnough(Level level, long now)
+        {
+            Metrics m = level.Metrics;
+            return QuoteReady && level.Available && now >= attributionBlockedUntil && m.Executed >= settings.MinimumVolume
+                && Share(m.Executed, m.Opposite) >= settings.MinimumDominancePercent
+                && m.Adverse <= settings.MaximumAdverseTicks && m.Last != long.MinValue && now - m.Last <= Ms(settings.QuietTimeoutMs);
+        }
+        private bool AbsorptionSupported(Level level, long now, bool quality)
+        {
+            Metrics m = level.Metrics;
+            return AbsorptionEnough(level, now) && IsWarm && quality
+                && m.Eligible >= settings.MinimumVolume && m.Matched * 100.0 >= m.Eligible * settings.MinimumMatchPercent
+                && m.Replenished >= settings.MinimumReplenishment && m.Refills >= settings.MinimumRefills
+                && (now - m.First) / TimeSpan.TicksPerMillisecond >= settings.MinimumHoldMs;
+        }
+        private bool InitiativeEnough(bool buy, InitiativeMetrics m, long opposite, long now)
+        {
+            long advance = buy ? m.EndPrice - m.StartPrice : m.StartPrice - m.EndPrice;
+            bool quotes = haveQuote && (buy
+                ? currentBid - m.StartBid >= settings.MinimumAdvanceTicks && currentAsk - m.StartAsk >= settings.MinimumAdvanceTicks
+                : m.StartBid - currentBid >= settings.MinimumAdvanceTicks && m.StartAsk - currentAsk >= settings.MinimumAdvanceTicks);
+            bool price = lastPrint != long.MinValue && (buy ? lastPrice >= m.EndPrice - settings.MaximumAdverseTicks
+                : lastPrice <= m.EndPrice + settings.MaximumAdverseTicks);
+            return QuoteReady && settings.Initiative && m.Executed >= settings.MinimumVolume && Share(m.Executed, opposite) >= settings.MinimumDominancePercent
+                && advance >= settings.MinimumAdvanceTicks && quotes && price && !m.PathBreached
+                && m.Last != long.MinValue && now - m.Last <= Ms(settings.QuietTimeoutMs);
+        }
+        private bool InitiativeSupported(bool buy, InitiativeMetrics m, long opposite, long now, bool quality)
+        { return InitiativeEnough(buy, m, opposite, now) && IsWarm && quality
+            && (now - m.First) / TimeSpan.TicksPerMillisecond >= settings.MinimumHoldMs; }
+        private void ObserveContinuity(long now)
+        {
+            if (updateDepth != 0) return; // Reconciliation observers are internal steps of one callback.
+            bool quality = ClassifiedEnough();
+            foreach (Level level in levels.Values)
+            {
+                Signal active = level.Active;
+                if (active == null) continue;
+                if (active.State == Stage.Candidate && !AbsorptionSupported(level, now, quality))
+                    active.QualifyingSince = long.MinValue;
+                else if (active.State == Stage.Qualified && (!quality || (level.Metrics.Eligible >= settings.MinimumVolume
+                    && level.Metrics.Matched * 100.0 < level.Metrics.Eligible * settings.MinimumMatchPercent)))
+                {
+                    End(active, Stage.Suppressed, now, "Execution evidence quality deteriorated");
+                    level.Active = null; level.CooldownUntil = now + Ms(settings.CooldownMs);
+                }
+            }
+            if (!quality)
+            {
+                if (buyInitiative != null && buyInitiative.State == Stage.Qualified)
+                { End(buyInitiative, Stage.Suppressed, now, "Trade classification deteriorated"); buyInitiative = null; buyCooldown = now + Ms(settings.CooldownMs); }
+                if (sellInitiative != null && sellInitiative.State == Stage.Qualified)
+                { End(sellInitiative, Stage.Suppressed, now, "Trade classification deteriorated"); sellInitiative = null; sellCooldown = now + Ms(settings.CooldownMs); }
+            }
+            if (buyInitiative != null && buyInitiative.State == Stage.Candidate && !InitiativeSupported(true, buys, sells.Executed, now, quality))
+                buyInitiative.QualifyingSince = long.MinValue;
+            if (sellInitiative != null && sellInitiative.State == Stage.Candidate && !InitiativeSupported(false, sells, buys.Executed, now, quality))
+                sellInitiative.QualifyingSince = long.MinValue;
+        }
+        internal void Evaluate(long now, bool force = false)
+        {
+            Advance(now);
+            if (Faulted || !ready) return;
+            // Rule state is checked on every completed callback. Only status text is throttled.
+            bool classifiedEnough = ClassifiedEnough();
+            if (QuoteReady && settings.Absorption)
+                foreach (KeyValuePair<Key, Level> pair in levels) Absorption(pair.Key, pair.Value, now, classifiedEnough);
+            if (QuoteReady)
+            { Initiative(true, buys, sells.Executed, now, classifiedEnough);
+                Initiative(false, sells, buys.Executed, now, classifiedEnough); }
+            prune.Clear();
+            foreach (KeyValuePair<Key, Level> pair in levels)
+                if (!pair.Value.Available && pair.Value.Active == null && now - pair.Value.LastSeen > Window) prune.Add(pair.Key);
+            foreach (Key key in prune) levels.Remove(key);
+            if (!force && lastEvaluation != long.MinValue && now - lastEvaluation < Ms(100)) return;
+            lastEvaluation = now;
+            Status = !QuoteReady ? "Experimental; quote observation paused: " + QuotePauseReason
+                : !IsWarm ? "Experimental; warming up" : "Experimental; observing";
+            if (!classifiedEnough) Status += "; trade classification incomplete";
+            if (now < attributionBlockedUntil) Status += "; absorption paused: source timing";
+            Status += "; buy/sell/unknown contracts " + buys.Executed + "/" + sells.Executed + "/" + unknown;
+            Status += "; qualified " + QualifiedCount + "; retained trades " + tape.Count
+                + "; dropped event records " + DroppedTransitionCount
+                + LifecycleDiagnostics();
+        }
+        private string LifecycleDiagnostics()
+        {
+            return "; flow resets " + ResetCount + "; last flow reset: " + LastResetReason
+                + "; quote pauses " + QuotePauseCount + "; quote ready " + QuoteReady
+                + "; warm elapsed ms " + WarmElapsedMs + "; last quote pause: " + QuotePauseReason
+                + "; last hard context failure: " + LastContextFailure;
+        }
+        private static int Share(long volume, long other)
+        { return (double)volume + other == 0 ? 0 : (int)(100.0 * volume / ((double)volume + other)); }
+        private void Absorption(Key key, Level level, long now, bool classifiedEnough)
+        {
+            Signal active = level.Active; Metrics m = level.Metrics; bool created = false;
+            if (active != null && active.State == Stage.Qualified)
+            {
+                if (!classifiedEnough || (m.Eligible >= settings.MinimumVolume
+                    && m.Matched * 100.0 < m.Eligible * (double)settings.MinimumMatchPercent))
+                    End(active, Stage.Suppressed, now, "Execution evidence quality deteriorated");
+                else if (!level.Available) End(active, Stage.Suppressed, now, "Coverage lost");
+                else if (haveQuote && lastPrint != long.MinValue
+                    && (key.Side == Side.Bid ? key.Price - lastPrice : lastPrice - key.Price) > settings.MaximumAdverseTicks)
+                    End(active, Stage.Invalidated, now, "Price crossed the held level");
+                else if (now - active.QualifiedAt >= Ms(settings.DisplayMs)) End(active, Stage.Expired, now, "Display lifetime elapsed");
+                if (active.State != Stage.Qualified) { level.Active = null; level.CooldownUntil = now + Ms(settings.CooldownMs); }
+                return;
+            }
+            bool enough = AbsorptionEnough(level, now);
+            if (!enough)
+            {
+                if (active != null)
+                { End(active, m.Adverse > settings.MaximumAdverseTicks ? Stage.Invalidated : Stage.Expired, now,
+                    m.Adverse > settings.MaximumAdverseTicks ? "Price crossed the candidate level" : "Execution evidence no longer qualifies"); level.Active = null; }
+                return;
+            }
+            if (active == null)
+            {
+                if (now < level.CooldownUntil) return;
+                active = Start(key.Side == Side.Bid ? Kind.BuyerAbsorption : Kind.SellerAbsorption, key.Price, now);
+                level.Active = active; created = true;
+            }
+            active.Executed = m.Executed; active.Eligible = m.Eligible; active.Matched = m.Matched; active.Replenished = m.Replenished;
+            active.Refills = m.Refills; active.Dominance = Share(m.Executed, m.Opposite);
+            active.HeldMs = (now - m.First) / TimeSpan.TicksPerMillisecond;
+            bool supported = AbsorptionSupported(level, now, classifiedEnough);
+            active.Reason = supported ? "Executed volume, replenishment and price hold agree"
+                : "Awaiting warm-up, matched executions, replenishment or hold duration";
+            if (created) Emit(active);
+            Confirm(active, supported, now);
+        }
+        private void Initiative(bool buy, InitiativeMetrics m, long opposite, long now, bool classifiedEnough)
+        {
+            Signal active = buy ? buyInitiative : sellInitiative; bool created = false;
+            if (active != null && active.State == Stage.Qualified)
+            {
+                if (!classifiedEnough) End(active, Stage.Suppressed, now, "Trade classification deteriorated");
+                else if (lastPrint != long.MinValue && (buy ? active.Price - lastPrice : lastPrice - active.Price) > settings.MaximumAdverseTicks)
+                    End(active, Stage.Invalidated, now, "Price retraced the initiative endpoint");
+                else if (now - active.QualifiedAt >= Ms(settings.DisplayMs)) End(active, Stage.Expired, now, "Display lifetime elapsed");
+                if (active.State != Stage.Qualified)
+                { if (buy) { buyInitiative = null; buyCooldown = now + Ms(settings.CooldownMs); }
+                    else { sellInitiative = null; sellCooldown = now + Ms(settings.CooldownMs); } }
+                return;
+            }
+            long advance = buy ? m.EndPrice - m.StartPrice : m.StartPrice - m.EndPrice;
+            bool enough = InitiativeEnough(buy, m, opposite, now);
+            if (!enough)
+            {
+                if (active != null) End(active, m.PathBreached ? Stage.Invalidated : Stage.Expired, now,
+                    m.PathBreached ? "Price retraced the initiative path" : "Initiative evidence no longer qualifies");
+                if (buy) buyInitiative = null; else sellInitiative = null; return;
+            }
+            if (active == null)
+            {
+                if (now < (buy ? buyCooldown : sellCooldown)) return;
+                active = Start(buy ? Kind.BuyInitiative : Kind.SellInitiative, m.EndPrice, now);
+                if (buy) buyInitiative = active; else sellInitiative = active; created = true;
+            }
+            active.Price = m.EndPrice; active.Executed = m.Executed; active.AdvanceTicks = advance;
+            active.Dominance = Share(m.Executed, opposite); active.HeldMs = (now - m.First) / TimeSpan.TicksPerMillisecond;
+            bool supported = InitiativeSupported(buy, m, opposite, now, classifiedEnough);
+            active.Reason = supported ? "Dominant executions, price advance and quote advance agree" : "Awaiting warm-up, classification or duration";
+            if (created) Emit(active);
+            Confirm(active, supported, now);
+        }
+        private Signal Start(Kind kind, long price, long now)
+        {
+            Signal signal = new Signal { Id = ++nextSignal, Pattern = kind, Price = price, State = Stage.Candidate,
+                Detected = now, Updated = now, Reason = "Initial execution evidence" };
+            return signal;
+        }
+        private void Confirm(Signal signal, bool supported, long now)
+        {
+            if (!supported) { signal.QualifyingSince = long.MinValue; return; }
+            if (signal.QualifyingSince == long.MinValue) signal.QualifyingSince = now;
+            if (now - signal.QualifyingSince < Ms(settings.ConfirmationMs)) return;
+            signal.State = Stage.Qualified; signal.FavorablePrice = signal.Price;
+            if (signal.Pattern == Kind.BuyInitiative && buys.Extremes.First != null)
+                signal.FavorablePrice = Math.Max(signal.Price, buys.Extremes.First.Value.Price);
+            else if (signal.Pattern == Kind.SellInitiative && sells.Extremes.First != null)
+                signal.FavorablePrice = Math.Min(signal.Price, sells.Extremes.First.Value.Price);
+            signal.QualifiedAt = now; signal.Updated = now; QualifiedCount++; Emit(signal);
+        }
+        private void End(Signal signal, Stage state, long now, string reason)
+        {
+            if (signal.State != Stage.Candidate && signal.State != Stage.Qualified) return;
+            signal.State = state; signal.Updated = now; signal.Reason = reason; Emit(signal);
+        }
+        private void Emit(Signal signal)
+        {
+            // Undrained diagnostic output must not grow without bound. The adapter
+            // drains each data callback, and caps output separately when disabled.
+            if (transitions.Count >= 256) { transitions.Dequeue(); DroppedTransitionCount++; }
+            transitions.Enqueue(signal.Copy());
+        }
+        internal Signal TakeTransition() { return transitions.Count == 0 ? null : transitions.Dequeue(); }
+        internal Signal At(Side displaySide, long price)
+        {
+            Key key = new Key(displaySide, price); Level level; Signal result = null;
+            if (levels.TryGetValue(key, out level) && level.Active != null) result = level.Active;
+            Signal initiative = displaySide == Side.Ask ? buyInitiative : sellInitiative;
+            if (initiative != null && initiative.Price == price && (result == null
+                || (initiative.State == Stage.Qualified && result.State != Stage.Qualified) || initiative.Updated > result.Updated)) result = initiative;
+            return result != null && (result.State == Stage.Candidate || result.State == Stage.Qualified) ? result.Copy() : null;
+        }
+    }
+    #endregion
+}

@@ -1,0 +1,40 @@
+PASS Default mode and existing property defaults preserved
+PASS Legacy mode matches 1000 depth/trade events and rendered values
+PASS Rolling trade-first execution adjustment through real adapter paths
+PASS Rolling depth-first execution adjustment through adapter
+PASS Rolling refresh expires quiet-market values with replay clock
+PASS Rolling signs, side colors and centered alignment retained
+PASS Inside spread and locked quotes remain unclassified
+PASS Feed reset clears rolling and legacy state
+PASS Wrong instrument callbacks are rejected
+PASS Instrument change reseeds and clears old histories
+PASS Disconnect/reconnect reseeds
+PASS Connection event invalidates even before scheduler polling
+PASS Mode/window changes cannot reuse mixed histories
+PASS Session transition cannot compare old session quantities
+PASS Already populated DOM boots from an arbitrary updated position
+PASS A snapshot not yet reflecting the triggering update waits for confirmation
+PASS Replay rewind clears current book
+PASS V3 XML settings serialize and reload with rolling configuration
+PASS Quote reset policy preserves legacy condition and can leave rolling intact
+PASS Rolling expiry cannot create new spoof-like alerts
+PASS Reset events without instrument identity still clear state
+PASS Termination disposes per-level timers and blocks refresh callbacks
+PASS Pre-reset queued callbacks cannot mutate the new generation
+DIAGNOSTIC: known resting levels=5; displayed rolling rows=5
+PASS Known quiet snapshot levels remain visible after rolling expiry
+PASS Snapshot displays both sides even when legacy maps only know one row
+PASS Legacy quote-map clearing cannot hide rolling levels
+PASS Session transition marks untouched rows unavailable instead of inventing zeros
+PASS Settings-only instance does not pretend to have a live calendar failure
+PASS Live diagnostic output is opt-in and rate limited
+PASS Delayed calendar arrival preserves a current snapshot across quiet levels
+PASS Actual live calendar failure produces unavailable markers and diagnostic
+SOURCE-LAG REPRO Estimated; matched 0; unmatched 0; unclassified 0; continuity breaks 0; invalid depth 0; source regressions 0; unstamped depth 0; known bid/ask 0/1; resets 4; last reset: Session calendar ready
+PASS Ordered depth with 200 ms provider timestamp lag retains five seconds
+PASS Provider lag survives an explicit reset without repeated reinitialization
+PASS Lagged trade timestamps reconcile in both callback arrival orders
+PASS Timestamp regressions do not masquerade as structural book loss
+PASS True invalid positions still reject the book and explain the failure
+PASS Provider book deeper than display coverage cannot cause false gaps
+RESULT 37 API-shape integration scenarios passed; 0 failed. Not actual NinjaTrader compilation.

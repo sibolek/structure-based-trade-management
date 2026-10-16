@@ -1,0 +1,44 @@
+{
+  "previous_source_preserved": true,
+  "previous_sha256": "2294852e8e21311e9baeef67b62f988f61266b1b2acda3d5d6251874e7dec434",
+  "new_sha256": "d93321a3bc75d37c0f2052ed92fec77b43431c7ed772747825d8c3a566bf1920",
+  "unchanged_calculation_cores": {
+    "v4 Rolling calculation core": {
+      "unchanged": true,
+      "normalized_sha256": "197002ba39be0f6754b8b280dab0a44f75335c4a5703436e30deba1a689a86b4"
+    },
+    "v4 Flow evidence core": {
+      "unchanged": true,
+      "normalized_sha256": "abf4a419bff7753b3722b160935a3c5c4d70f2a323bc673bd79cb4019812408a"
+    }
+  },
+  "modified_existing_adapter_methods": [
+    "OnRender",
+    "OnStateChange",
+    "EnsureFlowContext",
+    "ResetFlowEvidence",
+    "StopFlowEvidence",
+    "SynchronizeFlowCoverage",
+    "FinishFlowEvent",
+    "DrainFlowTransitions",
+    "PrintFlowStatusSample",
+    "DrawFlowEvidence"
+  ],
+  "unchanged_existing_adapter_methods": 44,
+  "new_adapter_methods": [
+    "BeginFlowRender",
+    "ClearLastQualifiedFlowSignal",
+    "DrawRememberedOrLiveFlow",
+    "FlowNumberWidth",
+    "FlowOutcomeCode",
+    "FlowPatternLabel",
+    "FlowSignalSide",
+    "FormatLastQualifiedFlowSignal",
+    "LastQualifiedFlowMarkerVisible",
+    "RememberQualifiedFlowTransition"
+  ],
+  "history_options_excluded_from_detector_configuration_key": true,
+  "signed_numeric_renderers_unchanged": true,
+  "legacy_spoof_detector_unchanged": true,
+  "crlf": true
+}

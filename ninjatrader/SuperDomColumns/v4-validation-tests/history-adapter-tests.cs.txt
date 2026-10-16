@@ -1,0 +1,196 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.IO;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Data;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.SuperDomColumns;
+using NinjaTrader.Gui.SuperDom;
+using System.Windows.Media;
+using F=NinjaTrader.NinjaScript.SuperDomColumns.ExecutionOSFlowEvidenceV4;
+public class FlowHarness:ExecutionOSPullingStacking_v4_Experimental
+{
+ public void SetState(State s){State=s;OnStateChange();}
+ public void Depth(MarketDepthEventArgs e){OnMarketDepth(e);}
+ public void Data(MarketDataEventArgs e){OnMarketData(e);}
+ public DrawingContext Render(double width=240){DrawingContext d=new DrawingContext();OnRender(d,width);return d;}
+}
+internal static class Program
+{
+ static int passed;static DateTime origin=new DateTime(2026,10,13,10,0,0);
+ static Type type=typeof(ExecutionOSPullingStacking_v4_Experimental);
+ static void Yes(bool value,string why){if(!value)throw new Exception(why);}
+ static void Eq(object a,object b,string why){if(!Equals(a,b))throw new Exception(why+": "+a+" != "+b);}
+ static void Test(string name,Action test){test();passed++;Console.WriteLine("PASS "+name);}
+ static object Call(FlowHarness v,string name,params object[] args){return type.GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance).Invoke(v,args);}
+ static object Field(FlowHarness v,string name){return type.GetField(name,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(v);}
+ static F Engine(FlowHarness v){return (F)Field(v,"flow");}
+ static void Time(double seconds){Connection.PlaybackConnection.Now=origin.AddSeconds(seconds);}
+ static void Refresh(FlowHarness v,double seconds){Time(seconds);Call(v,"OnRollingRefresh",new object[]{null});}
+ static void Book(FlowHarness v)
+ {
+  for(int i=0;i<4;i++){
+   v.SuperDom.MarketDepth.Bids.Add(new MarketDepthRow{Price=100-i*.25,Volume=200});
+   v.SuperDom.MarketDepth.Asks.Add(new MarketDepthRow{Price=100.25+i*.25,Volume=200});
+   v.SuperDom.Rows.Add(new PriceRow{Price=100-i*.25,BidVolume=200});v.SuperDom.Rows.Add(new PriceRow{Price=100.25+i*.25,AskVolume=200});
+  }
+ }
+ static FlowHarness New(bool rolling=true,bool log=true)
+ {
+  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);
+  v.CalculationMode=rolling?ExecutionOSPullingStackingCalculationModeV4.RollingWindow:ExecutionOSPullingStackingCalculationModeV4.LegacyBaseline;
+  v.ApplyLegacyResetsToRolling=false;v.ResetTolerance=60000;v.LogFlowEvents=log;Book(v);v.SetState(State.Active);
+  // Deterministic harness: exercise the timer callback explicitly instead of racing it.
+  Timer timer=(Timer)Field(v,"rollingRefreshTimer");timer.Dispose();type.GetField("rollingRefreshTimer",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,null);
+  Refresh(v,0);Update(v,false,0,200,.01);Update(v,true,0,200,.02);Refresh(v,5.02);return v;
+ }
+ static void Update(FlowHarness v,bool ask,int pos,long qty,double seconds,double lag=0)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book[pos].Volume=qty;
+  PriceRow row=v.SuperDom.Rows.First(delegate(PriceRow r){return r.Price==price;});if(ask)row.AskVolume=qty;else row.BidVolume=qty;
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Update,Position=pos,Price=price,Volume=qty,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Remove(FlowHarness v,bool ask,int pos,double seconds)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book.RemoveAt(pos);
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Remove,Position=pos,Price=price,Volume=0,Time=origin.AddSeconds(seconds)});
+ }
+ static void Trade(FlowHarness v,bool buy,double price,long qty,double seconds,double bid=100,double ask=100.25,double lag=0)
+ {
+  Time(seconds);v.Data(new MarketDataEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Last,Price=price,Volume=qty,Bid=bid,Ask=ask,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Abs(FlowHarness v,bool ask,bool depthFirst=false,double lag=0)
+ {
+  double price=ask?100.25:100;
+  for(int i=0;i<2;i++){
+   double t=5.1+i*.4;
+   if(depthFirst){Update(v,ask,0,140,t+.01,lag);Trade(v,ask,price,60,t+.04,100,100.25,lag+.04);}
+   else{Trade(v,ask,price,60,t,100,100.25,lag);Update(v,ask,0,140,t+.01,lag);}
+   Update(v,ask,0,200,t+.06,lag);
+  }
+  Refresh(v,5.9);Refresh(v,6.5);
+ }
+ static F.Signal At(FlowHarness v,bool ask,double price){return Engine(v).At(ask?F.Side.Ask:F.Side.Bid,(long)Math.Round(price/.25));}
+ static void End(FlowHarness v){v.SetState(State.Terminated);}
+ static void Add(FlowHarness v,bool ask,double price,double seconds)
+ {
+ Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;book.Insert(0,new MarketDepthRow{Price=price,Volume=200});
+ if(!v.SuperDom.Rows.Any(delegate(PriceRow r){return r.Price==price;}))v.SuperDom.Rows.Add(new PriceRow{Price=price});
+ v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Add,Position=0,Price=price,Volume=200,Time=origin.AddSeconds(seconds)});
+ }
+
+ static F.Signal Remembered(FlowHarness v){return (F.Signal)Field(v,"lastQualifiedFlowSignal");}
+ static F.Stage Outcome(FlowHarness v){return (F.Stage)Field(v,"lastQualifiedFlowOutcome");}
+ static F.Signal Sample(long id=100,F.Kind kind=F.Kind.SellInitiative,long price=400){return new F.Signal{Id=id,Pattern=kind,Price=price,State=F.Stage.Qualified,Detected=origin.AddSeconds(6).Ticks,Updated=origin.AddSeconds(6.5).Ticks,QualifiedAt=origin.AddSeconds(6.5).Ticks,Executed=141,Dominance=88,Reason="qualified fixture"};}
+ static void Save(FlowHarness v,F.Signal s){Time(6.5);Call(v,"RememberQualifiedFlowTransition",s);}
+ static void SetField(FlowHarness v,string field,object value){type.GetField(field,BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,value);}
+ static List<DrawnText> Hist(DrawingContext d){return d.Text.Where(delegate(DrawnText x){return x.Text.Brush.Key=="gray";}).ToList();}
+ static void Initiative(FlowHarness v,bool buy){
+  if(buy){Trade(v,true,100.25,50,5.1);Remove(v,true,0,5.11);Remove(v,false,3,5.12);Add(v,false,100.25,5.13);Trade(v,true,100.5,50,5.5,100.25,100.5);Remove(v,true,0,5.51);Add(v,false,100.5,5.52);Trade(v,true,100.75,50,5.9,100.5,100.75);}
+  else{Trade(v,false,100,50,5.1);Remove(v,false,0,5.11);Remove(v,true,3,5.12);Add(v,true,100,5.13);Trade(v,false,99.75,50,5.5,99.75,100);Remove(v,false,0,5.51);Add(v,true,99.75,5.52);Trade(v,false,99.5,50,5.9,99.5,99.75);}
+  Refresh(v,6.4);
+ }
+ public static int Main(){try{
+ Test("Real qualification persists with event logging disabled",delegate{
+  FlowHarness v=New(true,false);Abs(v,false);Yes(Remembered(v)!=null,"qualified cached without logging");Eq(Remembered(v).Pattern,F.Kind.BuyerAbsorption,"real absorption kind");Eq(Remembered(v).Executed,120L,"qualification volume");Yes(v.Printed.Count==0,"no forced logs");End(v);
+ });
+ Test("Candidates alone never create a persisted signal",delegate{
+  FlowHarness v=New();F.Signal s=Sample();s.State=F.Stage.Candidate;Save(v,s);Yes(Remembered(v)==null,"no candidate archive");End(v);
+ });
+ Test("Only the next qualification replaces the last record",delegate{
+  FlowHarness v=New();Save(v,Sample());F.Signal cand=Sample(101);cand.State=F.Stage.Candidate;Save(v,cand);Eq(Remembered(v).Id,100L,"candidate does not replace");Save(v,Sample(102,F.Kind.BuyInitiative,401));Eq(Remembered(v).Id,102L,"new qualification replaces");End(v);
+ });
+ Test("Qualification snapshots cannot drift after later signal mutation",delegate{
+  FlowHarness v=New();F.Signal s=Sample();Save(v,s);s.Price=999;s.Executed=999;s.State=F.Stage.Invalidated;Eq(Remembered(v).Price,400L,"price frozen");Eq(Remembered(v).Executed,141L,"volume frozen");Eq(Outcome(v),F.Stage.Qualified,"outcome not aliased");End(v);
+ });
+ foreach(F.Stage stage in new[]{F.Stage.Suppressed,F.Stage.Invalidated,F.Stage.Expired}){F.Stage terminal=stage;Test("Terminal outcome retains original qualification: "+stage,delegate{
+  FlowHarness v=New();Save(v,Sample());F.Signal end=Sample();end.Price=999;end.Executed=999;end.State=terminal;end.Reason="actual terminal reason";Save(v,end);Eq(Remembered(v).Price,400L,"original price");Eq(Remembered(v).Executed,141L,"original metric");Eq(Outcome(v),terminal,"outcome recorded");Yes(v.LastQualifiedFlowSummary.Contains("actual terminal reason"),"reason persisted");End(v);
+ });}
+ Test("Unrelated IDs and patterns cannot terminate the stored event",delegate{
+  FlowHarness v=New();Save(v,Sample());F.Signal end=Sample(101);end.State=F.Stage.Suppressed;Save(v,end);Eq(Outcome(v),F.Stage.Qualified,"ID checked");end=Sample(100,F.Kind.BuyInitiative);end.State=F.Stage.Suppressed;Save(v,end);Eq(Outcome(v),F.Stage.Qualified,"pattern checked");End(v);
+ });
+ Test("Old-generation outcome cannot overwrite a new-generation record",delegate{
+  FlowHarness v=New();Save(v,Sample());long gen=(long)Field(v,"flowGeneration");SetField(v,"flowGeneration",gen+1);F.Signal end=Sample();end.State=F.Stage.Suppressed;Save(v,end);Eq(Outcome(v),F.Stage.Qualified,"generation checked");End(v);
+ });
+ Test("History survives quote pauses and rolling evidence expiry",delegate{
+  FlowHarness v=New();Abs(v,false);Add(v,false,100.25,6.6);Eq(Outcome(v),F.Stage.Suppressed,"temporary lock recorded");Yes(Remembered(v)!=null,"history kept during quote gate pause");Refresh(v,30);Yes(Remembered(v)!=null,"no time expiry by default");Yes(v.LastQualifiedFlowSummary.Contains("Suppressed"),"status retained");End(v);
+ });
+ Test("Already-ended history clears on feed disconnect",delegate{
+  FlowHarness v=New();Abs(v,false);Add(v,false,100.25,6.6);v.SuperDom.IsConnected=false;Refresh(v,6.7);Yes(Remembered(v)==null,"all stored history cleared");End(v);
+ });
+ Test("Column header reset clears the last signal",delegate{
+  FlowHarness v=New();Save(v,Sample());v.OnColumnLabelClicked(null,new System.Windows.Input.MouseButtonEventArgs());Yes(Remembered(v)==null,"header clear");End(v);
+ });
+ Test("Playback rewind clears the last signal",delegate{
+  FlowHarness v=New();Abs(v,false);Refresh(v,2);Yes(Remembered(v)==null,"clock context clear");End(v);
+ });
+ Test("Instrument switch clears stored event identity",delegate{
+  FlowHarness v=New();Save(v,Sample());v.SuperDom.Instrument=new Instrument{FullName="OTHER TEST"};Refresh(v,6.6);Yes(Remembered(v)==null,"no cross-symbol history");End(v);
+ });
+ Test("Session transition clears last qualification",delegate{
+  FlowHarness v=New();Save(v,Sample());Refresh(v,86401);Yes(Remembered(v)==null,"no prior-session history");End(v);
+ });
+ Test("Disabling flow clears history even when logging is off",delegate{
+  FlowHarness v=New(true,false);Abs(v,false);v.FlowDetectionEnabled=false;Refresh(v,6.6);Yes(Remembered(v)==null,"disabled clear");End(v);
+ });
+ Test("Threshold reconfiguration clears old qualified evidence",delegate{
+  FlowHarness v=New();Abs(v,false);v.FlowMinimumVolume=200;Refresh(v,6.6);Yes(Remembered(v)==null,"settings clear");End(v);
+ });
+ Test("History options do not rebuild or reset detection",delegate{
+  FlowHarness v=New();Abs(v,false);F core=Engine(v);long resets=core.ResetCount,qualified=core.QualifiedCount;v.PersistLastQualifiedFlowSignal=false;v.LastQualifiedFlowHoldSeconds=30;Refresh(v,6.6);Yes(object.ReferenceEquals(core,Engine(v)),"same engine");Eq(core.ResetCount,resets,"same reset count");Eq(core.QualifiedCount,qualified,"same qualified count");Yes(Remembered(v)!=null,"summary remains");Yes(!((bool)Call(v,"LastQualifiedFlowMarkerVisible")),"marker disabled");v.PersistLastQualifiedFlowSignal=true;Yes((bool)Call(v,"LastQualifiedFlowMarkerVisible"),"re-enabled without losing record");End(v);
+ });
+ Test("Optional timeout hides only marker and respects exact boundary",delegate{
+  FlowHarness v=New();Save(v,Sample());v.LastQualifiedFlowHoldSeconds=10;Time(16.5);Yes((bool)Call(v,"LastQualifiedFlowMarkerVisible"),"visible at boundary");Connection.PlaybackConnection.Now=origin.AddSeconds(16.5).AddTicks(1);Yes(!(bool)Call(v,"LastQualifiedFlowMarkerVisible"),"hidden beyond boundary");Yes(Remembered(v)!=null,"summary never discarded by timeout");End(v);
+ });
+ Test("Paused playback leaves recorded age unchanged",delegate{
+  FlowHarness v=New();Save(v,Sample());Time(8);string a=v.LastQualifiedFlowSummary;Thread.Sleep(25);Eq(v.LastQualifiedFlowSummary,a,"receipt clock age");Yes(a.Contains("age 1.5s"),"known age");End(v);
+ });
+ Test("Under-180 logical width draws measured compact history",delegate{
+  FlowHarness v=New();Save(v,Sample());var d=v.Render(170);Yes(Hist(d).Count==1,"history now fits without arbitrary guard");Yes(Hist(d)[0].Text.Text.StartsWith("L "),"explicit history prefix");Yes(v.FlowRenderingStatus.Contains("width 170.0 logical")&&v.FlowRenderingStatus.Contains("history 1"),"actual rendering metrics");End(v);
+ });
+ Test("Tiny width reports omission and preserves summary",delegate{
+  FlowHarness v=New();Save(v,Sample());var d=v.Render(16);Eq(Hist(d).Count,0,"no overlapping label");Yes(v.FlowRenderingStatus.Contains("no-space 1"),"specific diagnostic");Yes(v.LastQualifiedFlowSummary.Contains("SELL"),"summary intact");End(v);
+ });
+ Test("History label does not overlap centered P/S number",delegate{
+  FlowHarness v=New();Save(v,Sample());double width=240;var d=v.Render(width);var h=Hist(d).Single();double numericRight=width/4+3;Yes(h.Point.X>=numericRight+4,"spare right-side label space");Yes(h.Point.X+h.Text.Width<=width/2-3,"inside bid half");End(v);
+ });
+ Test("Wide column draws full historical label with outcome",delegate{
+  FlowHarness v=New();Save(v,Sample());F.Signal end=Sample();end.State=F.Stage.Suppressed;Save(v,end);var d=v.Render(500);Yes(Hist(d).Single().Text.Text=="LAST SELL↓ SUP","full descriptive marker");End(v);
+ });
+ Test("Historical marker stays at qualification price across side changes",delegate{
+  FlowHarness v=New();Save(v,Sample());F.Signal end=Sample();end.Price=401;end.State=F.Stage.Invalidated;Save(v,end);var row=v.SuperDom.Rows.First(delegate(PriceRow x){return x.Price==100;});row.BidVolume=0;row.AskVolume=200;var d=v.Render(240);Yes(Hist(d).Count==1,"historical bid-side marker remains despite now being ask price");Yes(Hist(d)[0].Point.X<120,"history stays in original side");End(v);
+ });
+ Test("Side-only display filters marker without erasing record",delegate{
+  FlowHarness v=New();Save(v,Sample());v.DisplayType=ExecutionOSPullingStacking_v4_Experimental.PullingStackingDisplayType.Ask;Eq(Hist(v.Render(240)).Count,0,"bid history excluded");Yes(Remembered(v)!=null,"summary retained");End(v);
+ });
+ Test("Off-ladder signal remains available in summary",delegate{
+  FlowHarness v=New();Save(v,Sample(100,F.Kind.SellInitiative,9999));Eq(Hist(v.Render(240)).Count,0,"no false row attachment");Yes(v.FlowRenderingStatus.Contains("outside visible rows"),"off-screen diagnostic");Yes(v.LastQualifiedFlowSummary.Contains("2499.75"),"original price retained");End(v);
+ });
+ Test("Existing status cadence includes durable summary and real render width",delegate{
+  FlowHarness v=New();Save(v,Sample());v.Render(170);SetField(v,"lastFlowStatusPrint",long.MinValue);Call(v,"PrintFlowStatusSample");string line=v.Printed.Last();Yes(line.Contains("last-qualified LAST SELL")&&line.Contains("flow-render width 170.0 logical"),"observable without fleeting marker");End(v);
+ });
+ Test("Workspace serialization stores options but excludes session history",delegate{
+  FlowHarness v=New();Save(v,Sample());v.PersistLastQualifiedFlowSignal=true;v.LastQualifiedFlowHoldSeconds=30;var ser=new XmlSerializer(typeof(FlowHarness));string xml;using(var w=new StringWriter()){ser.Serialize(w,v);xml=w.ToString();}Yes(xml.Contains("PersistLastQualifiedFlowSignal")&&xml.Contains("LastQualifiedFlowHoldSeconds"),"options saved");Yes(!xml.Contains("LastQualifiedFlowSummary")&&!xml.Contains("FlowRenderingStatus")&&!xml.Contains("qualified fixture"),"runtime records excluded");End(v);
+ });
+ Test("Termination clears memory and ignores late qualification callbacks",delegate{
+  FlowHarness v=New();Save(v,Sample());End(v);Yes(Remembered(v)==null,"cleared on close");Save(v,Sample(200));Yes(Remembered(v)==null,"late callback ignored");
+ });
+ foreach(bool ask in new[]{false,true}){bool a=ask;Test("Real absorption retains correct side and transitions gray ask="+ask,delegate{
+  FlowHarness v=New();Abs(v,a);Yes(Remembered(v)!=null,"real qualification");Eq(Remembered(v).Pattern,a?F.Kind.SellerAbsorption:F.Kind.BuyerAbsorption,"correct pattern");Refresh(v,10);var d=v.Render(240);Yes(Hist(d).Count==1,"real expiry produces history");Yes(v.LastQualifiedFlowSummary.Contains("Expired"),"correct terminal outcome");End(v);
+ });}
+ foreach(bool buy in new[]{false,true}){bool b=buy;Test("Real initiative retention and active/ended display buy="+buy,delegate{
+  FlowHarness v=New();Initiative(v,b);Yes(Remembered(v)!=null,"initiative qualifies");Eq(Remembered(v).Pattern,b?F.Kind.BuyInitiative:F.Kind.SellInitiative,"direction");var active=v.Render(240);Eq(Hist(active).Count,0,"still-active label is not gray history");Yes(active.Text.Any(delegate(DrawnText x){return x.Text.Text==(b?"BUY↑":"SELL↓")||x.Text.Text==(b?"BI":"SI");}),"active label present");Refresh(v,10);Yes(Hist(v.Render(240)).Count==1,"after expiry a persistent history label remains");End(v);
+ });}
+ Test("Off-screen record is accessible in column tooltip",delegate{
+  FlowHarness v=New();Save(v,Sample(100,F.Kind.SellInitiative,9999));v.Render(240);string tip=v.UiWrapper.FlowTooltip.ToString();Yes(tip.Contains("LAST SELL")&&tip.Contains("2499.75")&&tip.Contains("qualified NT-local"),"full qualification summary");End(v);
+ });
+ Test("Tooltip updates on outcome changes and clears without ticking-age churn",delegate{
+  FlowHarness v=New();Save(v,Sample());v.Render(240);int n=v.UiWrapper.TooltipWrites;Time(7);v.Render(240);Eq(v.UiWrapper.TooltipWrites,n,"no rewrite as age ticks");F.Signal end=Sample();end.State=F.Stage.Suppressed;Call(v,"RememberQualifiedFlowTransition",end);v.Render(240);Yes(v.UiWrapper.FlowTooltip.ToString().Contains("Suppressed"),"terminal update");v.OnColumnLabelClicked(null,null);v.Render(240);Yes(v.UiWrapper.FlowTooltip.ToString().Contains("None;"),"cleared tooltip");End(v);
+ });
+ Console.WriteLine("RESULT "+passed+" last-signal display integration scenarios passed; 0 failed");return 0;
+ }catch(Exception ex){Console.Error.WriteLine("FAIL "+ex);return 1;}}
+}

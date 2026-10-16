@@ -1,0 +1,30 @@
+PASS Experimental defaults are distinct and old spoof alerts start disabled
+PASS Adapter trade-first bid absorption uses exact execution credits
+PASS Adapter trade-first ask absorption is symmetric
+PASS Adapter depth-first ordering reconciles without double counting refills
+PASS Lagged provider times retain evidence on the receipt clock
+PASS Source regression pauses absorption instead of erasing initiative tape
+PASS Flow works independently of the selected legacy P/S display
+PASS Consuming an inside queue preserves initiative warm-up and tape
+PASS Buy initiative crosses actual price levels and inside quotes
+PASS Sell initiative follows executions through falling bid levels
+PASS Rendering draws qualified labels on the correct side
+PASS Candidate display can be hidden without disabling collection
+PASS Single-side displays do not draw the other side's flow markers
+PASS Narrow columns hide flow labels without changing numeric P/S
+PASS Manual header reset suppresses markers and clears detector tape
+PASS Disconnect prevents old detector evidence from qualifying
+PASS A broken depth sequence clears flow before rapid snapshot recovery
+PASS Malformed depth price clears flow without waiting for the refresh timer
+PASS Replay rewind clears future signals and returns to warm-up
+PASS Detector threshold changes cannot reuse old trade matches
+PASS Old pending executions cannot credit reused IDs after a detector rebuild
+PASS Disable and re-enable cannot recycle old pending execution identity
+PASS Invalid thresholds fail visibly without crashing the column
+PASS Disabling flow detaches observers and clears markers
+PASS Opt-in legacy per-level reset also suppresses that level's flow evidence
+PASS Logging records observation times and never backdates qualification
+PASS Periodic status logging exposes warm-up and collection quality
+PASS Settings serialize separately and status is runtime-only
+PASS Termination prevents timer refresh, logging and further matches
+RESULT 29 full-column flow scenarios passed; 0 failed

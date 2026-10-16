@@ -1,0 +1,6 @@
+{
+  "build": "2026-10-16.1 EXP",
+  "source_sha256": "d93321a3bc75d37c0f2052ed92fec77b43431c7ed772747825d8c3a566bf1920",
+  "current_manifest": "last-signal-validation-manifest.json",
+  "runtime_observations": "v4-checkpoint-notes-2026-10-16.md"
+}

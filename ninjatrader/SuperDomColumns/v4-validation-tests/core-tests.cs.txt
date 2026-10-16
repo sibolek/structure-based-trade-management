@@ -1,0 +1,285 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using R = ExecutionOSRollingLiquidityV4;
+internal static class Program
+{
+    private static int passed;
+    private static readonly List<string> results = new List<string>();
+    private static long T(double seconds) { return (long)(seconds * TimeSpan.TicksPerSecond); }
+    private static long Source(double seconds) { return new DateTime(2026, 10, 12).Ticks + T(seconds); }
+    private static R New(int seconds = 5, int grace = 250, int depth = 10, int cap = 200000)
+    { R r = new R(seconds, grace, depth, cap); r.Reset(0); return r; }
+    private static void D(R r, R.Side side, R.DepthAction action, int pos, long price, long qty, double source, double receipt)
+    { r.Depth(side, action, pos, price, qty, Source(source), T(receipt)); }
+    private static void Seed(R r) { D(r, R.Side.Ask, R.DepthAction.Add, 0, 400, 100, 0, 0); }
+    private static long V(R r, R.Side side = R.Side.Ask, long price = 400)
+    { long v; if (!r.TryValue(side, price, out v)) throw new Exception("Value unavailable"); return v; }
+    private static void Eq(long actual, long expected, string why)
+    { if (actual != expected) throw new Exception(why + ": expected " + expected + ", got " + actual); }
+    private static void Yes(bool actual, string why) { if (!actual) throw new Exception(why); }
+    private static void Test(string name, Action test)
+    { test(); passed++; results.Add("PASS " + name); Console.WriteLine("PASS " + name); }
+    public static int Main()
+    {
+        try
+        {
+            Test("Initial Add and bootstrap Update seed zero", delegate {
+                R r = New(); Seed(r); Eq(V(r), 0, "initial");
+                D(r, R.Side.Bid, R.DepthAction.Update, 0, 399, 200, .1, .1);
+                Eq(V(r, R.Side.Bid, 399), 0, "bootstrap");
+            });
+            Test("Net additions and cancellations", delegate {
+                R r = New(); Seed(r);
+                D(r, R.Side.Ask, R.DepthAction.Update, 0, 400, 140, 1, 1); Eq(V(r), 40, "addition");
+                D(r, R.Side.Ask, R.DepthAction.Update, 0, 400, 90, 2, 2); Eq(V(r), -10, "net");
+            });
+            Test("Pure execution trade-first", delegate {
+                R r = New(); Seed(r); r.Trade(R.Side.Ask,400,30,Source(1),T(1));
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.01,1.01);
+                Eq(V(r),0,"execution"); Eq(r.MatchedVolume,30,"credit"); Eq(r.PendingCount,0,"consumed");
+            });
+            Test("Pure execution depth-first using event timestamps", delegate {
+                R r = New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.01,1);
+                r.Trade(R.Side.Ask,400,30,Source(1),T(1.05)); Eq(V(r),0,"execution");
+            });
+            Test("Execution plus additions and unchanged-depth replenishment", delegate {
+                R r=New(); Seed(r); r.Trade(R.Side.Ask,400,30,Source(1),T(1));
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,120,1.01,1.01); Eq(V(r),50,"replenishment");
+                r.Trade(R.Side.Ask,400,20,Source(2),T(2));
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,120,2.01,2.01); Eq(V(r),70,"unchanged depth");
+            });
+            Test("Execution credit consumed once across subsequent depth updates", delegate {
+                R r=New(); Seed(r); r.Trade(R.Side.Ask,400,30,Source(1),T(1));
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.01,1.01);
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,60,1.02,1.02);
+                Eq(V(r),-10,"no duplicate"); Eq(r.MatchedVolume,30,"one credit");
+            });
+            Test("Split executions, coalesced depth", delegate {
+                R r=New(); Seed(r); r.Trade(R.Side.Ask,400,10,Source(1),T(1));
+                r.Trade(R.Side.Ask,400,20,Source(1.01),T(1.01));
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.02,1.02); Eq(V(r),0,"coalesced");
+            });
+            Test("Independent bid/ask at same price and independent price levels", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Bid,R.DepthAction.Add,0,400,100,0,0);
+                D(r,R.Side.Ask,R.DepthAction.Add,1,401,100,0,0);
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.01,1);
+                D(r,R.Side.Bid,R.DepthAction.Update,0,400,80,1.01,1);
+                r.Trade(R.Side.Ask,400,30,Source(1),T(1.05));
+                Eq(V(r),0,"ask"); Eq(V(r,R.Side.Bid,400),-20,"bid"); Eq(V(r,R.Side.Ask,401),0,"other price");
+            });
+            Test("Expiry excludes exact left boundary and works without ticks", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,140,1,1);
+                r.Advance(T(5.9999999)); Eq(V(r),40,"before"); r.Advance(T(6)); Eq(V(r),0,"exact boundary");
+            });
+            Test("Contributions expire individually with no periodic reset", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,140,1,1);
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,120,3,3);
+                r.Advance(T(6)); Eq(V(r),-20,"one expired"); r.Advance(T(8)); Eq(V(r),0,"both expired");
+            });
+            Test("Late correction retains original depth timestamp", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.01,1);
+                r.Trade(R.Side.Ask,400,30,Source(1),T(1.2));
+                r.Advance(T(6)); Eq(V(r),0,"corrected event expired at original deadline"); Eq(r.EntryCount,0,"not extended");
+            });
+            Test("Expired contribution cannot be resurrected by correction", delegate {
+                R r=New(1,1000); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.01,1);
+                r.Trade(R.Side.Ask,400,30,Source(1),T(2)); Eq(V(r),0,"expired remains zero"); Eq(r.MatchedVolume,0,"no expired credit");
+            });
+            Test("Unconfirmed executions expire without invented stacking", delegate {
+                R r=New(); Seed(r); r.Trade(R.Side.Ask,400,30,Source(1),T(1));
+                r.Advance(T(1.26)); Eq(V(r),0,"no confirmation"); Eq(r.UnmatchedVolume,30,"diagnostic");
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.4,1.4); Eq(V(r),-30,"too late to credit");
+            });
+            Test("Contradictory event timestamps stay unmatched", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1,1);
+                r.Trade(R.Side.Ask,400,30,Source(1.1),T(1.02)); Eq(V(r),-30,"no backward pairing");
+                r.Advance(T(1.3)); Eq(r.UnmatchedVolume,30,"unmatched");
+            });
+            Test("Missing source timestamp blocks execution attribution", delegate {
+                R r=New(); r.Depth(R.Side.Ask,R.DepthAction.Add,0,400,100,0,0);
+                r.Trade(R.Side.Ask,400,30,Source(1),T(1));
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.01,1.01); Eq(V(r),-30,"no invented timestamp");
+                Yes(r.UnstampedDepthCount>0,"diagnostic");
+            });
+            Test("Positional shifts keep history attached to price", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Add,1,401,50,0,0);
+                D(r,R.Side.Ask,R.DepthAction.Update,1,401,80,1,1);
+                D(r,R.Side.Ask,R.DepthAction.Add,0,399,40,2,2);
+                Eq(V(r,R.Side.Ask,401),30,"history did not move"); Eq(V(r,R.Side.Ask,399),0,"first seen");
+            });
+            Test("Price replacement handles old removal and new baseline", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Add,1,401,50,0,0);
+                D(r,R.Side.Ask,R.DepthAction.Update,0,402,20,1,1);
+                Eq(V(r),-100,"old removed"); Eq(V(r,R.Side.Ask,402),0,"new seeded");
+            });
+            Test("Explicit inner removal is measured; outer loss is unavailable", delegate {
+                R r=New(5,250,2); Seed(r); D(r,R.Side.Ask,R.DepthAction.Add,1,401,50,0,0);
+                D(r,R.Side.Ask,R.DepthAction.Remove,0,0,0,1,1); Eq(V(r),-100,"known removal stored old price");
+                D(r,R.Side.Ask,R.DepthAction.Remove,0,0,0,2,2);
+                long v; Yes(!r.TryValue(R.Side.Ask,401,out v),"outer unobserved");
+            });
+            Test("Visibility loss and re-entry seed instead of fake pull/stack", delegate {
+                R r=New(5,250,2); Seed(r); D(r,R.Side.Ask,R.DepthAction.Add,1,401,50,0,0);
+                D(r,R.Side.Ask,R.DepthAction.Update,1,401,80,1,1);
+                D(r,R.Side.Ask,R.DepthAction.Add,0,399,40,2,2); long v;
+                Yes(!r.TryValue(R.Side.Ask,401,out v),"outside visible coverage");
+                D(r,R.Side.Ask,R.DepthAction.Remove,0,399,0,3,3); Eq(V(r,R.Side.Ask,401),0,"reseeded");
+            });
+            Test("Duplicate price rows aggregate side quantity", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Add,1,400,50,1,1); Eq(V(r),50,"aggregate add");
+                D(r,R.Side.Ask,R.DepthAction.Update,1,400,30,2,2); Eq(V(r),30,"aggregate update");
+            });
+            Test("Ordered depth source regression preserves quantities but blocks ambiguous execution credit", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,140,2,2);
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1,2.1);
+                Eq(V(r),-30,"ordered quantity measured");Eq(r.TimestampRegressionCount,1,"source regression count");
+                Eq(r.ContinuityBreakCount,0,"timestamp alone is not continuity loss");
+                r.Trade(R.Side.Ask,400,30,Source(1.5),T(2.11));
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,80,3,3);Eq(V(r),-20,"no ambiguous attribution");Eq(r.MatchedVolume,0,"no invented execution match");
+            });
+            Test("Invalid position cannot corrupt the book", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,4,400,20,1,1); long v;
+                Yes(!r.TryValue(R.Side.Ask,400,out v),"invalid unavailable"); Eq(r.ContinuityBreakCount,1,"continuity count");
+            });
+            Test("Manual history reset discards old pending credit", delegate {
+                R r=New(); Seed(r); r.Trade(R.Side.Ask,400,30,Source(1),T(1)); r.ResetHistory(T(1.01));
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.02,1.02); Eq(V(r),-30,"pre-reset trade not reused");
+                r.ResetLevel(R.Side.Ask,400); Eq(V(r),0,"per-level reset");
+            });
+            Test("Late pre-reset executions cannot be credited to post-reset depth", delegate {
+                R r=New(); Seed(r);r.ResetHistory(T(1),Source(1));
+                r.Trade(R.Side.Ask,400,30,Source(.9),T(1.01));
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.02,1.02);
+                Eq(V(r),-30,"no pre-reset credit");Eq(r.MatchedVolume,0,"none matched");Eq(r.UnmatchedVolume,30,"diagnostic");
+            });
+            Test("Session epoch waits for fresh quantities while retaining positions", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Add,1,401,50,0,0);
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,140,1,1);r.ResetObservations(T(2));long v;
+                Yes(!r.TryValue(R.Side.Ask,400,out v),"awaiting quantity");
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,20,3,3);Eq(V(r),0,"fresh seed");
+                Yes(!r.TryValue(R.Side.Ask,401,out v),"unaddressed level still awaits actual observation");
+                D(r,R.Side.Ask,R.DepthAction.Update,1,401,10,3.1,3.1);Eq(V(r,R.Side.Ask,401),0,"other fresh seed");
+            });
+            Test("Feed/instrument reset discards book and history", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,140,1,1); r.Reset(T(2)); long v;
+                Yes(!r.TryValue(R.Side.Ask,400,out v),"cleared");
+                D(r,R.Side.Ask,R.DepthAction.Add,0,400,300,2.1,2.1); Eq(V(r),0,"new baseline");
+            });
+            Test("Replay pause, speed progression, and rewind", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,140,1,1);
+                for(int i=0;i<1000;i++)r.Advance(T(1)); Eq(V(r),40,"pause");
+                r.Advance(T(6)); Eq(V(r),0,"replay time cutoff");
+                r.Advance(T(2)); long v; Yes(!r.TryValue(R.Side.Ask,400,out v),"rewind reset");
+            });
+            Test("Capacity overflow blanks result until explicit reset", delegate {
+                R r=New(5,250,10,2); Seed(r);
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,110,1,1);
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,120,1.01,1.01);
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,130,1.02,1.02); long v;
+                Yes(r.Faulted && !r.TryValue(R.Side.Ask,400,out v),"bounded fail");
+                r.Reset(T(2)); D(r,R.Side.Ask,R.DepthAction.Add,0,400,130,2,2); Eq(V(r),0,"reset recovery");
+            });
+            Test("Warm-up and provisional diagnostics", delegate {
+                R r=New(); Seed(r); Yes(!r.IsWarm,"warmup");
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,110,1,1); Yes(r.IsProvisional,"provisional");
+                r.Advance(T(1.26)); Yes(!r.IsProvisional,"settled"); r.Advance(T(5)); Yes(r.IsWarm,"warm");
+                r.Unclassified(20); Eq(r.UnclassifiedVolume,20,"unknown counted");
+            });
+            Test("3/5/10/30 second cutoff contracts", delegate {
+                foreach(int seconds in new int[]{3,5,10,30}){
+                    R r=New(seconds); Seed(r); D(r,R.Side.Ask,R.DepthAction.Update,0,400,110,1,1);
+                    r.Advance(T(seconds+1)-1); Eq(V(r),10,"before "+seconds);
+                    r.Advance(T(seconds+1)); Eq(V(r),0,"after "+seconds);
+                }
+            });
+            Test("Randomized rolling sums against independent event-list oracle", delegate {
+                Random random=new Random(4817); R r=New(); Seed(r); long qty=100, now=0;
+                List<long[]> oracle=new List<long[]>();
+                for(int i=0;i<10000;i++){
+                    now+=random.Next(1,100)*TimeSpan.TicksPerMillisecond;
+                    long next=random.Next(0,200); long delta=next-qty; qty=next;
+                    r.Depth(R.Side.Ask,R.DepthAction.Update,0,400,qty,Source(0)+now,now);
+                    oracle.Add(new long[]{now,delta});
+                    long expected=0; foreach(long[] e in oracle)if(e[0]>now-T(5))expected+=e[1];
+                    Eq(V(r),expected,"oracle event "+i);
+                }
+            });
+            Test("Atomic snapshot preserves known zeros without fabricated execution intervals", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Add,1,401,100,0,0);
+                r.PrepareSnapshot(T(1),Source(1));Eq(r.KnownLevelCount(R.Side.Ask),2,"snapshot count");
+                Eq(V(r),0,"snapshot baseline");Eq(V(r,R.Side.Ask,401),0,"quiet baseline");
+                r.Trade(R.Side.Ask,401,30,Source(1.05),T(1.05));
+                D(r,R.Side.Ask,R.DepthAction.Update,1,401,70,1.1,1.1);
+                Eq(V(r,R.Side.Ask,401),-30,"unknown interval gets no execution credit");Eq(r.MatchedVolume,0,"no invented match");
+                r.Trade(R.Side.Ask,401,20,Source(1.15),T(1.15));
+                D(r,R.Side.Ask,R.DepthAction.Update,1,401,50,1.2,1.2);
+                Eq(V(r,R.Side.Ask,401),-30,"timestamped interval receives execution credit");Eq(r.MatchedVolume,20,"subsequent matched");
+                r.Advance(T(7));Eq(V(r),0,"quiet zero after expiry");Eq(V(r,R.Side.Ask,401),0,"changed zero after expiry");
+            });
+            Test("Snapshot trigger uncertainty affects only the addressed level", delegate {
+                R r=New(); Seed(r); D(r,R.Side.Ask,R.DepthAction.Add,1,401,100,0,0);
+                r.PrepareSnapshot(T(1),Source(1));r.RequireFreshLevel(R.Side.Ask,400);long value;
+                Yes(!r.TryValue(R.Side.Ask,400,out value),"uncertain trigger");Eq(V(r,R.Side.Ask,401),0,"other row stays observed");
+                D(r,R.Side.Ask,R.DepthAction.Update,0,400,70,1.1,1.1);Eq(V(r),0,"uncertain row reseeds");
+            });
+            Test("Provider source clock can lag receipt time across rolling expiry", delegate {
+                R r=New();r.Depth(R.Side.Ask,R.DepthAction.Add,0,400,100,Source(.8),T(1));
+                r.PrepareSnapshot(T(1),Source(.8));r.ConfirmSnapshotLevel(R.Side.Ask,400,Source(.8));
+                for(int i=1;i<=100;i++)r.Depth(R.Side.Ask,R.DepthAction.Update,0,400,100+i,Source(.8+i*.01),T(1+i*.01));
+                r.Advance(T(6.5));Eq(V(r),50,"receipt-time window");Eq(r.ContinuityBreakCount,0,"no resets for normal lag");Yes(r.IsWarm,"warm");
+            });
+            Test("Reset fence cannot confuse lagged depth with pre-reset execution", delegate {
+                R r=New();r.Depth(R.Side.Ask,R.DepthAction.Add,0,400,100,Source(.8),T(1));
+                r.ResetHistory(T(2),Source(.8));r.Trade(R.Side.Ask,400,30,Source(.8),T(2.01));
+                r.Depth(R.Side.Ask,R.DepthAction.Update,0,400,70,Source(1.9),T(2.1));
+                Eq(V(r),-30,"no pre-reset credit");Eq(r.MatchedVolume,0,"none matched");Eq(r.ContinuityBreakCount,0,"lagged depth accepted");
+            });
+            foreach(int seconds in new int[]{3,5,10,30}) Benchmark(seconds);
+            MultiLevelBenchmark();
+            Console.WriteLine("RESULT "+passed+" calculation scenarios passed; 0 failed");
+            File.WriteAllLines("calculation-results.txt",results.ToArray());
+            return 0;
+        }
+        catch(Exception e){ Console.Error.WriteLine("FAIL "+e); return 1; }
+    }
+    private static void Benchmark(int seconds)
+    {
+        R r=New(seconds,250,10,500000); Seed(r); const int events=1000000;
+        long allocatedBefore=GC.GetTotalAllocatedBytes(true); Stopwatch timer=Stopwatch.StartNew();
+        for(int i=1;i<=events;i++){
+            long now=i*1000L; // Synthetic 10,000 depth updates per market second.
+            r.Depth(R.Side.Ask,R.DepthAction.Update,0,400,100+(i%10),Source(0)+now,now);
+        }
+        timer.Stop(); Yes(!r.Faulted,"benchmark capacity");
+        double ms=timer.Elapsed.TotalMilliseconds;
+        long allocated=GC.GetTotalAllocatedBytes(true)-allocatedBefore;
+        string line=String.Format(CultureInfo.InvariantCulture,
+            "BENCH horizon={0}s events={1} wallMs={2:F1} eventsPerSecond={3:F0} allocatedBytes={4} retainedEntries={5}",
+            seconds,events,ms,events*1000.0/ms,allocated,r.EntryCount);
+        results.Add(line);Console.WriteLine(line);
+        r.Advance(events*1000L+T(seconds));Eq(r.EntryCount,0,"quiet expiry benchmark");
+    }
+    private static void MultiLevelBenchmark()
+    {
+        R r=New(30,250,10,500000);
+        for(int i=0;i<10;i++){
+            r.Depth(R.Side.Bid,R.DepthAction.Add,i,399-i,100,Source(0),0);
+            r.Depth(R.Side.Ask,R.DepthAction.Add,i,400+i,100,Source(0),0);
+        }
+        const int events=1000000;Stopwatch timer=Stopwatch.StartNew();long before=GC.GetTotalAllocatedBytes(true);
+        for(int i=1;i<=events;i++){
+            long now=i*1000L;int pos=(i/2)%10;R.Side side=i%2==0?R.Side.Bid:R.Side.Ask;
+            long price=side==R.Side.Bid?399-pos:400+pos;
+            if(i%10==0)r.Trade(side,price,1,Source(0)+now,now);
+            r.Depth(side,R.DepthAction.Update,pos,price,100+(i%7),Source(0)+now+10,now+10);
+        }
+        timer.Stop();Yes(!r.Faulted,"multi-level capacity");Eq(r.MatchedVolume,100000,"multi-level matched execution count");
+        string line=String.Format(CultureInfo.InvariantCulture,
+            "BENCH multiLevel=20 horizon=30s events={0} wallMs={1:F1} eventsPerSecond={2:F0} allocatedBytes={3} retainedEntries={4} matchedVolume={5}",
+            events,timer.Elapsed.TotalMilliseconds,events*1000.0/timer.Elapsed.TotalMilliseconds,GC.GetTotalAllocatedBytes(true)-before,r.EntryCount,r.MatchedVolume);
+        results.Add(line);Console.WriteLine(line);
+    }
+}

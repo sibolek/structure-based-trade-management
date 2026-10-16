@@ -1,0 +1,19 @@
+PASS Candidate pause preserves evidence and restarts confirmation side=False
+PASS Qualified pause suppresses marker and enforces cooldown side=False
+PASS Missing level still clears its epoch while quote-paused side=False
+PASS Candidate pause preserves evidence and restarts confirmation side=True
+PASS Qualified pause suppresses marker and enforces cooldown side=True
+PASS Missing level still clears its epoch while quote-paused side=True
+PASS Initiative adverse path during pause survives recovery buy=False
+PASS Qualified initiative pauses and cannot resurrect buy=False
+PASS Initiative adverse path during pause survives recovery buy=True
+PASS Qualified initiative pauses and cannot resurrect buy=True
+PASS Long pause ages trades and contributions normally
+PASS Startup warm-up begins at first trusted inside quote
+PASS Hard context loss while paused resets and requires new warm-up
+PASS Receipt rewind supersedes pause
+PASS Capacity fault cannot be reopened by trusted quote
+PASS Repeated short transitions retain warm-up and window history
+PASS Pause preserves late execution credits at their original receipts
+PASS Unknown prints during pause remain in classification quality
+RESULT 18 live readiness core scenarios passed; 0 failed

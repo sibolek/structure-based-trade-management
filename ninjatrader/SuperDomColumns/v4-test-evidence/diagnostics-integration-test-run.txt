@@ -1,0 +1,8 @@
+PASS Adapter appends actual failure diagnostics without extra transition records
+PASS Adapter logging toggle changes snapshots without rebuilding or resetting
+PASS Legacy numeric mode still records flow diagnostics
+PASS Native-facing build stamp is consistent in diagnostics and rolling status
+PASS Enabled diagnostic capture is bounded by the existing transition queue
+ADAPTER-ORACLE1500 callbacks plus seeded qualification: identical numeric P/S and full transition logs, timing, legacy metrics and flow state after every completed callback
+PASS Full adapter differential preserves numeric P/S and complete signal logs
+RESULT 6 diagnostics integration scenarios passed; 0 failed

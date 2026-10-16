@@ -1,0 +1,59 @@
+PASS Absorption adverse excursion, side=False, phase=1ms
+PASS Absorption adverse excursion, side=True, phase=1ms
+PASS Initiative adverse excursion, buy=True, phase=1ms
+PASS Initiative adverse excursion, buy=False, phase=1ms
+PASS Absorption adverse excursion, side=False, phase=30ms
+PASS Absorption adverse excursion, side=True, phase=30ms
+PASS Initiative adverse excursion, buy=True, phase=30ms
+PASS Initiative adverse excursion, buy=False, phase=30ms
+PASS Absorption adverse excursion, side=False, phase=99ms
+PASS Absorption adverse excursion, side=True, phase=99ms
+PASS Initiative adverse excursion, buy=True, phase=99ms
+PASS Initiative adverse excursion, buy=False, phase=99ms
+PASS Absorption adverse excursion, side=False, phase=100ms
+PASS Absorption adverse excursion, side=True, phase=100ms
+PASS Initiative adverse excursion, buy=True, phase=100ms
+PASS Initiative adverse excursion, buy=False, phase=100ms
+PASS Absorption adverse excursion, side=False, phase=101ms
+PASS Absorption adverse excursion, side=True, phase=101ms
+PASS Initiative adverse excursion, buy=True, phase=101ms
+PASS Initiative adverse excursion, buy=False, phase=101ms
+PASS A3 net replenishment failure restarts exact confirmation, side=False
+PASS Exactly maximum adverse ticks remain permitted, side=False
+PASS A3 net replenishment failure restarts exact confirmation, side=True
+PASS Exactly maximum adverse ticks remain permitted, side=True
+PASS A4 quote failure restarts initiative confirmation, buy=True
+PASS A5 large prequalification retreat is rejected despite net advance, buy=True
+PASS Recovered retreat does not erase a candidate path breach, buy=True
+PASS Exactly one tick candidate retracement permits initiative, buy=True
+PASS A4 quote failure restarts initiative confirmation, buy=False
+PASS A5 large prequalification retreat is rejected despite net advance, buy=False
+PASS Recovered retreat does not erase a candidate path breach, buy=False
+PASS Exactly one tick candidate retracement permits initiative, buy=False
+PASS Support failure restarts timer side=False, phase=1ms
+PASS Support failure restarts timer side=True, phase=1ms
+PASS Support failure restarts timer side=False, phase=30ms
+PASS Support failure restarts timer side=True, phase=30ms
+PASS Support failure restarts timer side=False, phase=99ms
+PASS Support failure restarts timer side=True, phase=99ms
+PASS Support failure restarts timer side=False, phase=100ms
+PASS Support failure restarts timer side=True, phase=100ms
+PASS Support failure restarts timer side=False, phase=101ms
+PASS Support failure restarts timer side=True, phase=101ms
+PASS Qualified initiative protects the new favorable peak, buy=True
+PASS Qualified initiative protects the new favorable peak, buy=False
+PASS Qualification retains the prequalification favorable peak, buy=True
+PASS Qualification retains the prequalification favorable peak, buy=False
+PASS Later local retracement survives older global peak expiry, buy=True
+PASS Later local retracement survives older global peak expiry, buy=False
+PASS Older later breach cannot overwrite a newer local breach, buy=True
+PASS Older later breach cannot overwrite a newer local breach, buy=False
+PASS Mature unmatched failure followed by late credit restarts confirmation
+PASS Unknown-volume failure and recovery cannot bridge confirmation
+PASS Dominance failure and recovery cannot bridge confirmation
+PASS Expiry-induced failure then recovery between evaluations resets confirmation
+PASS Same-receipt coverage reentry excludes old execution and late credit
+PASS Quiet interval cannot be hidden by a later fresh execution
+ORACLE 8000 randomized events: accounting and both retained price-path predicates independently checked
+PASS Randomized independent rolling evidence oracle
+RESULT 57 repair scenarios passed; 0 failed

@@ -1,0 +1,351 @@
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Core.cs(50,51): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ContributionObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Tests.csproj]
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Core.cs(51,33): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ExecutionMatchedObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Tests.csproj]
+PASS Initial Add and bootstrap Update seed zero
+PASS Net additions and cancellations
+PASS Pure execution trade-first
+PASS Pure execution depth-first using event timestamps
+PASS Execution plus additions and unchanged-depth replenishment
+PASS Execution credit consumed once across subsequent depth updates
+PASS Split executions, coalesced depth
+PASS Independent bid/ask at same price and independent price levels
+PASS Expiry excludes exact left boundary and works without ticks
+PASS Contributions expire individually with no periodic reset
+PASS Late correction retains original depth timestamp
+PASS Expired contribution cannot be resurrected by correction
+PASS Unconfirmed executions expire without invented stacking
+PASS Contradictory event timestamps stay unmatched
+PASS Missing source timestamp blocks execution attribution
+PASS Positional shifts keep history attached to price
+PASS Price replacement handles old removal and new baseline
+PASS Explicit inner removal is measured; outer loss is unavailable
+PASS Visibility loss and re-entry seed instead of fake pull/stack
+PASS Duplicate price rows aggregate side quantity
+PASS Ordered depth source regression preserves quantities but blocks ambiguous execution credit
+PASS Invalid position cannot corrupt the book
+PASS Manual history reset discards old pending credit
+PASS Late pre-reset executions cannot be credited to post-reset depth
+PASS Session epoch waits for fresh quantities while retaining positions
+PASS Feed/instrument reset discards book and history
+PASS Replay pause, speed progression, and rewind
+PASS Capacity overflow blanks result until explicit reset
+PASS Warm-up and provisional diagnostics
+PASS 3/5/10/30 second cutoff contracts
+PASS Randomized rolling sums against independent event-list oracle
+PASS Atomic snapshot preserves known zeros without fabricated execution intervals
+PASS Snapshot trigger uncertainty affects only the addressed level
+PASS Provider source clock can lag receipt time across rolling expiry
+PASS Reset fence cannot confuse lagged depth with pre-reset execution
+BENCH horizon=3s events=1000000 wallMs=349.0 eventsPerSecond=2865037 allocatedBytes=120524632 retainedEntries=30000
+BENCH horizon=5s events=1000000 wallMs=191.3 eventsPerSecond=5228731 allocatedBytes=121048944 retainedEntries=50000
+BENCH horizon=10s events=1000000 wallMs=160.3 eventsPerSecond=6237533 allocatedBytes=122097584 retainedEntries=100000
+BENCH horizon=30s events=1000000 wallMs=200.0 eventsPerSecond=5000958 allocatedBytes=128389048 retainedEntries=300000
+BENCH multiLevel=20 horizon=30s events=1000000 wallMs=826.7 eventsPerSecond=1209580 allocatedBytes=125248928 retainedEntries=300000 matchedVolume=100000
+RESULT 35 calculation scenarios passed; 0 failed
+
+Welcome to .NET 10.0!
+---------------------
+SDK Version: 10.0.401
+
+----------------
+Write your first app: https://aka.ms/dotnet-hello-world
+Find out what's new: https://aka.ms/dotnet-whats-new
+Explore documentation: https://aka.ms/dotnet-docs
+Report issues and find source on GitHub: https://github.com/dotnet/core
+Use 'dotnet --help' to see available commands or visit: https://aka.ms/dotnet-cli
+--------------------------------------------------------------------------------------
+An issue was encountered verifying workloads. For more information, run "dotnet workload update".
+PASS Default mode and existing property defaults preserved
+PASS Legacy mode matches 1000 depth/trade events and rendered values
+PASS Rolling trade-first execution adjustment through real adapter paths
+PASS Rolling depth-first execution adjustment through adapter
+PASS Rolling refresh expires quiet-market values with replay clock
+PASS Rolling signs, side colors and centered alignment retained
+PASS Inside spread and locked quotes remain unclassified
+PASS Feed reset clears rolling and legacy state
+PASS Wrong instrument callbacks are rejected
+PASS Instrument change reseeds and clears old histories
+PASS Disconnect/reconnect reseeds
+PASS Connection event invalidates even before scheduler polling
+PASS Mode/window changes cannot reuse mixed histories
+PASS Session transition cannot compare old session quantities
+PASS Already populated DOM boots from an arbitrary updated position
+PASS A snapshot not yet reflecting the triggering update waits for confirmation
+PASS Replay rewind clears current book
+PASS V3 XML settings serialize and reload with rolling configuration
+PASS Quote reset policy preserves legacy condition and can leave rolling intact
+PASS Rolling expiry cannot create new spoof-like alerts
+PASS Reset events without instrument identity still clear state
+PASS Termination disposes per-level timers and blocks refresh callbacks
+PASS Pre-reset queued callbacks cannot mutate the new generation
+DIAGNOSTIC: known resting levels=5; displayed rolling rows=5
+PASS Known quiet snapshot levels remain visible after rolling expiry
+PASS Snapshot displays both sides even when legacy maps only know one row
+PASS Legacy quote-map clearing cannot hide rolling levels
+PASS Session transition marks untouched rows unavailable instead of inventing zeros
+PASS Settings-only instance does not pretend to have a live calendar failure
+PASS Live diagnostic output is opt-in and rate limited
+PASS Delayed calendar arrival preserves a current snapshot across quiet levels
+PASS Actual live calendar failure produces unavailable markers and diagnostic
+SOURCE-LAG REPRO Estimated; matched 0; unmatched 0; unclassified 0; continuity breaks 0; invalid depth 0; source regressions 0; unstamped depth 0; known bid/ask 0/1; resets 4; last reset: Session calendar ready
+PASS Ordered depth with 200 ms provider timestamp lag retains five seconds
+PASS Provider lag survives an explicit reset without repeated reinitialization
+PASS Lagged trade timestamps reconcile in both callback arrival orders
+PASS Timestamp regressions do not masquerade as structural book loss
+PASS True invalid positions still reject the book and explain the failure
+PASS Provider book deeper than display coverage cannot cause false gaps
+RESULT 37 API-shape integration scenarios passed; 0 failed. Not actual NinjaTrader compilation.
+PASS Buyer absorption requires matched selling, replenishment and a hold
+PASS Seller absorption is the mirrored pattern
+PASS Executions without replenishment remain candidates
+PASS Replenishment without executions cannot signal absorption
+PASS Unmatched executions block absorption qualification
+PASS Low matched share cannot be hidden by lifetime volume
+PASS Unknown trade share blocks strong labels
+PASS Candidate timestamps and qualification have no backdating
+PASS Adverse movement invalidates a candidate before qualification
+PASS Qualified absorption can be invalidated without rewriting its old event
+PASS Observation loss suppresses a marker rather than treating it as pulling
+PASS Coverage reentry cannot reuse prior executions
+PASS Historical expiry alone cannot create an alert
+PASS Matched credit keeps the original depth evidence timestamp
+PASS One corrected contribution is one refill observation
+PASS Attribution uncertainty pauses absorption
+PASS Both-sided activity need not imply absorption dominance
+PASS Quiet old executions cannot qualify a new pattern
+PASS Buy initiative requires price and inside-quote progress
+PASS Sell initiative is symmetric
+PASS Buying at one stationary price is not initiative
+PASS Quote-only movement cannot establish initiative
+PASS Print advance with no quote follow-through remains unqualified
+PASS Initiative can be recognized without asserting execution-depth matches
+PASS A large isolated print is insufficient for initiative
+PASS Qualified initiative invalidates on a retracement
+PASS Feed unavailability suppresses qualified states
+PASS Manual reset cannot reuse old IDs or matched evidence
+PASS Rewind resets receipt-clock evidence
+PASS Capacity failure prevents strong labels
+PASS Evidence cutoff excludes its exact left boundary
+PASS Detection options can disable each pattern independently
+PASS Fresh unresolved executions receive grace before lowering matched quality
+PASS Partial fresh match credit cannot inflate the eligible denominator
+PASS Invalid trade prices cannot create false adverse movement
+PASS Classification deterioration suppresses already qualified absorption
+PASS Confirmation duration is measured after all conditions first agree
+PASS Withdrawals offset refills in net replenishment
+PASS Execution-only correction is not a refill observation
+BENCH flow input pairs=100000 wallMs=418.1 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
+RESULT 39 flow scenarios passed; 0 failed
+PASS Experimental defaults are distinct and old spoof alerts start disabled
+PASS Adapter trade-first bid absorption uses exact execution credits
+PASS Adapter trade-first ask absorption is symmetric
+PASS Adapter depth-first ordering reconciles without double counting refills
+PASS Lagged provider times retain evidence on the receipt clock
+PASS Source regression pauses absorption instead of erasing initiative tape
+PASS Flow works independently of the selected legacy P/S display
+PASS Consuming an inside queue preserves initiative warm-up and tape
+PASS Buy initiative crosses actual price levels and inside quotes
+PASS Sell initiative follows executions through falling bid levels
+PASS Rendering draws qualified labels on the correct side
+PASS Candidate display can be hidden without disabling collection
+PASS Single-side displays do not draw the other side's flow markers
+PASS Narrow columns hide flow labels without changing numeric P/S
+PASS Manual header reset suppresses markers and clears detector tape
+PASS Disconnect prevents old detector evidence from qualifying
+PASS A broken depth sequence clears flow before rapid snapshot recovery
+PASS Malformed depth price clears flow without waiting for the refresh timer
+PASS Replay rewind clears future signals and returns to warm-up
+PASS Detector threshold changes cannot reuse old trade matches
+PASS Old pending executions cannot credit reused IDs after a detector rebuild
+PASS Disable and re-enable cannot recycle old pending execution identity
+PASS Invalid thresholds fail visibly without crashing the column
+PASS Disabling flow detaches observers and clears markers
+PASS Opt-in legacy per-level reset also suppresses that level's flow evidence
+PASS Logging records observation times and never backdates qualification
+PASS Periodic status logging exposes warm-up and collection quality
+PASS Settings serialize separately and status is runtime-only
+PASS Termination prevents timer refresh, logging and further matches
+RESULT 29 full-column flow scenarios passed; 0 failed
+PASS Absorption adverse excursion, side=False, phase=1ms
+PASS Absorption adverse excursion, side=True, phase=1ms
+PASS Initiative adverse excursion, buy=True, phase=1ms
+PASS Initiative adverse excursion, buy=False, phase=1ms
+PASS Absorption adverse excursion, side=False, phase=30ms
+PASS Absorption adverse excursion, side=True, phase=30ms
+PASS Initiative adverse excursion, buy=True, phase=30ms
+PASS Initiative adverse excursion, buy=False, phase=30ms
+PASS Absorption adverse excursion, side=False, phase=99ms
+PASS Absorption adverse excursion, side=True, phase=99ms
+PASS Initiative adverse excursion, buy=True, phase=99ms
+PASS Initiative adverse excursion, buy=False, phase=99ms
+PASS Absorption adverse excursion, side=False, phase=100ms
+PASS Absorption adverse excursion, side=True, phase=100ms
+PASS Initiative adverse excursion, buy=True, phase=100ms
+PASS Initiative adverse excursion, buy=False, phase=100ms
+PASS Absorption adverse excursion, side=False, phase=101ms
+PASS Absorption adverse excursion, side=True, phase=101ms
+PASS Initiative adverse excursion, buy=True, phase=101ms
+PASS Initiative adverse excursion, buy=False, phase=101ms
+PASS A3 net replenishment failure restarts exact confirmation, side=False
+PASS Exactly maximum adverse ticks remain permitted, side=False
+PASS A3 net replenishment failure restarts exact confirmation, side=True
+PASS Exactly maximum adverse ticks remain permitted, side=True
+PASS A4 quote failure restarts initiative confirmation, buy=True
+PASS A5 large prequalification retreat is rejected despite net advance, buy=True
+PASS Recovered retreat does not erase a candidate path breach, buy=True
+PASS Exactly one tick candidate retracement permits initiative, buy=True
+PASS A4 quote failure restarts initiative confirmation, buy=False
+PASS A5 large prequalification retreat is rejected despite net advance, buy=False
+PASS Recovered retreat does not erase a candidate path breach, buy=False
+PASS Exactly one tick candidate retracement permits initiative, buy=False
+PASS Support failure restarts timer side=False, phase=1ms
+PASS Support failure restarts timer side=True, phase=1ms
+PASS Support failure restarts timer side=False, phase=30ms
+PASS Support failure restarts timer side=True, phase=30ms
+PASS Support failure restarts timer side=False, phase=99ms
+PASS Support failure restarts timer side=True, phase=99ms
+PASS Support failure restarts timer side=False, phase=100ms
+PASS Support failure restarts timer side=True, phase=100ms
+PASS Support failure restarts timer side=False, phase=101ms
+PASS Support failure restarts timer side=True, phase=101ms
+PASS Qualified initiative protects the new favorable peak, buy=True
+PASS Qualified initiative protects the new favorable peak, buy=False
+PASS Qualification retains the prequalification favorable peak, buy=True
+PASS Qualification retains the prequalification favorable peak, buy=False
+PASS Later local retracement survives older global peak expiry, buy=True
+PASS Later local retracement survives older global peak expiry, buy=False
+PASS Older later breach cannot overwrite a newer local breach, buy=True
+PASS Older later breach cannot overwrite a newer local breach, buy=False
+PASS Mature unmatched failure followed by late credit restarts confirmation
+PASS Unknown-volume failure and recovery cannot bridge confirmation
+PASS Dominance failure and recovery cannot bridge confirmation
+PASS Expiry-induced failure then recovery between evaluations resets confirmation
+PASS Same-receipt coverage reentry excludes old execution and late credit
+PASS Quiet interval cannot be hidden by a later fresh execution
+ORACLE 8000 randomized events: accounting and both retained price-path predicates independently checked
+PASS Randomized independent rolling evidence oracle
+RESULT 57 repair scenarios passed; 0 failed
+PASS Adapter adverse excursion side=False, phase=1ms
+PASS Adapter adverse excursion side=True, phase=1ms
+PASS Adapter adverse excursion side=False, phase=30ms
+PASS Adapter adverse excursion side=True, phase=30ms
+PASS Adapter adverse excursion side=False, phase=99ms
+PASS Adapter adverse excursion side=True, phase=99ms
+PASS Adapter adverse excursion side=False, phase=100ms
+PASS Adapter adverse excursion side=True, phase=100ms
+PASS Adapter adverse excursion side=False, phase=101ms
+PASS Adapter adverse excursion side=True, phase=101ms
+PASS Adapter 30ms replenishment loss restarts confirmation side=False
+PASS Adapter 30ms replenishment loss restarts confirmation side=True
+PASS Adapter same-receipt reset excludes late execution credits
+PASS Coalesced depth reconciliation preserves split-print continuity side=False
+PASS Separate same-time withdrawal/refill callbacks still restart continuity side=False
+PASS Coalesced depth reconciliation preserves split-print continuity side=True
+PASS Separate same-time withdrawal/refill callbacks still restart continuity side=True
+PASS Coalesced one-print execution is equivalent to split-print reconciliation
+PASS Old opposite-order correction identities excluded after context change disable=False
+PASS Old opposite-order correction identities excluded after context change disable=True
+RESULT 20 repair integration scenarios passed; 0 failed
+PASS Candidate pause preserves evidence and restarts confirmation side=False
+PASS Qualified pause suppresses marker and enforces cooldown side=False
+PASS Missing level still clears its epoch while quote-paused side=False
+PASS Candidate pause preserves evidence and restarts confirmation side=True
+PASS Qualified pause suppresses marker and enforces cooldown side=True
+PASS Missing level still clears its epoch while quote-paused side=True
+PASS Initiative adverse path during pause survives recovery buy=False
+PASS Qualified initiative pauses and cannot resurrect buy=False
+PASS Initiative adverse path during pause survives recovery buy=True
+PASS Qualified initiative pauses and cannot resurrect buy=True
+PASS Long pause ages trades and contributions normally
+PASS Startup warm-up begins at first trusted inside quote
+PASS Hard context loss while paused resets and requires new warm-up
+PASS Receipt rewind supersedes pause
+PASS Capacity fault cannot be reopened by trusted quote
+PASS Repeated short transitions retain warm-up and window history
+PASS Pause preserves late execution credits at their original receipts
+PASS Unknown prints during pause remain in classification quality
+RESULT 18 live readiness core scenarios passed; 0 failed
+PASS Ordered inside transition up=True lockedFirst=True
+PASS Ordered inside transition up=True lockedFirst=False
+PASS Ordered inside transition up=False lockedFirst=True
+PASS Ordered inside transition up=False lockedFirst=False
+PASS Crossed quote pause preserves tape and publishes both prices
+PASS Disconnect during pause clears history with exact reset reason
+PASS Hard reset fences older same-receipt correction IDs
+PASS Flow diagnostic includes reset count, pause count and warm clock
+PASS Zero ask queues pause detection while bid coverage survives
+PASS Trusted L2 confirmation is independent of stale trade snapshot buy=False stale=False
+PASS Trusted L2 confirmation is independent of stale trade snapshot buy=False stale=True
+PASS Trusted L2 confirmation is independent of stale trade snapshot buy=True stale=False
+PASS Trusted L2 confirmation is independent of stale trade snapshot buy=True stale=True
+RESULT 13 live readiness integration scenarios passed; 0 failed
+PASS Fresh absorption snapshot identifies replenishment, duration and matching blockers side=False
+PASS Absorption terminal snapshot refreshes direct adverse print before cached metrics side=False
+PASS Absorption coverage loss captures omitted level before state clearing side=False
+PASS Fresh absorption snapshot identifies replenishment, duration and matching blockers side=True
+PASS Absorption terminal snapshot refreshes direct adverse print before cached metrics side=True
+PASS Absorption coverage loss captures omitted level before state clearing side=True
+PASS Initiative dominance loss reports current counters despite older legacy fields buy=False
+PASS Retained path breach identified in actual terminal snapshot buy=False
+PASS Qualified peak retracement keeps trigger and numeric magnitude buy=False
+PASS Initiative dominance loss reports current counters despite older legacy fields buy=True
+PASS Retained path breach identified in actual terminal snapshot buy=True
+PASS Qualified peak retracement keeps trigger and numeric magnitude buy=True
+PASS Independent inside-quote advance blocker bidOnly=False
+PASS Independent inside-quote advance blocker bidOnly=True
+PASS Window expiry records new retained anchor and lost advance
+PASS Quiet deadline reports sub-millisecond strict-boundary failure
+PASS Confirmation reset captures failed support before recovery and remains immutable
+PASS Matching grace interruption records the exact maturity boundary
+PASS Unknown share, eligible and matching blockers are distinct
+PASS Queued candidate snapshots survive later trades and settings object mutation
+PASS Diagnostics disabled allocates no snapshots or confirmation records
+PASS Formatting remains unambiguous under a comma-decimal culture
+ORACLE30000 identical input steps across reviewed core / diagnostics-off / diagnostics-on; 1263 identical transitions; marker, confirmation, rule, reset and retention state matched after every step
+PASS Diagnostic-only differential oracle against reviewed previous core
+RESULT 23 diagnostics core scenarios passed; 0 failed
+PASS Adapter appends actual failure diagnostics without extra transition records
+PASS Adapter logging toggle changes snapshots without rebuilding or resetting
+PASS Legacy numeric mode still records flow diagnostics
+PASS Native-facing build stamp is consistent in diagnostics and rolling status
+PASS Enabled diagnostic capture is bounded by the existing transition queue
+ADAPTER-ORACLE1500 callbacks plus seeded qualification: identical numeric P/S and full transition logs, timing, legacy metrics and flow state after every completed callback
+PASS Full adapter differential preserves numeric P/S and complete signal logs
+RESULT 6 diagnostics integration scenarios passed; 0 failed
+PASS Real qualification persists with event logging disabled
+PASS Candidates alone never create a persisted signal
+PASS Only the next qualification replaces the last record
+PASS Qualification snapshots cannot drift after later signal mutation
+PASS Terminal outcome retains original qualification: Suppressed
+PASS Terminal outcome retains original qualification: Invalidated
+PASS Terminal outcome retains original qualification: Expired
+PASS Unrelated IDs and patterns cannot terminate the stored event
+PASS Old-generation outcome cannot overwrite a new-generation record
+PASS History survives quote pauses and rolling evidence expiry
+PASS Already-ended history clears on feed disconnect
+PASS Column header reset clears the last signal
+PASS Playback rewind clears the last signal
+PASS Instrument switch clears stored event identity
+PASS Session transition clears last qualification
+PASS Disabling flow clears history even when logging is off
+PASS Threshold reconfiguration clears old qualified evidence
+PASS History options do not rebuild or reset detection
+PASS Optional timeout hides only marker and respects exact boundary
+PASS Paused playback leaves recorded age unchanged
+PASS Under-180 logical width draws measured compact history
+PASS Tiny width reports omission and preserves summary
+PASS History label does not overlap centered P/S number
+PASS Wide column draws full historical label with outcome
+PASS Historical marker stays at qualification price across side changes
+PASS Side-only display filters marker without erasing record
+PASS Off-ladder signal remains available in summary
+PASS Existing status cadence includes durable summary and real render width
+PASS Workspace serialization stores options but excludes session history
+PASS Termination clears memory and ignores late qualification callbacks
+PASS Real absorption retains correct side and transitions gray ask=False
+PASS Real absorption retains correct side and transitions gray ask=True
+PASS Real initiative retention and active/ended display buy=False
+PASS Real initiative retention and active/ended display buy=True
+PASS Off-screen record is accessible in column tooltip
+PASS Tooltip updates on outcome changes and clears without ticking-age churn
+RESULT 36 last-signal display integration scenarios passed; 0 failed
+Experimental source harness passed. Actual NT compilation, visual QA and labelled Level II replay still required.
