@@ -1,8 +1,14 @@
 {
-  "previous_source_preserved": true,
-  "previous_sha256": "2294852e8e21311e9baeef67b62f988f61266b1b2acda3d5d6251874e7dec434",
-  "new_sha256": "d93321a3bc75d37c0f2052ed92fec77b43431c7ed772747825d8c3a566bf1920",
-  "unchanged_calculation_cores": {
+  "build": "2026-10-16.3 EXP",
+  "source_sha256": "a794505f8066a816caceca3287eb6ca9f74c004b16384fdac3162b9cacee1222",
+  "fixed_panel_baseline_sha256": "922340f1fc2fe1eac3bdf720a52a9402b1d5b95149bebae56f124aaacf6ddbe7",
+  "prior_git_checkpoint": "0f0e5ede65dcd3ed81a9e03423008ebf606a8873",
+  "compact_update_scope": [
+    "AddFixedFlowSummaryLine",
+    "DrawFixedFlowSummary"
+  ],
+  "all_other_source_identical_after_build_stamp_normalization": true,
+  "fixed_panel_scope": {
     "v4 Rolling calculation core": {
       "unchanged": true,
       "normalized_sha256": "197002ba39be0f6754b8b280dab0a44f75335c4a5703436e30deba1a689a86b4"
@@ -10,35 +16,77 @@
     "v4 Flow evidence core": {
       "unchanged": true,
       "normalized_sha256": "abf4a419bff7753b3722b160935a3c5c4d70f2a323bc673bd79cb4019812408a"
-    }
+    },
+    "modified_existing_methods": [
+      "OnRender",
+      "OnStateChange",
+      "FormatLastQualifiedFlowSignal",
+      "ClearLastQualifiedFlowSignal",
+      "RememberQualifiedFlowTransition"
+    ],
+    "new_methods": [
+      "AddFixedFlowSummaryLine",
+      "DrawFixedFlowSummary",
+      "FlowPatternName",
+      "FlowTrackingEndLabel"
+    ],
+    "signed_numeric_renderers_unchanged": true,
+    "spoof_detector_unchanged": true,
+    "display_settings_excluded_from_detector_key": true,
+    "source_CRLF": true
   },
-  "modified_existing_adapter_methods": [
-    "OnRender",
-    "OnStateChange",
-    "EnsureFlowContext",
-    "ResetFlowEvidence",
-    "StopFlowEvidence",
-    "SynchronizeFlowCoverage",
-    "FinishFlowEvent",
-    "DrainFlowTransitions",
-    "PrintFlowStatusSample",
-    "DrawFlowEvidence"
-  ],
-  "unchanged_existing_adapter_methods": 44,
-  "new_adapter_methods": [
-    "BeginFlowRender",
-    "ClearLastQualifiedFlowSignal",
-    "DrawRememberedOrLiveFlow",
-    "FlowNumberWidth",
-    "FlowOutcomeCode",
-    "FlowPatternLabel",
-    "FlowSignalSide",
-    "FormatLastQualifiedFlowSignal",
-    "LastQualifiedFlowMarkerVisible",
-    "RememberQualifiedFlowTransition"
-  ],
-  "history_options_excluded_from_detector_configuration_key": true,
-  "signed_numeric_renderers_unchanged": true,
-  "legacy_spoof_detector_unchanged": true,
-  "crlf": true
+  "event_reason_reference": {
+    "documentation_only": true,
+    "source_sha256_unchanged": "a794505f8066a816caceca3287eb6ca9f74c004b16384fdac3162b9cacee1222",
+    "all_original_HTML_bytes_preserved_after_removing_added_section_and_nav": true,
+    "all_original_readme_content_preserved": true,
+    "all_original_image_references_preserved": true,
+    "new_user_screenshot_unmodified": true,
+    "literal_terminal_and_fault_reasons_covered": [
+      "Coverage lost",
+      "Depth source timing uncertain",
+      "Display lifetime elapsed",
+      "Evidence capacity exceeded; reset required",
+      "Execution evidence no longer qualifies",
+      "Execution evidence quality deteriorated",
+      "Initiative evidence no longer qualifies",
+      "Legacy level reset",
+      "Negative quantity",
+      "New contribution receipt order regressed; reset required",
+      "Observation coverage lost",
+      "Price crossed the candidate level",
+      "Price crossed the held level",
+      "Price retraced the initiative endpoint",
+      "Price retraced the initiative path",
+      "Trade classification deteriorated"
+    ],
+    "all_diagnostic_blockers_covered": [
+      "None",
+      "ContextUnavailable",
+      "WarmupIncomplete",
+      "QuoteGateClosed",
+      "CoverageUnavailable",
+      "SourceTimingBlocked",
+      "ExecutedBelowMinimum",
+      "DominanceBelowMinimum",
+      "AdverseMovementExceeded",
+      "ExecutionStale",
+      "EligibleBelowMinimum",
+      "MatchBelowMinimum",
+      "ReplenishmentBelowMinimum",
+      "RefillsBelowMinimum",
+      "ObservationTooShort",
+      "UnknownShareTooHigh",
+      "PriceAdvanceInsufficient",
+      "BidAdvanceInsufficient",
+      "AskAdvanceInsufficient",
+      "EndpointRetracementExceeded",
+      "RetainedPathBreached",
+      "PriceUnavailable",
+      "ConfirmationIncomplete",
+      "InsideQuoteUnavailable"
+    ],
+    "source_reference": "2026-10-16.3 EXP; detector region parity with 16.2 verified below",
+    "calculation_core_parity_16_2_16_3": true
+  }
 }

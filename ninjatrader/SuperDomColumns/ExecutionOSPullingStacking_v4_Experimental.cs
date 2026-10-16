@@ -1056,6 +1056,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                         += SuperDom.ActualRowHeight;
                 }
             }
+            lock (collectionSync) { DrawFixedFlowSummary(dc, renderWidth,
+                Math.Max(0, verticalOffset), pixelsPerDip); }
         }
 
         private void DrawBidValue(
@@ -1418,6 +1420,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 FlowCooldownMilliseconds = 5000;
                 PersistLastQualifiedFlowSignal = true;
                 LastQualifiedFlowHoldSeconds = 0;
+                ShowFixedFlowSummary = true;
+                FixedFlowSummaryFontSize = 14;
 
                 SpoofDetectionEnabled = false;
                 SpoofMinimumStackVolume = 100;
@@ -1960,7 +1964,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
 
     public partial class ExecutionOSPullingStacking_v4_Experimental
     {
-        private const string RollingBuildId = "2026-10-16.1 EXP";
+        private const string RollingBuildId = "2026-10-16.3 EXP";
         private ExecutionOSRollingLiquidityV4 rolling;
         private Timer rollingRefreshTimer;
         private BarsRequest rollingSessionRequest;
@@ -2709,7 +2713,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                     RememberQualifiedFlowTransition(signal);
                     if (!LogFlowEvents || v3Terminated) continue;
                     double tickSize = SuperDom.Instrument.MasterInstrument.TickSize;
-                    Print("ExecutionOS Flow v4 [" + SuperDom.Instrument.FullName + "] build 2026-10-16.1 EXP; "
+                    Print("ExecutionOS Flow v4 [" + SuperDom.Instrument.FullName + "] build 2026-10-16.3 EXP; "
                         + "NT-local " + SessionClockNow().ToString("yyyy-MM-dd HH:mm:ss.fff")
                         + "; generation " + flowGeneration + "; id " + signal.Id
                         + "; event receipt ms " + ((signal.Updated - flowLogOrigin) / TimeSpan.TicksPerMillisecond)
@@ -2730,7 +2734,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             if (lastFlowStatusPrint != long.MinValue && realNow - lastFlowStatusPrint < 5 * TimeSpan.TicksPerSecond) return;
             lastFlowStatusPrint = realNow;
             Print("ExecutionOS Flow v4 [" + (rollingInstrument == null ? "no instrument" : rollingInstrument.FullName)
-                + "] build 2026-10-16.1 EXP; STATUS; " + FlowStatus
+                + "] build 2026-10-16.3 EXP; STATUS; " + FlowStatus
                 + "; last-qualified " + LastQualifiedFlowSummary + "; flow-render " + FlowRenderingStatus);
         }
         private void DrawFlowEvidence(DrawingContext dc, PriceRow row, double renderWidth, double verticalOffset, double dpi)
@@ -2757,7 +2761,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
         // Presentation-only memory: never feeds a value back into either evidence engine.
         private ExecutionOSFlowEvidenceV4.Signal lastQualifiedFlowSignal;
         private ExecutionOSFlowEvidenceV4.Stage lastQualifiedFlowOutcome;
-        private DateTime lastQualifiedFlowTime;
+        private DateTime lastQualifiedFlowTime, lastQualifiedFlowEndedTime;
         private long lastQualifiedFlowGeneration;
         private string lastQualifiedFlowReason, lastFlowHistoryClearReason = "No qualification recorded";
         private double lastFlowRenderWidth, lastFlowRenderDpi;
@@ -2795,7 +2799,10 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             return "LAST " + FlowPatternLabel(s.Pattern, false) + " @ " + price
                 + "; qualified NT-local " + lastQualifiedFlowTime.ToString("yyyy-MM-dd HH:mm:ss.fff")
                 + (includeAge ? "; age " + age.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "s" : "")
-                + "; last transition " + lastQualifiedFlowOutcome + "; " + lastQualifiedFlowReason;
+                + "; last transition " + lastQualifiedFlowOutcome + "; " + lastQualifiedFlowReason
+                + "; tracking " + FlowTrackingEndLabel()
+                + (lastQualifiedFlowEndedTime == DateTime.MinValue ? "" : "; ended NT-local "
+                    + lastQualifiedFlowEndedTime.ToString("yyyy-MM-dd HH:mm:ss.fff"));
         }
 
         [XmlIgnore]
@@ -2810,14 +2817,15 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                         + " logical; scale " + lastFlowRenderDpi.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + "x"
                         + "; live " + lastFlowLiveLabels + "; history " + lastFlowHistoryLabels
                         + "; compact " + lastFlowCompactLabels + "; no-space " + lastFlowNoSpace
-                        + "; " + lastFlowHistoryVisibility;
+                        + "; " + lastFlowHistoryVisibility + "; " + fixedFlowSummaryVisibility;
             }
         }
 
         private void ClearLastQualifiedFlowSignal(string reason)
         {
             lastQualifiedFlowSignal = null; lastQualifiedFlowReason = null;
-            lastQualifiedFlowTime = DateTime.MinValue; lastQualifiedFlowGeneration = 0;
+            lastQualifiedFlowTime = lastQualifiedFlowEndedTime = DateTime.MinValue; lastQualifiedFlowGeneration = 0;
+            fixedFlowSummaryLines.Clear(); fixedFlowSummaryKey = null;
             lastFlowHistoryClearReason = reason; lastFlowHistoryVisibility = "No retained qualification; " + reason;
         }
 
@@ -2830,7 +2838,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 if (lastQualifiedFlowSignal != null && lastQualifiedFlowGeneration == flowGeneration
                     && lastQualifiedFlowSignal.Id == signal.Id) return;
                 lastQualifiedFlowSignal = signal.Copy(); lastQualifiedFlowGeneration = flowGeneration;
-                lastQualifiedFlowTime = SessionClockNow(); lastQualifiedFlowOutcome = signal.State;
+                lastQualifiedFlowTime = SessionClockNow(); lastQualifiedFlowEndedTime = DateTime.MinValue;
+                lastQualifiedFlowOutcome = signal.State;
                 lastQualifiedFlowReason = signal.Reason;
             }
             else if (lastQualifiedFlowSignal != null && lastQualifiedFlowGeneration == flowGeneration
@@ -2839,6 +2848,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             {
                 // Keep qualification price, time and metrics frozen. Only the recorded outcome changes.
                 lastQualifiedFlowOutcome = signal.State; lastQualifiedFlowReason = signal.Reason;
+                lastQualifiedFlowEndedTime = SessionClockNow();
             }
         }
 
@@ -2886,6 +2896,104 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 : !PersistLastQualifiedFlowSignal ? "History marker disabled; summary retained"
                 : !LastQualifiedFlowMarkerVisible() ? "History marker timed out; summary retained"
                 : "History price outside visible rows, side filtered, or column inactive";
+        }
+
+        [Display(Name = "Show fixed last-event summary", GroupName = "Flow display", Order = 792)]
+        public bool ShowFixedFlowSummary { get; set; }
+
+        [Range(12, 24)]
+        [Display(Name = "Summary font size", GroupName = "Flow display", Order = 794)]
+        public int FixedFlowSummaryFontSize { get; set; }
+
+        private readonly List<FormattedText> fixedFlowSummaryLines = new List<FormattedText>();
+        private string fixedFlowSummaryKey;
+        private Typeface fixedFlowSummaryTypeface;
+        private double fixedFlowSummaryHeight;
+        private string fixedFlowSummaryVisibility = "Not rendered yet";
+
+        private static string FlowPatternName(ExecutionOSFlowEvidenceV4.Kind kind)
+        {
+            return kind == ExecutionOSFlowEvidenceV4.Kind.BuyerAbsorption ? "Buyer absorption (BA)"
+                : kind == ExecutionOSFlowEvidenceV4.Kind.SellerAbsorption ? "Seller absorption (SA)"
+                : kind == ExecutionOSFlowEvidenceV4.Kind.BuyInitiative ? "Buy initiative (BI)" : "Sell initiative (SI)";
+        }
+
+        private string FlowTrackingEndLabel()
+        {
+            if (lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Qualified) return "Active — still tracking";
+            if (lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Expired) return "Ended: Expired";
+            string reason = lastQualifiedFlowReason ?? "";
+            if (lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Invalidated)
+                return reason == "Price retraced the initiative endpoint" || reason == "Price retraced the initiative path"
+                    ? "Ended: Retraced" : reason == "Price crossed the held level" ? "Ended: Held level breached" : "Ended: Invalidated";
+            if (reason.StartsWith("Inside bid", StringComparison.Ordinal)
+                || reason.StartsWith("Inside ask", StringComparison.Ordinal)
+                || reason.StartsWith("Inside quotes", StringComparison.Ordinal)) return "Ended: Quote validation failed";
+            if (reason == "Trade classification deteriorated" || reason == "Execution evidence quality deteriorated")
+                return "Ended: Execution validation failed";
+            if (reason == "Coverage lost" || reason == "Observation coverage lost") return "Ended: Depth coverage lost";
+            if (reason == "Depth source timing uncertain") return "Ended: Depth timing uncertain";
+            return "Ended: Tracking suppressed";
+        }
+
+        private void AddFixedFlowSummaryLine(string value, double size, Brush brush, double width, double dpi)
+        {
+            FormattedText text = new FormattedText(value, Core.Globals.GeneralOptions.CurrentCulture,
+                FlowDirection.LeftToRight, typeFace, size, brush, dpi);
+            text.MaxTextWidth = width;
+            fixedFlowSummaryLines.Add(text);
+            fixedFlowSummaryHeight += text.Height + 1;
+        }
+
+        private void DrawFixedFlowSummary(DrawingContext dc, double width, double height, double dpi)
+        {
+            // A fixed column-local card, drawn after the price rows. No controls, subscriptions,
+            // event interception or detector writes; moving the ladder never moves this origin.
+            if (!ShowFixedFlowSummary || !FlowDetectionEnabled || lastQualifiedFlowSignal == null)
+            {
+                fixedFlowSummaryLines.Clear(); fixedFlowSummaryKey = null;
+                fixedFlowSummaryVisibility = !ShowFixedFlowSummary ? "Fixed summary disabled"
+                    : "Fixed summary waiting for a qualification";
+                return;
+            }
+            if (width < 80 || height < 20)
+            { fixedFlowSummaryVisibility = "Fixed summary needs more column space; full record in tooltip"; return; }
+            double size = Math.Max(12, Math.Min(24, FixedFlowSummaryFontSize));
+            string price = rollingInstrument == null ? "unavailable"
+                : (lastQualifiedFlowSignal.Price * rollingInstrument.MasterInstrument.TickSize)
+                    .ToString(Core.Globals.GeneralOptions.CurrentCulture);
+            string tracking = lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Qualified
+                ? "Active" : FlowTrackingEndLabel();
+            string key = lastQualifiedFlowGeneration + "/" + lastQualifiedFlowSignal.Id + "/" + price
+                + "/" + lastQualifiedFlowTime.Ticks + "/" + lastQualifiedFlowEndedTime.Ticks
+                + "/" + tracking + "/" + lastQualifiedFlowReason + "/" + width + "/" + dpi + "/" + size;
+            if (key != fixedFlowSummaryKey || !ReferenceEquals(typeFace, fixedFlowSummaryTypeface))
+            {
+                fixedFlowSummaryLines.Clear(); fixedFlowSummaryHeight = 10;
+                double textWidth = width - 16;
+                AddFixedFlowSummaryLine(FlowPatternName(lastQualifiedFlowSignal.Pattern) + " @ " + price,
+                    size, Brushes.WhiteSmoke, textWidth, dpi);
+                AddFixedFlowSummaryLine(lastQualifiedFlowTime.ToString("HH:mm:ss.fff") + " NT-local",
+                    size, Brushes.WhiteSmoke, textWidth, dpi);
+                AddFixedFlowSummaryLine(tracking, size, Brushes.WhiteSmoke, textWidth, dpi);
+                if (lastQualifiedFlowOutcome != ExecutionOSFlowEvidenceV4.Stage.Qualified)
+                {
+                    AddFixedFlowSummaryLine(lastQualifiedFlowReason ?? "Reason unavailable", size, Brushes.Silver, textWidth, dpi);
+                    AddFixedFlowSummaryLine("Ended " + lastQualifiedFlowEndedTime.ToString("HH:mm:ss.fff") + " NT-local",
+                        11, Brushes.Silver, textWidth, dpi);
+                }
+                fixedFlowSummaryKey = key; fixedFlowSummaryTypeface = typeFace;
+            }
+            double visibleHeight = Math.Min(height, fixedFlowSummaryHeight);
+            dc.PushClip(new RectangleGeometry(new Rect(0, 0, width, visibleHeight)));
+            dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, width, visibleHeight));
+            double y = 5;
+            foreach (FormattedText line in fixedFlowSummaryLines)
+            { dc.DrawText(line, new Point(8, y)); y += line.Height + 1; }
+            dc.Pop();
+            fixedFlowSummaryVisibility = visibleHeight < fixedFlowSummaryHeight
+                ? "Fixed summary clipped by short viewport; enlarge window or use tooltip"
+                : "Fixed summary visible at column top";
         }
 
         private double FlowNumberWidth(PriceRow row, int side, double dpi)

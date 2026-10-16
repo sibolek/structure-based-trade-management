@@ -1,5 +1,5 @@
-/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Core.cs(50,51): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ContributionObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Tests.csproj]
-/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Core.cs(51,33): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ExecutionMatchedObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-t7h553t7/rolling/Tests.csproj]
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Core.cs(51,33): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ExecutionMatchedObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Tests.csproj]
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Core.cs(50,51): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ContributionObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Tests.csproj]
 PASS Initial Add and bootstrap Update seed zero
 PASS Net additions and cancellations
 PASS Pure execution trade-first
@@ -35,11 +35,11 @@ PASS Atomic snapshot preserves known zeros without fabricated execution interval
 PASS Snapshot trigger uncertainty affects only the addressed level
 PASS Provider source clock can lag receipt time across rolling expiry
 PASS Reset fence cannot confuse lagged depth with pre-reset execution
-BENCH horizon=3s events=1000000 wallMs=349.0 eventsPerSecond=2865037 allocatedBytes=120524632 retainedEntries=30000
-BENCH horizon=5s events=1000000 wallMs=191.3 eventsPerSecond=5228731 allocatedBytes=121048944 retainedEntries=50000
-BENCH horizon=10s events=1000000 wallMs=160.3 eventsPerSecond=6237533 allocatedBytes=122097584 retainedEntries=100000
-BENCH horizon=30s events=1000000 wallMs=200.0 eventsPerSecond=5000958 allocatedBytes=128389048 retainedEntries=300000
-BENCH multiLevel=20 horizon=30s events=1000000 wallMs=826.7 eventsPerSecond=1209580 allocatedBytes=125248928 retainedEntries=300000 matchedVolume=100000
+BENCH horizon=3s events=1000000 wallMs=287.3 eventsPerSecond=3480643 allocatedBytes=120524632 retainedEntries=30000
+BENCH horizon=5s events=1000000 wallMs=208.1 eventsPerSecond=4805560 allocatedBytes=121048944 retainedEntries=50000
+BENCH horizon=10s events=1000000 wallMs=197.0 eventsPerSecond=5076975 allocatedBytes=122097584 retainedEntries=100000
+BENCH horizon=30s events=1000000 wallMs=234.2 eventsPerSecond=4269426 allocatedBytes=128389048 retainedEntries=300000
+BENCH multiLevel=20 horizon=30s events=1000000 wallMs=876.5 eventsPerSecond=1140853 allocatedBytes=125248928 retainedEntries=300000 matchedVolume=100000
 RESULT 35 calculation scenarios passed; 0 failed
 
 Welcome to .NET 10.0!
@@ -133,7 +133,7 @@ PASS Classification deterioration suppresses already qualified absorption
 PASS Confirmation duration is measured after all conditions first agree
 PASS Withdrawals offset refills in net replenishment
 PASS Execution-only correction is not a refill observation
-BENCH flow input pairs=100000 wallMs=418.1 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
+BENCH flow input pairs=100000 wallMs=492.2 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
 RESULT 39 flow scenarios passed; 0 failed
 PASS Experimental defaults are distinct and old spoof alerts start disabled
 PASS Adapter trade-first bid absorption uses exact execution credits
@@ -348,4 +348,41 @@ PASS Real initiative retention and active/ended display buy=True
 PASS Off-screen record is accessible in column tooltip
 PASS Tooltip updates on outcome changes and clears without ticking-age churn
 RESULT 36 last-signal display integration scenarios passed; 0 failed
+PASS Fixed summary defaults to enabled and larger fourteen-point type
+PASS Summary starts empty until a qualification and candidates cannot fill it
+PASS Off-ladder qualification remains in fixed card without logging or hover
+PASS Price movement and scrolling never move the card origin or qualification
+PASS All four event types are spelled out: BuyerAbsorption
+PASS All four event types are spelled out: SellerAbsorption
+PASS All four event types are spelled out: BuyInitiative
+PASS All four event types are spelled out: SellInitiative
+PASS Terminal explanation is specific: Display lifetime elapsed
+PASS Terminal explanation is specific: Price retraced the initiative endpoint
+PASS Terminal explanation is specific: Price retraced the initiative path
+PASS Terminal explanation is specific: Price crossed the held level
+PASS Terminal explanation is specific: Inside quotes locked (tick 400)
+PASS Terminal explanation is specific: Inside quotes crossed (bid tick 401, ask tick 400)
+PASS Terminal explanation is specific: Inside bid unconfirmed
+PASS Terminal explanation is specific: Inside ask unconfirmed
+PASS Terminal explanation is specific: Inside bid and ask unconfirmed
+PASS Terminal explanation is specific: Trade classification deteriorated
+PASS Terminal explanation is specific: Execution evidence quality deteriorated
+PASS Terminal explanation is specific: Observation coverage lost
+PASS Terminal explanation is specific: Coverage lost
+PASS Terminal explanation is specific: Depth source timing uncertain
+PASS Terminal explanation is specific: An unfamiliar future reason
+PASS Unknown invalidation is never incorrectly called a retracement
+PASS History marker timeout and disabled row marker do not hide fixed card
+PASS Disabling and restoring fixed summary preserves detector and retained record
+PASS Unchanged status reuses bounded layout until ending or resize
+PASS Narrow card wraps and clips strictly inside its column
+PASS Tiny widths and short viewports report limited visibility without losing event
+PASS Replacing the qualification removes the previous ending from the card
+PASS Header reset clears fixed card and cached layout
+PASS Real quote failure preserves qualification and exposes accurate reason
+PASS Real initiative expiry remains recorded as qualified and expired
+PASS Real initiative retracement displays the recorded price-path ending
+PASS Real absorption level breach stays distinct from initiative retracement
+PASS Summary options serialize but runtime qualification and ending do not
+RESULT 36 fixed-summary integration scenarios passed; 0 failed
 Experimental source harness passed. Actual NT compilation, visual QA and labelled Level II replay still required.

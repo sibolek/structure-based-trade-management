@@ -29,25 +29,26 @@ namespace System.Windows.Media
     public static class VisualTreeHelper { public static Dpi GetDpi(object v){return new Dpi{PixelsPerDip=1};} }
     public class Brush { public string Key;public Brush(string key){Key=key;} }
     public class SolidColorBrush : Brush {public SolidColorBrush(string key):base(key){} }
-    public static class Brushes { public static Brush LimeGreen=new Brush("green"), Red=new Brush("red"), DarkOrange=new Brush("orange"), Goldenrod=new Brush("gold"), Gray=new Brush("gray"); }
+    public static class Brushes { public static Brush LimeGreen=new Brush("green"), Red=new Brush("red"), DarkOrange=new Brush("orange"), Goldenrod=new Brush("gold"), Gray=new Brush("gray"), Black=new Brush("black"), Silver=new Brush("silver"), WhiteSmoke=new Brush("white-smoke"); }
     public class Pen {public double Thickness; public Pen(Brush b,double t){Thickness=t;} }
     public class FontFamily { }
     public class Typeface {public Typeface(FontFamily f,System.Windows.FontStyle s,System.Windows.FontWeight w,object stretch){} }
     public class FormattedText
     {
-        public string Text;public Brush Brush;public double MaxTextWidth;public int MaxLineCount;public System.Windows.TextAlignment TextAlignment;public System.Windows.TextTrimming Trimming;
-        public double Height{get{return 10;}}public double Width{get{return Text.Length*6;}}
-        public FormattedText(string text,CultureInfo culture,System.Windows.FlowDirection direction,Typeface type,double size,Brush brush,double dpi){Text=text;Brush=brush;}
+        public double FontSize;public string Text;public Brush Brush;public double MaxTextWidth;public int MaxLineCount;public System.Windows.TextAlignment TextAlignment;public System.Windows.TextTrimming Trimming;
+        public double Height{get{return MaxTextWidth>0 && MaxLineCount==0 ? Math.Max(1,Math.Ceiling(Width/MaxTextWidth))*FontSize*1.2 : 10;}}public double Width{get{return Text.Length*6;}}
+        public FormattedText(string text,CultureInfo culture,System.Windows.FlowDirection direction,Typeface type,double size,Brush brush,double dpi){Text=text;Brush=brush;FontSize=size;}
     }
     public class GuidelineSet {public List<double> GuidelinesX=new List<double>(),GuidelinesY=new List<double>();}
     public class DrawnText {public FormattedText Text;public System.Windows.Point Point;}
-    public class RectangleGeometry {public RectangleGeometry(System.Windows.Rect rect){}}
+    public class RectangleGeometry {public System.Windows.Rect Rect;public RectangleGeometry(System.Windows.Rect rect){Rect=rect;}}
+    public class DrawnRectangle {public Brush Brush;public System.Windows.Rect Rect;}
     public class DrawingContext
     {
-        public List<DrawnText> Text=new List<DrawnText>();
-        public void PushClip(RectangleGeometry geometry){}
+        public List<DrawnText> Text=new List<DrawnText>();public List<DrawnRectangle> Rectangles=new List<DrawnRectangle>();public List<System.Windows.Rect> Clips=new List<System.Windows.Rect>();
+        public void PushClip(RectangleGeometry geometry){Clips.Add(geometry.Rect);}
         public void DrawText(FormattedText text,System.Windows.Point point){Text.Add(new DrawnText{Text=text,Point=point});}
-        public void DrawRectangle(Brush brush,Pen pen,System.Windows.Rect rect){}
+        public void DrawRectangle(Brush brush,Pen pen,System.Windows.Rect rect){Rectangles.Add(new DrawnRectangle{Brush=brush,Rect=rect});}
         public void DrawLine(Pen pen,System.Windows.Point a,System.Windows.Point b){}
         public void PushGuidelineSet(GuidelineSet s){}public void Pop(){}
     }

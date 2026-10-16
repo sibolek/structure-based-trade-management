@@ -41,7 +41,7 @@ internal static class Program
  }
  static FlowHarness New(bool rolling=true,bool log=true)
  {
-  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);
+  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);v.ShowFixedFlowSummary=false;
   v.CalculationMode=rolling?ExecutionOSPullingStackingCalculationModeV4.RollingWindow:ExecutionOSPullingStackingCalculationModeV4.LegacyBaseline;
   v.ApplyLegacyResetsToRolling=false;v.ResetTolerance=60000;v.LogFlowEvents=log;Book(v);v.SetState(State.Active);
   // Deterministic harness: exercise the timer callback explicitly instead of racing it.
@@ -94,7 +94,7 @@ internal static class Program
  foreach(double sec in new[]{0.0,.01,.02,5.02}){Time(sec);if(sec==.01||sec==.02){bool ask=sec==.02;GCall(v,"OnMarketDepth",new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Update,Position=0,Price=ask?100.25:100,Volume=200,Time=origin.AddSeconds(sec)});}else GCall(v,"OnRollingRefresh",new object[]{null});}
  return v;
  }
- static string TransitionText(string s){return s.Split(new[]{"; checks-now "},StringSplitOptions.None)[0].Replace("2026-10-16.1","2026-10-14.1");}
+ static string TransitionText(string s){return s.Split(new[]{"; checks-now "},StringSplitOptions.None)[0].Replace("2026-10-16.3","2026-10-14.1");}
  static void CompareAdapters(SuperDomColumn a,SuperDomColumn b,int step){
  foreach(double p in new[]{99.25,99.5,99.75,100,100.25,100.5,100.75,101})foreach(bool ask in new[]{false,true})Eq(Num(a,p,ask),Num(b,p,ask),"P/S parity step"+step);
  object x=GField(a,"flow"),y=GField(b,"flow");foreach(string n in new[]{"QualifiedCount","ResetCount","QuotePauseCount","DroppedTransitionCount","RetainedTrades","RetainedContributions","IsWarm","QuoteReady","Status"})Eq(x.GetType().GetProperty(n,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(x,null),y.GetType().GetProperty(n,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(y,null),"flow parity "+n+" step"+step);
@@ -111,7 +111,7 @@ internal static class Program
  FlowHarness v=New(false);Abs(v,false);Yes(v.Printed.Any(delegate(string x){return x.Contains("; Qualified;")&&x.Contains("net-refill=120/min=50");}),"same diagnostic path in legacy display mode");End(v);
  });
  Test("Native-facing build stamp is consistent in diagnostics and rolling status",delegate{
- FlowHarness v=New();Eq(v.RollingBuild,"2026-10-16.1 EXP","rolling build");Abs(v,false);Yes(v.Printed.Any(delegate(string x){return x.Contains("build 2026-10-16.1 EXP")&&x.Contains("checks-now");}),"transition build");End(v);
+ FlowHarness v=New();Eq(v.RollingBuild,"2026-10-16.3 EXP","rolling build");Abs(v,false);Yes(v.Printed.Any(delegate(string x){return x.Contains("build 2026-10-16.3 EXP")&&x.Contains("checks-now");}),"transition build");End(v);
  });
  Test("Enabled diagnostic capture is bounded by the existing transition queue",delegate{
  FlowHarness v=New();Abs(v,false);Yes(Engine(v).QueuedTransitions==0,"drained synchronously");Yes(Engine(v).DroppedTransitionCount==0,"no extra records");End(v);

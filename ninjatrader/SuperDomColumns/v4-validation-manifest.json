@@ -1,6 +1,30 @@
 {
-  "build": "2026-10-16.1 EXP",
-  "source_sha256": "d93321a3bc75d37c0f2052ed92fec77b43431c7ed772747825d8c3a566bf1920",
-  "current_manifest": "last-signal-validation-manifest.json",
-  "runtime_observations": "v4-checkpoint-notes-2026-10-16.md"
+  "build": "2026-10-16.3 EXP",
+  "source_sha256": "a794505f8066a816caceca3287eb6ca9f74c004b16384fdac3162b9cacee1222",
+  "current_manifest": "compact-summary-validation-manifest.json",
+  "current_guide": "NinjaTrader-v4-Compact-Summary-Guide.html",
+  "event_reason_reference": "Event-Endings-Reference.md",
+  "publication_notes": "v4-compact-checkpoint-notes-2026-10-16.md",
+  "publication_validation": {
+    "scenarios": {
+      "rolling": 35,
+      "history-integration": 36,
+      "summary-integration": 36,
+      "diagnostics": 23,
+      "repair": 57,
+      "repair-integration": 20,
+      "flow-integration": 29,
+      "readiness": 18,
+      "flow": 39,
+      "diagnostics-integration": 6,
+      "compatibility": 37,
+      "readiness-integration": 13
+    },
+    "total_passed": 349,
+    "failed": 0,
+    "source_sha256": "a794505f8066a816caceca3287eb6ca9f74c004b16384fdac3162b9cacee1222",
+    "guide_layout": "v4-test-evidence/guide-layout-check-16.3.json"
+  },
+  "native_validation": "User screenshots support specific displayed behavior; full native compiler and WPF validation not independently established",
+  "git_publication_record": "Containing Git commit and remote branch"
 }

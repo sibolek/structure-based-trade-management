@@ -3,7 +3,7 @@
 from pathlib import Path
 import os,argparse,tempfile,subprocess,hashlib,textwrap,shutil
 from xml.sax.saxutils import escape
-p=argparse.ArgumentParser(description=__doc__);p.add_argument('--source',type=Path);p.add_argument('--log-dir',type=Path);p.add_argument('--only',choices=['rolling','compatibility','flow','flow-integration','repair','repair-integration','readiness','readiness-integration','diagnostics','diagnostics-integration','history-integration']);a=p.parse_args()
+p=argparse.ArgumentParser(description=__doc__);p.add_argument('--source',type=Path);p.add_argument('--log-dir',type=Path);p.add_argument('--only',choices=['rolling','compatibility','flow','flow-integration','repair','repair-integration','readiness','readiness-integration','diagnostics','diagnostics-integration','history-integration','summary-integration']);a=p.parse_args()
 f=Path(__file__).resolve().parent;s=(a.source or f.parent/'ExecutionOSPullingStacking_v4_Experimental.cs').resolve();text=s.read_text()
 assert hashlib.sha256((f/'baseline.cs.txt').read_bytes()).hexdigest()=='a521f8c49dc62dcac8391d813ad5eb3399922764f7a42b4bfd69899dcc001298'
 assert hashlib.sha256((f/'v3-baseline.cs.txt').read_bytes()).hexdigest()=='6d6d7770feeb9442a01984cec190782683a5c106b078c6d88c193e7c4c655902'
@@ -31,6 +31,7 @@ with tempfile.TemporaryDirectory(prefix='executionos-v4-tests-') as td:
  if (f/'diagnostics-tests.cs.txt').exists():groups.append(('diagnostics',{'Program.cs':(f/'diagnostics-tests.cs.txt').read_text(),'Flow.cs':core('v4 Flow evidence core'),'PreviousFlow.cs':(f/'flow-previous.cs.txt').read_text()},[],'Program'))
  if (f/'diagnostics-adapter-tests.cs.txt').exists():groups.append(('diagnostics-integration',{'Program.cs':(f/'diagnostics-adapter-tests.cs.txt').read_text(),'Stubs.cs':(f/'api-shape-stubs.cs.txt').read_text(),'PreviousColumn.cs':(f/'column-previous.cs.txt').read_text()},[frozen],'Program'))
  if (f/'history-adapter-tests.cs.txt').exists():groups.append(('history-integration',{'Program.cs':(f/'history-adapter-tests.cs.txt').read_text(),'Stubs.cs':(f/'api-shape-stubs.cs.txt').read_text()},[frozen],'Program'))
+ if (f/'summary-adapter-tests.cs.txt').exists():groups.append(('summary-integration',{'Program.cs':(f/'summary-adapter-tests.cs.txt').read_text(),'Stubs.cs':(f/'api-shape-stubs.cs.txt').read_text()},[frozen],'Program'))
  for kind,files,refs,startup in groups:
   if a.only and a.only != kind:continue
   d=root/kind;d.mkdir()

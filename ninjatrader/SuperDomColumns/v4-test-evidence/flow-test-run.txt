@@ -37,5 +37,5 @@ PASS Classification deterioration suppresses already qualified absorption
 PASS Confirmation duration is measured after all conditions first agree
 PASS Withdrawals offset refills in net replenishment
 PASS Execution-only correction is not a refill observation
-BENCH flow input pairs=100000 wallMs=418.1 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
+BENCH flow input pairs=100000 wallMs=492.2 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
 RESULT 39 flow scenarios passed; 0 failed

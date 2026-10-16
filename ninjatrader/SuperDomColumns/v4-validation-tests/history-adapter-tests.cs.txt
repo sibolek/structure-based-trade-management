@@ -41,7 +41,7 @@ internal static class Program
  }
  static FlowHarness New(bool rolling=true,bool log=true)
  {
-  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);
+  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);v.ShowFixedFlowSummary=false;
   v.CalculationMode=rolling?ExecutionOSPullingStackingCalculationModeV4.RollingWindow:ExecutionOSPullingStackingCalculationModeV4.LegacyBaseline;
   v.ApplyLegacyResetsToRolling=false;v.ResetTolerance=60000;v.LogFlowEvents=log;Book(v);v.SetState(State.Active);
   // Deterministic harness: exercise the timer callback explicitly instead of racing it.

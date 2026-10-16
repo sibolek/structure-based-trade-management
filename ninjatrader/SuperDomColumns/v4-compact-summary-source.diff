@@ -1,0 +1,70 @@
+--- 2026-10-16.2
++++ 2026-10-16.3
+@@ -1964,7 +1964,7 @@
+ 
+     public partial class ExecutionOSPullingStacking_v4_Experimental
+     {
+-        private const string RollingBuildId = "2026-10-16.2 EXP";
++        private const string RollingBuildId = "2026-10-16.3 EXP";
+         private ExecutionOSRollingLiquidityV4 rolling;
+         private Timer rollingRefreshTimer;
+         private BarsRequest rollingSessionRequest;
+@@ -2713,7 +2713,7 @@
+                     RememberQualifiedFlowTransition(signal);
+                     if (!LogFlowEvents || v3Terminated) continue;
+                     double tickSize = SuperDom.Instrument.MasterInstrument.TickSize;
+-                    Print("ExecutionOS Flow v4 [" + SuperDom.Instrument.FullName + "] build 2026-10-16.2 EXP; "
++                    Print("ExecutionOS Flow v4 [" + SuperDom.Instrument.FullName + "] build 2026-10-16.3 EXP; "
+                         + "NT-local " + SessionClockNow().ToString("yyyy-MM-dd HH:mm:ss.fff")
+                         + "; generation " + flowGeneration + "; id " + signal.Id
+                         + "; event receipt ms " + ((signal.Updated - flowLogOrigin) / TimeSpan.TicksPerMillisecond)
+@@ -2734,7 +2734,7 @@
+             if (lastFlowStatusPrint != long.MinValue && realNow - lastFlowStatusPrint < 5 * TimeSpan.TicksPerSecond) return;
+             lastFlowStatusPrint = realNow;
+             Print("ExecutionOS Flow v4 [" + (rollingInstrument == null ? "no instrument" : rollingInstrument.FullName)
+-                + "] build 2026-10-16.2 EXP; STATUS; " + FlowStatus
++                + "] build 2026-10-16.3 EXP; STATUS; " + FlowStatus
+                 + "; last-qualified " + LastQualifiedFlowSummary + "; flow-render " + FlowRenderingStatus);
+         }
+         private void DrawFlowEvidence(DrawingContext dc, PriceRow row, double renderWidth, double verticalOffset, double dpi)
+@@ -2942,7 +2942,7 @@
+                 FlowDirection.LeftToRight, typeFace, size, brush, dpi);
+             text.MaxTextWidth = width;
+             fixedFlowSummaryLines.Add(text);
+-            fixedFlowSummaryHeight += text.Height + 3;
++            fixedFlowSummaryHeight += text.Height + 1;
+         }
+ 
+         private void DrawFixedFlowSummary(DrawingContext dc, double width, double height, double dpi)
+@@ -2962,7 +2962,8 @@
+             string price = rollingInstrument == null ? "unavailable"
+                 : (lastQualifiedFlowSignal.Price * rollingInstrument.MasterInstrument.TickSize)
+                     .ToString(Core.Globals.GeneralOptions.CurrentCulture);
+-            string tracking = FlowTrackingEndLabel();
++            string tracking = lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Qualified
++                ? "Active" : FlowTrackingEndLabel();
+             string key = lastQualifiedFlowGeneration + "/" + lastQualifiedFlowSignal.Id + "/" + price
+                 + "/" + lastQualifiedFlowTime.Ticks + "/" + lastQualifiedFlowEndedTime.Ticks
+                 + "/" + tracking + "/" + lastQualifiedFlowReason + "/" + width + "/" + dpi + "/" + size;
+@@ -2970,12 +2971,10 @@
+             {
+                 fixedFlowSummaryLines.Clear(); fixedFlowSummaryHeight = 10;
+                 double textWidth = width - 16;
+-                AddFixedFlowSummaryLine("WHAT QUALIFIED", 11, Brushes.Silver, textWidth, dpi);
+                 AddFixedFlowSummaryLine(FlowPatternName(lastQualifiedFlowSignal.Pattern) + " @ " + price,
+                     size, Brushes.WhiteSmoke, textWidth, dpi);
+                 AddFixedFlowSummaryLine(lastQualifiedFlowTime.ToString("HH:mm:ss.fff") + " NT-local",
+                     size, Brushes.WhiteSmoke, textWidth, dpi);
+-                AddFixedFlowSummaryLine("TRACKING", 11, Brushes.Silver, textWidth, dpi);
+                 AddFixedFlowSummaryLine(tracking, size, Brushes.WhiteSmoke, textWidth, dpi);
+                 if (lastQualifiedFlowOutcome != ExecutionOSFlowEvidenceV4.Stage.Qualified)
+                 {
+@@ -2990,7 +2989,7 @@
+             dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, width, visibleHeight));
+             double y = 5;
+             foreach (FormattedText line in fixedFlowSummaryLines)
+-            { dc.DrawText(line, new Point(8, y)); y += line.Height + 3; }
++            { dc.DrawText(line, new Point(8, y)); y += line.Height + 1; }
+             dc.Pop();
+             fixedFlowSummaryVisibility = visibleHeight < fixedFlowSummaryHeight
+                 ? "Fixed summary clipped by short viewport; enlarge window or use tooltip"

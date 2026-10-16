@@ -1,0 +1,163 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.IO;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Data;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.SuperDomColumns;
+using NinjaTrader.Gui.SuperDom;
+using System.Windows.Media;
+using F=NinjaTrader.NinjaScript.SuperDomColumns.ExecutionOSFlowEvidenceV4;
+public class FlowHarness:ExecutionOSPullingStacking_v4_Experimental
+{
+ public void SetState(State s){State=s;OnStateChange();}
+ public void Depth(MarketDepthEventArgs e){OnMarketDepth(e);}
+ public void Data(MarketDataEventArgs e){OnMarketData(e);}
+ public DrawingContext Render(double width=240){DrawingContext d=new DrawingContext();OnRender(d,width);return d;}
+}
+internal static class Program
+{
+ static int passed;static DateTime origin=new DateTime(2026,10,13,10,0,0);
+ static Type type=typeof(ExecutionOSPullingStacking_v4_Experimental);
+ static void Yes(bool value,string why){if(!value)throw new Exception(why);}
+ static void Eq(object a,object b,string why){if(!Equals(a,b))throw new Exception(why+": "+a+" != "+b);}
+ static void Test(string name,Action test){test();passed++;Console.WriteLine("PASS "+name);}
+ static object Call(FlowHarness v,string name,params object[] args){return type.GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance).Invoke(v,args);}
+ static object Field(FlowHarness v,string name){return type.GetField(name,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(v);}
+ static F Engine(FlowHarness v){return (F)Field(v,"flow");}
+ static void Time(double seconds){Connection.PlaybackConnection.Now=origin.AddSeconds(seconds);}
+ static void Refresh(FlowHarness v,double seconds){Time(seconds);Call(v,"OnRollingRefresh",new object[]{null});}
+ static void Book(FlowHarness v)
+ {
+  for(int i=0;i<4;i++){
+   v.SuperDom.MarketDepth.Bids.Add(new MarketDepthRow{Price=100-i*.25,Volume=200});
+   v.SuperDom.MarketDepth.Asks.Add(new MarketDepthRow{Price=100.25+i*.25,Volume=200});
+   v.SuperDom.Rows.Add(new PriceRow{Price=100-i*.25,BidVolume=200});v.SuperDom.Rows.Add(new PriceRow{Price=100.25+i*.25,AskVolume=200});
+  }
+ }
+ static FlowHarness New(bool rolling=true,bool log=true)
+ {
+  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);v.ShowFixedFlowSummary=false;
+  v.CalculationMode=rolling?ExecutionOSPullingStackingCalculationModeV4.RollingWindow:ExecutionOSPullingStackingCalculationModeV4.LegacyBaseline;
+  v.ApplyLegacyResetsToRolling=false;v.ResetTolerance=60000;v.LogFlowEvents=log;Book(v);v.SetState(State.Active);
+  // Deterministic harness: exercise the timer callback explicitly instead of racing it.
+  Timer timer=(Timer)Field(v,"rollingRefreshTimer");timer.Dispose();type.GetField("rollingRefreshTimer",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,null);
+  Refresh(v,0);Update(v,false,0,200,.01);Update(v,true,0,200,.02);Refresh(v,5.02);return v;
+ }
+ static void Update(FlowHarness v,bool ask,int pos,long qty,double seconds,double lag=0)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book[pos].Volume=qty;
+  PriceRow row=v.SuperDom.Rows.First(delegate(PriceRow r){return r.Price==price;});if(ask)row.AskVolume=qty;else row.BidVolume=qty;
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Update,Position=pos,Price=price,Volume=qty,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Remove(FlowHarness v,bool ask,int pos,double seconds)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book.RemoveAt(pos);
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Remove,Position=pos,Price=price,Volume=0,Time=origin.AddSeconds(seconds)});
+ }
+ static void Trade(FlowHarness v,bool buy,double price,long qty,double seconds,double bid=100,double ask=100.25,double lag=0)
+ {
+  Time(seconds);v.Data(new MarketDataEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Last,Price=price,Volume=qty,Bid=bid,Ask=ask,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Abs(FlowHarness v,bool ask,bool depthFirst=false,double lag=0)
+ {
+  double price=ask?100.25:100;
+  for(int i=0;i<2;i++){
+   double t=5.1+i*.4;
+   if(depthFirst){Update(v,ask,0,140,t+.01,lag);Trade(v,ask,price,60,t+.04,100,100.25,lag+.04);}
+   else{Trade(v,ask,price,60,t,100,100.25,lag);Update(v,ask,0,140,t+.01,lag);}
+   Update(v,ask,0,200,t+.06,lag);
+  }
+  Refresh(v,5.9);Refresh(v,6.5);
+ }
+ static F.Signal At(FlowHarness v,bool ask,double price){return Engine(v).At(ask?F.Side.Ask:F.Side.Bid,(long)Math.Round(price/.25));}
+ static void End(FlowHarness v){v.SetState(State.Terminated);}
+ static void Add(FlowHarness v,bool ask,double price,double seconds)
+ {
+ Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;book.Insert(0,new MarketDepthRow{Price=price,Volume=200});
+ if(!v.SuperDom.Rows.Any(delegate(PriceRow r){return r.Price==price;}))v.SuperDom.Rows.Add(new PriceRow{Price=price});
+ v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Add,Position=0,Price=price,Volume=200,Time=origin.AddSeconds(seconds)});
+ }
+
+ static F.Signal Remembered(FlowHarness v){return (F.Signal)Field(v,"lastQualifiedFlowSignal");}
+ static F.Stage Outcome(FlowHarness v){return (F.Stage)Field(v,"lastQualifiedFlowOutcome");}
+ static F.Signal Sample(long id=100,F.Kind kind=F.Kind.SellInitiative,long price=400){return new F.Signal{Id=id,Pattern=kind,Price=price,State=F.Stage.Qualified,Detected=origin.AddSeconds(6).Ticks,Updated=origin.AddSeconds(6.5).Ticks,QualifiedAt=origin.AddSeconds(6.5).Ticks,Executed=141,Dominance=88,Reason="qualified fixture"};}
+ static void Save(FlowHarness v,F.Signal s){Time(6.5);Call(v,"RememberQualifiedFlowTransition",s);}
+ static void SetField(FlowHarness v,string field,object value){type.GetField(field,BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,value);}
+ static List<DrawnText> Hist(DrawingContext d){return d.Text.Where(delegate(DrawnText x){return x.Text.Brush.Key=="gray";}).ToList();}
+ static void Initiative(FlowHarness v,bool buy){
+  if(buy){Trade(v,true,100.25,50,5.1);Remove(v,true,0,5.11);Remove(v,false,3,5.12);Add(v,false,100.25,5.13);Trade(v,true,100.5,50,5.5,100.25,100.5);Remove(v,true,0,5.51);Add(v,false,100.5,5.52);Trade(v,true,100.75,50,5.9,100.5,100.75);}
+  else{Trade(v,false,100,50,5.1);Remove(v,false,0,5.11);Remove(v,true,3,5.12);Add(v,true,100,5.13);Trade(v,false,99.75,50,5.5,99.75,100);Remove(v,false,0,5.51);Add(v,true,99.75,5.52);Trade(v,false,99.5,50,5.9,99.5,99.75);}
+  Refresh(v,6.4);
+ }
+ static FlowHarness Panel(bool log=false){FlowHarness v=New(true,log);v.ShowFixedFlowSummary=true;for(int i=0;i<50;i++)v.SuperDom.Rows.Add(new PriceRow{Price=110+i*.25});return v;}
+ static List<DrawnText> Card(DrawingContext d){return d.Text.Where(delegate(DrawnText t){return t.Text.Brush.Key=="silver"||t.Text.Brush.Key=="white-smoke";}).ToList();}
+ static string CardText(DrawingContext d){return String.Join("|",Card(d).Select(delegate(DrawnText x){return x.Text.Text;}));}
+ static void Terminal(FlowHarness v,F.Stage stage,string reason){F.Signal s=Sample();s.State=stage;s.Reason=reason;Time(8);Call(v,"RememberQualifiedFlowTransition",s);}
+ public static int Main(){try{
+ Test("Fixed summary defaults to enabled and larger fourteen-point type",delegate{
+  FlowHarness v=new FlowHarness();v.SetState(State.SetDefaults);Yes(v.ShowFixedFlowSummary,"default enabled");Eq(v.FixedFlowSummaryFontSize,14,"font");End(v);
+ });
+ Test("Summary starts empty until a qualification and candidates cannot fill it",delegate{
+  var v=Panel();Eq(Card(v.Render()).Count,0,"no fabricated history");F.Signal s=Sample();s.State=F.Stage.Candidate;Save(v,s);Eq(Card(v.Render()).Count,0,"candidate not qualified");End(v);
+ });
+ Test("Off-ladder qualification remains in fixed card without logging or hover",delegate{
+  var v=Panel();Save(v,Sample(100,F.Kind.SellInitiative,9999));string text=CardText(v.Render(300));Yes(text.Contains("Sell initiative (SI) @ 2499.75")&&text.Contains("10:00:06.500 NT-local"),"full frozen identity");Yes(!text.Contains("WHAT QUALIFIED")&&!text.Contains("TRACKING")&&text.Contains("Active"),"compact layout without headings");Eq(v.Printed.Count,0,"logging not needed");End(v);
+ });
+ Test("Price movement and scrolling never move the card origin or qualification",delegate{
+  var v=Panel();Save(v,Sample());var a=Card(v.Render(300));v.SuperDom.Rows.Reverse();Time(9);var b=Card(v.Render(300));Eq(a[0].Point.Y,b[0].Point.Y,"pinned origin");Eq(CardText(v.Render(300)),String.Join("|",a.Select(delegate(DrawnText t){return t.Text.Text;})),"unchanged snapshot");End(v);
+ });
+ foreach(F.Kind kind in new[]{F.Kind.BuyerAbsorption,F.Kind.SellerAbsorption,F.Kind.BuyInitiative,F.Kind.SellInitiative}){F.Kind k=kind;Test("All four event types are spelled out: "+kind,delegate{
+  var v=Panel();Save(v,Sample(100,k));string text=CardText(v.Render(300));string expected=k==F.Kind.BuyerAbsorption?"Buyer absorption (BA)":k==F.Kind.SellerAbsorption?"Seller absorption (SA)":k==F.Kind.BuyInitiative?"Buy initiative (BI)":"Sell initiative (SI)";Yes(text.Contains(expected),"human-readable type");End(v);
+ });}
+ string[] reasons={"Display lifetime elapsed","Price retraced the initiative endpoint","Price retraced the initiative path","Price crossed the held level","Inside quotes locked (tick 400)","Inside quotes crossed (bid tick 401, ask tick 400)","Inside bid unconfirmed","Inside ask unconfirmed","Inside bid and ask unconfirmed","Trade classification deteriorated","Execution evidence quality deteriorated","Observation coverage lost","Coverage lost","Depth source timing uncertain","An unfamiliar future reason"};
+ string[] labels={"Expired","Retraced","Retraced","Held level breached","Quote validation failed","Quote validation failed","Quote validation failed","Quote validation failed","Quote validation failed","Execution validation failed","Execution validation failed","Depth coverage lost","Depth coverage lost","Depth timing uncertain","Tracking suppressed"};
+ for(int i=0;i<reasons.Length;i++){string reason=reasons[i],label=labels[i];F.Stage stage=i==0?F.Stage.Expired:i<=3?F.Stage.Invalidated:F.Stage.Suppressed;Test("Terminal explanation is specific: "+reason,delegate{
+  var v=Panel();Save(v,Sample());Terminal(v,stage,reason);string text=CardText(v.Render(320));Yes(text.Contains("Ended: "+label)&&text.Contains(reason),"category and exact reason");Yes(text.Contains("10:00:06.500 NT-local")&&text.Contains("Ended 10:00:08.000 NT-local"),"qualification and ending times separate");Eq(Remembered(v).State,F.Stage.Qualified,"qualification not rewritten");Eq(Remembered(v).Price,400L,"price frozen");End(v);
+ });}
+ Test("Unknown invalidation is never incorrectly called a retracement",delegate{
+  var v=Panel();Save(v,Sample());Terminal(v,F.Stage.Invalidated,"Other invalidation");Yes(CardText(v.Render(320)).Contains("Ended: Invalidated"),"unknown fallback");End(v);
+ });
+ Test("History marker timeout and disabled row marker do not hide fixed card",delegate{
+  var v=Panel();Save(v,Sample());v.PersistLastQualifiedFlowSignal=false;v.LastQualifiedFlowHoldSeconds=1;Time(60);Yes(Card(v.Render()).Count>0,"independent card lifetime");Yes(Remembered(v)!=null,"record kept");End(v);
+ });
+ Test("Disabling and restoring fixed summary preserves detector and retained record",delegate{
+  var v=Panel();Save(v,Sample());F core=Engine(v);long resets=core.ResetCount;v.ShowFixedFlowSummary=false;Eq(Card(v.Render()).Count,0,"hidden");v.FixedFlowSummaryFontSize=20;Refresh(v,7);Yes(object.ReferenceEquals(core,Engine(v)),"same engine");Eq(core.ResetCount,resets,"no detector resets");v.ShowFixedFlowSummary=true;Yes(Card(v.Render()).Any(delegate(DrawnText t){return t.Text.FontSize==20;}),"restored font and card");End(v);
+ });
+ Test("Unchanged status reuses bounded layout until ending or resize",delegate{
+  var v=Panel();Save(v,Sample());var a=Card(v.Render(300));var b=Card(v.Render(300));Yes(object.ReferenceEquals(a[1].Text,b[1].Text),"cached formatted text");Terminal(v,F.Stage.Expired,"Display lifetime elapsed");var c=Card(v.Render(300));Yes(!object.ReferenceEquals(a[1].Text,c[1].Text),"ending rebuild");var d=Card(v.Render(400));Yes(!object.ReferenceEquals(c[1].Text,d[1].Text),"width rebuild");End(v);
+ });
+ Test("Narrow card wraps and clips strictly inside its column",delegate{
+  var v=Panel();Save(v,Sample());Terminal(v,F.Stage.Suppressed,"Inside quotes crossed (bid tick 401, ask tick 400)");var d=v.Render(170);Yes(Card(d).All(delegate(DrawnText t){return t.Text.MaxTextWidth==154&&t.Point.X==8;}),"wrap width with padding");var r=d.Rectangles.Last();Eq(r.Brush.Key,"black","opaque background masks row text");Yes(r.Rect.Left==0&&r.Rect.Width==170,"column bounds");Yes(d.Clips.Last().Width==170,"clip matches card");End(v);
+ });
+ Test("Tiny widths and short viewports report limited visibility without losing event",delegate{
+  var v=Panel();Save(v,Sample());Eq(Card(v.Render(16)).Count,0,"no illegible sliver");Yes(v.FlowRenderingStatus.Contains("needs more column space"),"width diagnosis");v.SuperDom.Rows.RemoveRange(2,v.SuperDom.Rows.Count-2);v.Render(300);Yes(v.FlowRenderingStatus.Contains("clipped by short viewport"),"height diagnosis");Yes(v.LastQualifiedFlowSummary.Contains("LAST SELL"),"tooltip/property retains details");End(v);
+ });
+ Test("Replacing the qualification removes the previous ending from the card",delegate{
+  var v=Panel();Save(v,Sample());Terminal(v,F.Stage.Suppressed,"Inside bid unconfirmed");Time(9);Call(v,"RememberQualifiedFlowTransition",Sample(101,F.Kind.BuyInitiative,410));string text=CardText(v.Render(320));Yes(text.Contains("Buy initiative (BI) @ 102.5")&&text.Contains("Active"),"new qualification");Yes(!text.Contains("Ended ")&&!text.Contains("unconfirmed"),"no stale terminal info");End(v);
+ });
+ Test("Header reset clears fixed card and cached layout",delegate{
+  var v=Panel();Save(v,Sample());v.Render();v.OnColumnLabelClicked(null,null);Eq(Card(v.Render()).Count,0,"no card after reset");Eq(((System.Collections.IList)Field(v,"fixedFlowSummaryLines")).Count,0,"layout cleared");End(v);
+ });
+ Test("Real quote failure preserves qualification and exposes accurate reason",delegate{
+  var v=Panel();Abs(v,false);Add(v,false,100.25,6.6);string text=CardText(v.Render(320));Yes(text.Contains("Buyer absorption (BA)")&&text.Contains("Ended: Quote validation failed")&&text.Contains("Inside quotes locked"),"real quote gate ending");End(v);
+ });
+ Test("Real initiative expiry remains recorded as qualified and expired",delegate{
+  var v=Panel();Initiative(v,true);Refresh(v,10);string text=CardText(v.Render(320));Yes(text.Contains("Buy initiative (BI)")&&text.Contains("Ended: Expired")&&text.Contains("Display lifetime elapsed"),"real expiry");End(v);
+ });
+ Test("Real initiative retracement displays the recorded price-path ending",delegate{
+  var v=Panel();Initiative(v,true);Trade(v,false,100,1,6.6,100.5,100.75);string text=CardText(v.Render(320));Yes(text.Contains("Buy initiative (BI)")&&text.Contains("Ended: Retraced")&&text.Contains("Price retraced the initiative path"),"real retracement: "+text);End(v);
+ });
+ Test("Real absorption level breach stays distinct from initiative retracement",delegate{
+  var v=Panel();Abs(v,false);Trade(v,false,99.5,1,6.6);string text=CardText(v.Render(320));Yes(text.Contains("Buyer absorption (BA)")&&text.Contains("Ended: Held level breached"),"real held level breach: "+text);End(v);
+ });
+ Test("Summary options serialize but runtime qualification and ending do not",delegate{
+  var v=Panel();Save(v,Sample());Terminal(v,F.Stage.Expired,"Display lifetime elapsed");string xml;var ser=new XmlSerializer(typeof(FlowHarness));using(var w=new StringWriter()){ser.Serialize(w,v);xml=w.ToString();}Yes(xml.Contains("ShowFixedFlowSummary")&&xml.Contains("FixedFlowSummaryFontSize"),"preferences saved");Yes(!xml.Contains("qualified fixture")&&!xml.Contains("Display lifetime elapsed")&&!xml.Contains("lastQualifiedFlowEndedTime"),"session-only history");End(v);
+ });
+ Console.WriteLine("RESULT "+passed+" fixed-summary integration scenarios passed; 0 failed");return 0;
+ }catch(Exception ex){Console.Error.WriteLine("FAIL "+ex);return 1;}}
+}

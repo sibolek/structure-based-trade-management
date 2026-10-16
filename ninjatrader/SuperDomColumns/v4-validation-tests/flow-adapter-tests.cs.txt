@@ -41,7 +41,7 @@ internal static class Program
  }
  static FlowHarness New(bool rolling=true,bool log=true)
  {
-  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);
+  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);v.ShowFixedFlowSummary=false;
   v.CalculationMode=rolling?ExecutionOSPullingStackingCalculationModeV4.RollingWindow:ExecutionOSPullingStackingCalculationModeV4.LegacyBaseline;
   v.ApplyLegacyResetsToRolling=false;v.ResetTolerance=60000;v.LogFlowEvents=log;Book(v);v.SetState(State.Active);
   // Deterministic harness: exercise the timer callback explicitly instead of racing it.
@@ -77,7 +77,7 @@ internal static class Program
  static F.Signal At(FlowHarness v,bool ask,double price){return Engine(v).At(ask?F.Side.Ask:F.Side.Bid,(long)Math.Round(price/.25));}
  static void End(FlowHarness v){v.SetState(State.Terminated);}
  public static int Main(){try{
- Test("Experimental defaults are distinct and old spoof alerts start disabled",delegate{FlowHarness v=new FlowHarness{SuperDom=new SuperDom()};v.SetState(State.SetDefaults);Yes(v.FlowDetectionEnabled&&v.DetectAbsorption&&v.DetectInitiative,"detectors");Yes(!v.SpoofDetectionEnabled&&!v.LogFlowEvents,"quiet defaults");Eq(v.DefaultWidth,240,"width");Eq(v.FlowMinimumMatchPercent,80,"trial quality gate");});
+ Test("Experimental defaults are distinct and old spoof alerts start disabled",delegate{FlowHarness v=new FlowHarness{SuperDom=new SuperDom()};v.SetState(State.SetDefaults);v.ShowFixedFlowSummary=false;Yes(v.FlowDetectionEnabled&&v.DetectAbsorption&&v.DetectInitiative,"detectors");Yes(!v.SpoofDetectionEnabled&&!v.LogFlowEvents,"quiet defaults");Eq(v.DefaultWidth,240,"width");Eq(v.FlowMinimumMatchPercent,80,"trial quality gate");});
  Test("Adapter trade-first bid absorption uses exact execution credits",delegate{FlowHarness v=New();Abs(v,false);Eq(At(v,false,100).State,F.Stage.Qualified,"bid absorption");Eq(At(v,false,100).Matched,120L,"matched");Eq(At(v,false,100).Replenished,120L,"replenished");Yes(v.Printed.Any(delegate(string s){return s.Contains("BuyerAbsorption; Qualified");}),"log qualified");End(v);});
  Test("Adapter trade-first ask absorption is symmetric",delegate{FlowHarness v=New();Abs(v,true);Eq(At(v,true,100.25).Pattern,F.Kind.SellerAbsorption,"ask side");Eq(At(v,true,100.25).State,F.Stage.Qualified,"qualified");End(v);});
  Test("Adapter depth-first ordering reconciles without double counting refills",delegate{FlowHarness v=New();Abs(v,false,true);Eq(At(v,false,100).State,F.Stage.Qualified,"qualified");Eq(At(v,false,100).Refills,2,"two actual refills");Eq(At(v,false,100).Matched,120L,"execution volume");End(v);});

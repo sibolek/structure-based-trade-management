@@ -1,0 +1,53 @@
+[
+  {
+    "width": 1440,
+    "scroll": 1440,
+    "reasonSections": 1,
+    "tableCount": 5,
+    "brokenAnchors": [],
+    "localLinks": [
+      "ExecutionOSPullingStacking_v4_Experimental.cs",
+      "ExecutionOS-v4-Compact-Summary-source-bundle.zip",
+      "README-v4-Compact-Summary.md",
+      "Event-Endings-Reference.md",
+      "assets/retraced-example-user-screenshot.png"
+    ],
+    "imageLoaded": true,
+    "missingLocal": [],
+    "build": "16.3"
+  },
+  {
+    "width": 768,
+    "scroll": 768,
+    "reasonSections": 1,
+    "tableCount": 5,
+    "brokenAnchors": [],
+    "localLinks": [
+      "ExecutionOSPullingStacking_v4_Experimental.cs",
+      "ExecutionOS-v4-Compact-Summary-source-bundle.zip",
+      "README-v4-Compact-Summary.md",
+      "Event-Endings-Reference.md",
+      "assets/retraced-example-user-screenshot.png"
+    ],
+    "imageLoaded": true,
+    "missingLocal": [],
+    "build": "16.3"
+  },
+  {
+    "width": 390,
+    "scroll": 390,
+    "reasonSections": 1,
+    "tableCount": 5,
+    "brokenAnchors": [],
+    "localLinks": [
+      "ExecutionOSPullingStacking_v4_Experimental.cs",
+      "ExecutionOS-v4-Compact-Summary-source-bundle.zip",
+      "README-v4-Compact-Summary.md",
+      "Event-Endings-Reference.md",
+      "assets/retraced-example-user-screenshot.png"
+    ],
+    "imageLoaded": true,
+    "missingLocal": [],
+    "build": "16.3"
+  }
+]

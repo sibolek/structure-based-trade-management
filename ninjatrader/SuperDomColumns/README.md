@@ -58,3 +58,7 @@ determination of spoofing. Pulling/stacking calculations remain unchanged.
 
 Status: implementation and static review complete; NinjaTrader compilation and
 live-market threshold calibration are pending.
+
+## Experimental v4
+
+The separately named v4 column has an optional rolling calculation and experimental absorption/initiative observations. See the [current v4 checkpoint](README-Pulling-Stacking-v4-Experimental.md) for build 2026-10-16.3, the compact fixed last-event summary, validation, and installation instructions. The original column above is unchanged.

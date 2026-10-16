@@ -1,0 +1,37 @@
+PASS Fixed summary defaults to enabled and larger fourteen-point type
+PASS Summary starts empty until a qualification and candidates cannot fill it
+PASS Off-ladder qualification remains in fixed card without logging or hover
+PASS Price movement and scrolling never move the card origin or qualification
+PASS All four event types are spelled out: BuyerAbsorption
+PASS All four event types are spelled out: SellerAbsorption
+PASS All four event types are spelled out: BuyInitiative
+PASS All four event types are spelled out: SellInitiative
+PASS Terminal explanation is specific: Display lifetime elapsed
+PASS Terminal explanation is specific: Price retraced the initiative endpoint
+PASS Terminal explanation is specific: Price retraced the initiative path
+PASS Terminal explanation is specific: Price crossed the held level
+PASS Terminal explanation is specific: Inside quotes locked (tick 400)
+PASS Terminal explanation is specific: Inside quotes crossed (bid tick 401, ask tick 400)
+PASS Terminal explanation is specific: Inside bid unconfirmed
+PASS Terminal explanation is specific: Inside ask unconfirmed
+PASS Terminal explanation is specific: Inside bid and ask unconfirmed
+PASS Terminal explanation is specific: Trade classification deteriorated
+PASS Terminal explanation is specific: Execution evidence quality deteriorated
+PASS Terminal explanation is specific: Observation coverage lost
+PASS Terminal explanation is specific: Coverage lost
+PASS Terminal explanation is specific: Depth source timing uncertain
+PASS Terminal explanation is specific: An unfamiliar future reason
+PASS Unknown invalidation is never incorrectly called a retracement
+PASS History marker timeout and disabled row marker do not hide fixed card
+PASS Disabling and restoring fixed summary preserves detector and retained record
+PASS Unchanged status reuses bounded layout until ending or resize
+PASS Narrow card wraps and clips strictly inside its column
+PASS Tiny widths and short viewports report limited visibility without losing event
+PASS Replacing the qualification removes the previous ending from the card
+PASS Header reset clears fixed card and cached layout
+PASS Real quote failure preserves qualification and exposes accurate reason
+PASS Real initiative expiry remains recorded as qualified and expired
+PASS Real initiative retracement displays the recorded price-path ending
+PASS Real absorption level breach stays distinct from initiative retracement
+PASS Summary options serialize but runtime qualification and ending do not
+RESULT 36 fixed-summary integration scenarios passed; 0 failed
