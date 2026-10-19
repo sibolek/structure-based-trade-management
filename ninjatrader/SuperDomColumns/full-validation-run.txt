@@ -1,5 +1,5 @@
-/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Core.cs(51,33): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ExecutionMatchedObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Tests.csproj]
-/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Core.cs(50,51): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ContributionObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Tests.csproj]
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/rolling/Core.cs(51,33): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ExecutionMatchedObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/rolling/Tests.csproj]
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/rolling/Core.cs(50,51): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ContributionObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/rolling/Tests.csproj]
 PASS Initial Add and bootstrap Update seed zero
 PASS Net additions and cancellations
 PASS Pure execution trade-first
@@ -35,11 +35,11 @@ PASS Atomic snapshot preserves known zeros without fabricated execution interval
 PASS Snapshot trigger uncertainty affects only the addressed level
 PASS Provider source clock can lag receipt time across rolling expiry
 PASS Reset fence cannot confuse lagged depth with pre-reset execution
-BENCH horizon=3s events=1000000 wallMs=287.3 eventsPerSecond=3480643 allocatedBytes=120524632 retainedEntries=30000
-BENCH horizon=5s events=1000000 wallMs=208.1 eventsPerSecond=4805560 allocatedBytes=121048944 retainedEntries=50000
-BENCH horizon=10s events=1000000 wallMs=197.0 eventsPerSecond=5076975 allocatedBytes=122097584 retainedEntries=100000
-BENCH horizon=30s events=1000000 wallMs=234.2 eventsPerSecond=4269426 allocatedBytes=128389048 retainedEntries=300000
-BENCH multiLevel=20 horizon=30s events=1000000 wallMs=876.5 eventsPerSecond=1140853 allocatedBytes=125248928 retainedEntries=300000 matchedVolume=100000
+BENCH horizon=3s events=1000000 wallMs=184.0 eventsPerSecond=5434966 allocatedBytes=120524632 retainedEntries=30000
+BENCH horizon=5s events=1000000 wallMs=167.1 eventsPerSecond=5982965 allocatedBytes=121048944 retainedEntries=50000
+BENCH horizon=10s events=1000000 wallMs=81.8 eventsPerSecond=12223041 allocatedBytes=122097584 retainedEntries=100000
+BENCH horizon=30s events=1000000 wallMs=192.5 eventsPerSecond=5194565 allocatedBytes=128389048 retainedEntries=300000
+BENCH multiLevel=20 horizon=30s events=1000000 wallMs=403.9 eventsPerSecond=2475555 allocatedBytes=125248928 retainedEntries=300000 matchedVolume=100000
 RESULT 35 calculation scenarios passed; 0 failed
 
 Welcome to .NET 10.0!
@@ -94,6 +94,7 @@ PASS Timestamp regressions do not masquerade as structural book loss
 PASS True invalid positions still reject the book and explain the failure
 PASS Provider book deeper than display coverage cannot cause false gaps
 RESULT 37 API-shape integration scenarios passed; 0 failed. Not actual NinjaTrader compilation.
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/flow/Flow.cs(18,23): warning CS0649: Field 'ExecutionOSFlowEvidenceV4.Settings.PauseQualifiedOnQuoteLoss' is never assigned to, and will always have its default value false [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/flow/Tests.csproj]
 PASS Buyer absorption requires matched selling, replenishment and a hold
 PASS Seller absorption is the mirrored pattern
 PASS Executions without replenishment remain candidates
@@ -133,7 +134,7 @@ PASS Classification deterioration suppresses already qualified absorption
 PASS Confirmation duration is measured after all conditions first agree
 PASS Withdrawals offset refills in net replenishment
 PASS Execution-only correction is not a refill observation
-BENCH flow input pairs=100000 wallMs=492.2 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
+BENCH flow input pairs=100000 wallMs=406.0 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
 RESULT 39 flow scenarios passed; 0 failed
 PASS Experimental defaults are distinct and old spoof alerts start disabled
 PASS Adapter trade-first bid absorption uses exact execution credits
@@ -165,6 +166,7 @@ PASS Periodic status logging exposes warm-up and collection quality
 PASS Settings serialize separately and status is runtime-only
 PASS Termination prevents timer refresh, logging and further matches
 RESULT 29 full-column flow scenarios passed; 0 failed
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/repair/Flow.cs(18,23): warning CS0649: Field 'ExecutionOSFlowEvidenceV4.Settings.PauseQualifiedOnQuoteLoss' is never assigned to, and will always have its default value false [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/repair/Tests.csproj]
 PASS Absorption adverse excursion, side=False, phase=1ms
 PASS Absorption adverse excursion, side=True, phase=1ms
 PASS Initiative adverse excursion, buy=True, phase=1ms
@@ -245,6 +247,7 @@ PASS Coalesced one-print execution is equivalent to split-print reconciliation
 PASS Old opposite-order correction identities excluded after context change disable=False
 PASS Old opposite-order correction identities excluded after context change disable=True
 RESULT 20 repair integration scenarios passed; 0 failed
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/readiness/Flow.cs(18,23): warning CS0649: Field 'ExecutionOSFlowEvidenceV4.Settings.PauseQualifiedOnQuoteLoss' is never assigned to, and will always have its default value false [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/readiness/Tests.csproj]
 PASS Candidate pause preserves evidence and restarts confirmation side=False
 PASS Qualified pause suppresses marker and enforces cooldown side=False
 PASS Missing level still clears its epoch while quote-paused side=False
@@ -278,6 +281,7 @@ PASS Trusted L2 confirmation is independent of stale trade snapshot buy=False st
 PASS Trusted L2 confirmation is independent of stale trade snapshot buy=True stale=False
 PASS Trusted L2 confirmation is independent of stale trade snapshot buy=True stale=True
 RESULT 13 live readiness integration scenarios passed; 0 failed
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/diagnostics/Flow.cs(18,23): warning CS0649: Field 'ExecutionOSFlowEvidenceV4.Settings.PauseQualifiedOnQuoteLoss' is never assigned to, and will always have its default value false [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/diagnostics/Tests.csproj]
 PASS Fresh absorption snapshot identifies replenishment, duration and matching blockers side=False
 PASS Absorption terminal snapshot refreshes direct adverse print before cached metrics side=False
 PASS Absorption coverage loss captures omitted level before state clearing side=False
@@ -385,4 +389,104 @@ PASS Real initiative retracement displays the recorded price-path ending
 PASS Real absorption level breach stays distinct from initiative retracement
 PASS Summary options serialize but runtime qualification and ending do not
 RESULT 36 fixed-summary integration scenarios passed; 0 failed
+PASS Diagnostics default off and are excluded from detector configuration
+PASS Startup invalid quotes establish no invented pause or recovery
+PASS Fractional duration is preserved and callback details remain explanatory
+PASS Exact recovered-duration histogram boundary ticks=0
+PASS Exact recovered-duration histogram boundary ticks=10000
+PASS Exact recovered-duration histogram boundary ticks=10001
+PASS Exact recovered-duration histogram boundary ticks=50000
+PASS Exact recovered-duration histogram boundary ticks=50001
+PASS Exact recovered-duration histogram boundary ticks=100000
+PASS Exact recovered-duration histogram boundary ticks=100001
+PASS Exact recovered-duration histogram boundary ticks=500000
+PASS Exact recovered-duration histogram boundary ticks=500001
+PASS Exact recovered-duration histogram boundary ticks=1000000
+PASS Exact recovered-duration histogram boundary ticks=1000001
+PASS Exact recovered-duration histogram boundary ticks=5000000
+PASS Exact recovered-duration histogram boundary ticks=5000001
+PASS Exact recovered-duration histogram boundary ticks=10000000
+PASS Exact recovered-duration histogram boundary ticks=10000001
+PASS Changing invalid reason stays one continuous pause
+PASS Repeated synchronization in a callback does not inflate callback counts
+PASS Context reset censors open duration and cannot count as recovery
+PASS Generation and reset-count changes both abort rather than bridge contexts
+PASS Clock rewind never turns a negative interval into a valid recovery
+PASS Qualified and candidate links are bounded and do not alias later episodes
+PASS Longest record includes recovered episodes only
+PASS Bounded aggregates stay consistent through ten thousand observations
+PASS Real locked-quote pause records exact recovery callback and stable engine context
+PASS Crossed recovery can restore the same inside without a context reset
+PASS Missing-side pause measures return of confirmed inside depth
+PASS Trade quote snapshots are captured without reopening the L2 gate
+PASS A pause links a real suppressed qualified event with logging off
+PASS Disconnect during a pause is abandoned, not recovered
+PASS Header reset and detector disable cannot leave an open diagnostic episode
+PASS Starting capture in an already-paused gate does not invent its start
+PASS Toggling diagnostics rebuilds only its recorder and leaves core untouched
+PASS Output is bounded by five real seconds rather than quote event rate
+PASS Instrument changes start a separate capture without leaking old prices
+PASS Adapter playback rewind starts a fresh capture rather than bridging elapsed time
+PASS Switching from playback to live cannot mix different clock domains
+PASS Diagnostics flag serializes but runtime records do not
+PARITY 1500 callbacks plus qualification and quote pauses; diagnostics=False
+PASS Full adapter parity against committed 16.3 diagnostics=False
+PARITY 1500 callbacks plus qualification and quote pauses; diagnostics=True
+PASS Full adapter parity against committed 16.3 diagnostics=True
+RESULT 42 quote-pause diagnostic scenarios passed; 0 failed
+PASS Qualified pause/recheck retains identity and original metrics kind=0
+PASS Original display deadline continues through quote pause kind=0
+PASS Reported adverse print during pause remains terminal kind=0
+PASS Hard context loss supersedes pause kind=0
+PASS L1 snapshot and ready flag alone cannot resume kind=0
+PASS Qualified pause/recheck retains identity and original metrics kind=1
+PASS Original display deadline continues through quote pause kind=1
+PASS Reported adverse print during pause remains terminal kind=1
+PASS Hard context loss supersedes pause kind=1
+PASS L1 snapshot and ready flag alone cannot resume kind=1
+PASS Qualified pause/recheck retains identity and original metrics kind=2
+PASS Original display deadline continues through quote pause kind=2
+PASS Reported adverse print during pause remains terminal kind=2
+PASS Hard context loss supersedes pause kind=2
+PASS L1 snapshot and ready flag alone cannot resume kind=2
+PASS Qualified pause/recheck retains identity and original metrics kind=3
+PASS Original display deadline continues through quote pause kind=3
+PASS Reported adverse print during pause remains terminal kind=3
+PASS Hard context loss supersedes pause kind=3
+PASS L1 snapshot and ready flag alone cannot resume kind=3
+PASS Recovered spread with inadequate advance fails recheck buy=False
+PASS Observed 819ms interruption can recover without timer grace buy=False
+PASS Recovered spread with inadequate advance fails recheck buy=True
+PASS Observed 819ms interruption can recover without timer grace buy=True
+PASS Absorption coverage loss still ends paused event ask=False
+PASS Candidates remain suppressed and restart confirmation ask=False
+PASS Absorption coverage loss still ends paused event ask=True
+PASS Candidates remain suppressed and restart confirmation ask=True
+PASS Stale execution evidence fails recovery without extending lifetime
+PASS Unknown prints continue degrading quality during pause
+PASS Source timing uncertainty still terminates paused absorption
+PASS Strict policy remains the default
+PASS Repeated pause cycles do not requalify or extend expiry
+PASS Paused transitions are immutable snapshots
+RESULT 34 pause resume core scenarios passed; 0 failed
+PASS Pause policy defaults off for saved configuration compatibility
+PASS Real absorption pause/resume updates retained summary logging=False
+PASS Real absorption pause/resume updates retained summary logging=True
+PASS A paused event expires without quote recovery
+PASS Trade snapshot does not reopen depth gate while event paused
+PASS Paused qualification ends on actual adverse print
+PASS Coverage loss cannot be bridged by later valid quotes
+PASS Real initiative pause/resume retains qualified record
+PASS Recovery failure has a specific retained ending
+PASS Quote recorder distinguishes paused from suppressed qualification
+PASS Configuration change deliberately rebuilds context
+PASS Disconnect while paused clears retained history
+PASS Header reset while paused clears retained history
+PASS Playback rewind while paused cannot revive old event
+PASS Older paused event cannot replace a newer qualification summary
+PASS Runtime pause flags are not serialized as saved state
+PASS Duplicate qualification cannot clear an existing pause
+PARITY 1500 callbacks plus actual qualification, pause and recovery; policy enabled versus strict
+PASS Enabled lifecycle preserves P/S over qualification, pause and 1500 callbacks
+RESULT 18 pause resume adapter scenarios passed; 0 failed
 Experimental source harness passed. Actual NT compilation, visual QA and labelled Level II replay still required.

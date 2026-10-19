@@ -1,0 +1,34 @@
+{
+  "build": "2026-10-16.5 EXP",
+  "source_sha256": "7a4e923094f1fdabdf1293027c268e847ed3399b6c372f6ab8b9a412892b1cf1",
+  "total_scenarios_passed": 443,
+  "failed": 0,
+  "groups": {
+    "rolling": 35,
+    "history-integration": 36,
+    "summary-integration": 36,
+    "quote-pause-integration": 42,
+    "diagnostics": 23,
+    "repair": 57,
+    "pause-resume-integration": 18,
+    "repair-integration": 20,
+    "flow-integration": 29,
+    "readiness": 18,
+    "flow": 39,
+    "diagnostics-integration": 6,
+    "pause-resume": 34,
+    "compatibility": 37,
+    "readiness-integration": 13
+  },
+  "compiler": "C# 5 with .NET 10 and API-shaped stubs; not NinjaTrader assemblies",
+  "strict_policy_regression_scenarios": 391,
+  "new_policy_scenarios": 52,
+  "additional_evidence": "1500-callback enabled-versus-strict numeric P/S parity including a real harness qualification, pause and recovery; existing 30000-step oracle and two 1500-callback strict adapter parity traces retained",
+  "validation_limits": [
+    "Native NinjaTrader compilation and UI verification required",
+    "No new live capture or full Level II replay of the uploaded log",
+    "No trading-edge validation",
+    "No native performance benchmark"
+  ],
+  "source_unchanged_during_final_suite": true
+}

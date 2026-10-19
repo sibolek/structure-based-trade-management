@@ -1,0 +1,221 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.IO;
+using System.Xml.Serialization;
+using NinjaTrader.Cbi;
+using NinjaTrader.Data;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.SuperDomColumns;
+using NinjaTrader.Gui.SuperDom;
+using QP=NinjaTrader.NinjaScript.SuperDomColumns.ExecutionOSQuotePauseDiagnosticsV4;
+using System.Windows.Media;
+using F=NinjaTrader.NinjaScript.SuperDomColumns.ExecutionOSFlowEvidenceV4;
+public class FlowHarness:ExecutionOSPullingStacking_v4_Experimental
+{
+ public void SetState(State s){State=s;OnStateChange();}
+ public void Depth(MarketDepthEventArgs e){OnMarketDepth(e);}
+ public void Data(MarketDataEventArgs e){OnMarketData(e);}
+ public DrawingContext Render(double width=240){DrawingContext d=new DrawingContext();OnRender(d,width);return d;}
+}
+internal static class Program
+{
+ static int passed;static DateTime origin=new DateTime(2026,10,13,10,0,0);
+ static Type type=typeof(ExecutionOSPullingStacking_v4_Experimental);
+ static void Yes(bool value,string why){if(!value)throw new Exception(why);}
+ static void Eq(object a,object b,string why){if(!Equals(a,b))throw new Exception(why+": "+a+" != "+b);}
+ static void Test(string name,Action test){test();passed++;Console.WriteLine("PASS "+name);}
+ static object Call(FlowHarness v,string name,params object[] args){return type.GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance).Invoke(v,args);}
+ static object Field(FlowHarness v,string name){return type.GetField(name,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(v);}
+ static F Engine(FlowHarness v){return (F)Field(v,"flow");}
+ static void Time(double seconds){Connection.PlaybackConnection.Now=origin.AddSeconds(seconds);}
+ static void Refresh(FlowHarness v,double seconds){Time(seconds);Call(v,"OnRollingRefresh",new object[]{null});}
+ static void Book(FlowHarness v)
+ {
+  for(int i=0;i<4;i++){
+   v.SuperDom.MarketDepth.Bids.Add(new MarketDepthRow{Price=100-i*.25,Volume=200});
+   v.SuperDom.MarketDepth.Asks.Add(new MarketDepthRow{Price=100.25+i*.25,Volume=200});
+   v.SuperDom.Rows.Add(new PriceRow{Price=100-i*.25,BidVolume=200});v.SuperDom.Rows.Add(new PriceRow{Price=100.25+i*.25,AskVolume=200});
+  }
+ }
+ static FlowHarness New(bool rolling=true,bool log=true)
+ {
+  Connection.PlaybackConnection=new Playback{Now=origin};FlowHarness v=new FlowHarness{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};v.SetState(State.SetDefaults);v.ShowFixedFlowSummary=false;
+  v.CalculationMode=rolling?ExecutionOSPullingStackingCalculationModeV4.RollingWindow:ExecutionOSPullingStackingCalculationModeV4.LegacyBaseline;
+  v.ApplyLegacyResetsToRolling=false;v.ResetTolerance=60000;v.LogFlowEvents=log;Book(v);v.SetState(State.Active);
+  // Deterministic harness: exercise the timer callback explicitly instead of racing it.
+  Timer timer=(Timer)Field(v,"rollingRefreshTimer");timer.Dispose();type.GetField("rollingRefreshTimer",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,null);
+  Refresh(v,0);Update(v,false,0,200,.01);Update(v,true,0,200,.02);Refresh(v,5.02);return v;
+ }
+ static void Update(FlowHarness v,bool ask,int pos,long qty,double seconds,double lag=0)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book[pos].Volume=qty;
+  PriceRow row=v.SuperDom.Rows.First(delegate(PriceRow r){return r.Price==price;});if(ask)row.AskVolume=qty;else row.BidVolume=qty;
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Update,Position=pos,Price=price,Volume=qty,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Remove(FlowHarness v,bool ask,int pos,double seconds)
+ {
+  Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;double price=book[pos].Price;book.RemoveAt(pos);
+  v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Remove,Position=pos,Price=price,Volume=0,Time=origin.AddSeconds(seconds)});
+ }
+ static void Trade(FlowHarness v,bool buy,double price,long qty,double seconds,double bid=100,double ask=100.25,double lag=0)
+ {
+  Time(seconds);v.Data(new MarketDataEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Last,Price=price,Volume=qty,Bid=bid,Ask=ask,Time=origin.AddSeconds(seconds-lag)});
+ }
+ static void Abs(FlowHarness v,bool ask,bool depthFirst=false,double lag=0)
+ {
+  double price=ask?100.25:100;
+  for(int i=0;i<2;i++){
+   double t=5.1+i*.4;
+   if(depthFirst){Update(v,ask,0,140,t+.01,lag);Trade(v,ask,price,60,t+.04,100,100.25,lag+.04);}
+   else{Trade(v,ask,price,60,t,100,100.25,lag);Update(v,ask,0,140,t+.01,lag);}
+   Update(v,ask,0,200,t+.06,lag);
+  }
+  Refresh(v,5.9);Refresh(v,6.5);
+ }
+ static F.Signal At(FlowHarness v,bool ask,double price){return Engine(v).At(ask?F.Side.Ask:F.Side.Bid,(long)Math.Round(price/.25));}
+ static void End(FlowHarness v){v.SetState(State.Terminated);}
+ static void Add(FlowHarness v,bool ask,double price,double seconds)
+ {
+ Time(seconds);List<MarketDepthRow> book=ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids;book.Insert(0,new MarketDepthRow{Price=price,Volume=200});
+ if(!v.SuperDom.Rows.Any(delegate(PriceRow r){return r.Price==price;}))v.SuperDom.Rows.Add(new PriceRow{Price=price});
+ v.Depth(new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Add,Position=0,Price=price,Volume=200,Time=origin.AddSeconds(seconds)});
+ }
+
+ static F.Signal Remembered(FlowHarness v){return (F.Signal)Field(v,"lastQualifiedFlowSignal");}
+ static F.Stage Outcome(FlowHarness v){return (F.Stage)Field(v,"lastQualifiedFlowOutcome");}
+ static F.Signal Sample(long id=100,F.Kind kind=F.Kind.SellInitiative,long price=400){return new F.Signal{Id=id,Pattern=kind,Price=price,State=F.Stage.Qualified,Detected=origin.AddSeconds(6).Ticks,Updated=origin.AddSeconds(6.5).Ticks,QualifiedAt=origin.AddSeconds(6.5).Ticks,Executed=141,Dominance=88,Reason="qualified fixture"};}
+ static void Save(FlowHarness v,F.Signal s){Time(6.5);Call(v,"RememberQualifiedFlowTransition",s);}
+ static void SetField(FlowHarness v,string field,object value){type.GetField(field,BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,value);}
+ static List<DrawnText> Hist(DrawingContext d){return d.Text.Where(delegate(DrawnText x){return x.Text.Brush.Key=="gray";}).ToList();}
+ static void Initiative(FlowHarness v,bool buy){
+  if(buy){Trade(v,true,100.25,50,5.1);Remove(v,true,0,5.11);Remove(v,false,3,5.12);Add(v,false,100.25,5.13);Trade(v,true,100.5,50,5.5,100.25,100.5);Remove(v,true,0,5.51);Add(v,false,100.5,5.52);Trade(v,true,100.75,50,5.9,100.5,100.75);}
+  else{Trade(v,false,100,50,5.1);Remove(v,false,0,5.11);Remove(v,true,3,5.12);Add(v,true,100,5.13);Trade(v,false,99.75,50,5.5,99.75,100);Remove(v,false,0,5.51);Add(v,true,99.75,5.52);Trade(v,false,99.5,50,5.9,99.5,99.75);}
+  Refresh(v,6.4);
+ }
+ static ExecutionOSQuotePauseDiagnosticsV4 Q(FlowHarness v){return (ExecutionOSQuotePauseDiagnosticsV4)Field(v,"quotePauseDiagnostics");}
+ static FlowHarness NewQ(bool log=false){var v=New(true,log);v.LogQuotePauseDiagnostics=true;Refresh(v,5.03);return v;}
+ static ExecutionOSQuotePauseDiagnosticsV4.Quote Inside(long bid=400,long ask=401,bool b=true,bool a=true){return new ExecutionOSQuotePauseDiagnosticsV4.Quote{BidKnown=b,AskKnown=a,Bid=bid,Ask=ask,BidQuantity=200,AskQuantity=150};}
+ static ExecutionOSQuotePauseDiagnosticsV4.Callback Frame(long seq,int kind=1,int side=0){return new ExecutionOSQuotePauseDiagnosticsV4.Callback{Sequence=seq,Kind=kind,DataType=side,Operation=1,Position=0,Price=100,Volume=200,SourceTicks=origin.Ticks};}
+ static void Observe(ExecutionOSQuotePauseDiagnosticsV4 q,long ticks,long seq,ExecutionOSQuotePauseDiagnosticsV4.Quote quote,string reason="locked",long gen=1,long resets=1,bool context=true){q.Observe(ticks,origin.AddTicks(ticks),gen,resets,context,"test context",quote,reason,Frame(seq));}
+ static long BinSum(ExecutionOSQuotePauseDiagnosticsV4 q){return q.Bins.Sum();}
+ static string Events(SuperDomColumn v){return String.Join("\n",v.Printed.Where(delegate(string s){return s.Contains("; Candidate;")||s.Contains("; Qualified;")||s.Contains("; Suppressed;")||s.Contains("; Invalidated;")||s.Contains("; Expired;");}).Select(delegate(string s){return s.Replace("2026-10-16.5 EXP","2026-10-16.3 EXP");}));}
+ static Type GType(SuperDomColumn v){Type t=v.GetType();while(t.BaseType!=typeof(SuperDomColumn))t=t.BaseType;return t;}
+ static object GField(SuperDomColumn v,string name){return GType(v).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(v);}
+ static object GCall(SuperDomColumn v,string name,params object[] args){return GType(v).GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance).Invoke(v,args);}
+ static void GState(SuperDomColumn v,State s){v.State=s;GCall(v,"OnStateChange");}
+ static SuperDomColumn Previous(){
+  Time(0);var v=new ExecutionOSPullingStacking_v4_QuotePrevious{SuperDom=new SuperDom(),UiWrapper=new System.Windows.UiElement()};GState(v,State.SetDefaults);
+  v.CalculationMode=ExecutionOSPullingStackingCalculationModeQuotePrevious.RollingWindow;v.ApplyLegacyResetsToRolling=false;v.ResetTolerance=60000;v.LogFlowEvents=true;v.ShowFixedFlowSummary=false;
+  for(int i=0;i<4;i++){v.SuperDom.MarketDepth.Bids.Add(new MarketDepthRow{Price=100-i*.25,Volume=200});v.SuperDom.MarketDepth.Asks.Add(new MarketDepthRow{Price=100.25+i*.25,Volume=200});v.SuperDom.Rows.Add(new PriceRow{Price=100-i*.25,BidVolume=200});v.SuperDom.Rows.Add(new PriceRow{Price=100.25+i*.25,AskVolume=200});}
+  GState(v,State.Active);((Timer)GField(v,"rollingRefreshTimer")).Dispose();GType(v).GetField("rollingRefreshTimer",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,null);
+  foreach(double sec in new[]{0.0,.01,.02,5.02}){Time(sec);if(sec==.01||sec==.02)GUpdate(v,sec==.02,0,200,sec);else GCall(v,"OnRollingRefresh",new object[]{null});}
+  return v;
+ }
+ static void GUpdate(SuperDomColumn v,bool ask,int pos,long qty,double seconds){Time(seconds);var row=(ask?v.SuperDom.MarketDepth.Asks:v.SuperDom.MarketDepth.Bids)[pos];row.Volume=qty;var p=v.SuperDom.Rows.First(delegate(PriceRow r){return r.Price==row.Price;});if(ask)p.AskVolume=qty;else p.BidVolume=qty;GCall(v,"OnMarketDepth",new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=ask?MarketDataType.Ask:MarketDataType.Bid,Operation=Operation.Update,Position=pos,Price=row.Price,Volume=qty,Time=origin.AddSeconds(seconds)});}
+ static void GTrade(SuperDomColumn v,bool buy,long qty,double seconds){Time(seconds);GCall(v,"OnMarketData",new MarketDataEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Last,Price=buy?100.25:100,Volume=qty,Bid=100,Ask=100.25,Time=origin.AddSeconds(seconds)});}
+ static void GAdd(SuperDomColumn v,double price,double seconds){Time(seconds);v.SuperDom.MarketDepth.Bids.Insert(0,new MarketDepthRow{Price=price,Volume=200});if(!v.SuperDom.Rows.Any(delegate(PriceRow p){return p.Price==price;}))v.SuperDom.Rows.Add(new PriceRow{Price=price});GCall(v,"OnMarketDepth",new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Bid,Operation=Operation.Add,Position=0,Price=price,Volume=200,Time=origin.AddSeconds(seconds)});}
+ static void GRemove(SuperDomColumn v,double seconds){Time(seconds);double price=v.SuperDom.MarketDepth.Bids[0].Price;v.SuperDom.MarketDepth.Bids.RemoveAt(0);GCall(v,"OnMarketDepth",new MarketDepthEventArgs{Instrument=v.SuperDom.Instrument,MarketDataType=MarketDataType.Bid,Operation=Operation.Remove,Position=0,Price=price,Volume=0,Time=origin.AddSeconds(seconds)});}
+ static void Compare(SuperDomColumn current,SuperDomColumn previous,int step){
+  foreach(double price in new[]{99.25,99.5,99.75,100,100.25,100.5})foreach(bool ask in new[]{false,true}){object[] a={price,ask,0L},b={price,ask,0L};Eq(GCall(current,"TryRollingValue",a),GCall(previous,"TryRollingValue",b),"availability parity "+step);Eq(a[2],b[2],"P/S parity "+step);}
+  object x=GField(current,"flow"),y=GField(previous,"flow");foreach(string n in new[]{"QualifiedCount","ResetCount","QuotePauseCount","DroppedTransitionCount","RetainedTrades","RetainedContributions","IsWarm","QuoteReady","Status"})Eq(x.GetType().GetProperty(n,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(x,null),y.GetType().GetProperty(n,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(y,null),"engine parity "+n+" "+step);
+  Eq(Events(current),Events(previous),"exact original transitions "+step);Eq(GType(current).GetProperty("LastQualifiedFlowSummary").GetValue(current,null),GType(previous).GetProperty("LastQualifiedFlowSummary").GetValue(previous,null),"retained qualification parity "+step);
+ }
+ public static int Main(){try{
+ Test("Diagnostics default off and are excluded from detector configuration",delegate{
+  var v=New();Yes(!v.LogQuotePauseDiagnostics&&Q(v)==null,"no default recorder");object key=Call(v,"FlowConfigurationKey");v.LogQuotePauseDiagnostics=true;Eq(Call(v,"FlowConfigurationKey"),key,"logging not a rule");End(v);
+ });
+ Test("Startup invalid quotes establish no invented pause or recovery",delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,0,1,Inside(400,400),"initial locked");Observe(q,0,1,Inside(400,400),"initial locked");Eq(q.InitialInvalidCallbacks,1L,"one callback not two synchronizations");Eq(q.Started,0L,"not left-complete");Observe(q,100,2,Inside());Yes(q.HasBaseline,"trusted baseline");Eq(q.Recovered,0L,"no synthetic startup recovery");
+ });
+ Test("Fractional duration is preserved and callback details remain explanatory",delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,0,1,Inside());Observe(q,10000,2,Inside(401,401),"Inside quotes locked (tick 401)");Observe(q,11250,3,Inside(401,402));Eq(q.LatestClosed.Duration,1250L,"125 microseconds");string s=q.Describe(q.LatestClosed,11250,.25);Yes(s.Contains("duration-ms=0.125")&&s.Contains("before-inside=100x200/100.25x150")&&s.Contains("recovered-inside=100.25x200/100.5x150")&&s.Contains("both-higher")&&s.Contains("op=Update"),"measured explanatory record");
+ });
+ long[] durations={0,10000,10001,50000,50001,100000,100001,500000,500001,1000000,1000001,5000000,5000001,10000000,10000001};
+ int[] bins={0,0,1,1,2,2,3,3,4,4,5,5,6,6,7};
+ for(int i=0;i<durations.Length;i++){long duration=durations[i];int bin=bins[i];Test("Exact recovered-duration histogram boundary ticks="+duration,delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,0,1,Inside());Observe(q,1,2,Inside(401,401));Observe(q,1+duration,3,Inside());Eq(q.Recovered,1L,"one recovered");Eq(q.Bins[bin],1L,"correct bin");Eq(BinSum(q),1L,"no double counting");Eq(q.ZeroDurationRecoveries,duration==0?1L:0L,"zero duration separately observable");
+ });}
+ Test("Changing invalid reason stays one continuous pause",delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,0,1,Inside());Observe(q,100,2,Inside(401,401),"locked");Observe(q,200,3,Inside(402,401),"crossed");Observe(q,300,4,Inside(402,401,true,false),"missing ask");Observe(q,400,5,Inside());Eq(q.Started,1L,"one episode");Eq(q.LatestClosed.SeenKinds,7,"all invalid states observed");Eq(q.LatestClosed.Reason,"locked","original onset frozen");Eq(q.LatestClosed.LatestReason,"missing ask","latest bad reason");
+ });
+ Test("Repeated synchronization in a callback does not inflate callback counts",delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,0,1,Inside());Observe(q,100,2,Inside(401,401));q.CallbackArrived(Frame(2));Observe(q,100,2,Inside(401,401));q.CallbackArrived(Frame(3,2,0));q.CallbackArrived(Frame(3,2,0));Observe(q,200,4,Inside());Eq(q.LatestClosed.BidDepth,2L,"start and recovery counted once each");Eq(q.LatestClosed.LastTrades,1L,"trade once");Eq(q.LatestClosed.LastTrade.Sequence,3L,"latest L1 captured");
+ });
+ Test("Context reset censors open duration and cannot count as recovery",delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,0,1,Inside());Observe(q,100,2,Inside(401,401));q.ResetContext(100000,origin,Frame(3),"Feed disconnected");Eq(q.Abandoned,1L,"abandoned recorded");Eq(q.Recovered,0L,"not recovered");Eq(BinSum(q),0L,"no completed-duration sample");Yes(q.Describe(q.LatestClosed,100000,.25).Contains("censored-observed-ms="),"censored duration explicit");Observe(q,100001,4,Inside());Eq(q.Recovered,0L,"new context establishes baseline");
+ });
+ Test("Generation and reset-count changes both abort rather than bridge contexts",delegate{
+  foreach(bool generation in new[]{false,true}){var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,0,1,Inside());Observe(q,1,2,Inside(401,401));Observe(q,2,3,Inside(),"valid",generation?2:1,generation?1:2);Eq(q.Abandoned,1L,"identity change");Eq(q.Recovered,0L,"not a recovery");Yes(q.HasBaseline,"new baseline available");}
+ });
+ Test("Clock rewind never turns a negative interval into a valid recovery",delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,10000,1,Inside());Observe(q,11000,2,Inside(401,401));Observe(q,100,3,Inside());Eq(q.Abandoned,1L,"rewind abandoned");Eq(q.Recovered,0L,"excluded");Yes(q.LatestClosed.Outcome.Contains("Receipt clock rewind"),"reason retained");Yes(q.Describe(q.LatestClosed,100,.25).Contains("unavailable-clock-rewind"),"no invented zero duration");
+ });
+ Test("Qualified and candidate links are bounded and do not alias later episodes",delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,0,1,Inside());Observe(q,1,2,Inside(401,401),"locked");for(int i=0;i<10;i++)q.Suppressed(1,i,"BuyInitiative",i%2==0,"locked");Eq(q.Active.StoredIds,6,"bounded identity samples");Eq(q.Active.OmittedIds,4,"omission explicit");Eq(q.Active.QualifiedSuppressed,5,"all qualifications counted");Eq(q.Active.CandidatesSuppressed,5,"all candidates counted");q.Suppressed(2,100,"Other",true,"locked");Eq(q.Active.QualifiedSuppressed,5,"wrong generation ignored");Observe(q,10,3,Inside());var affected=q.LatestQualifiedAffected;Observe(q,11,4,Inside(401,401),"locked");Observe(q,12,5,Inside());Yes(object.ReferenceEquals(q.LatestQualifiedAffected,affected),"last affected retained despite unrelated recovery");
+ });
+ Test("Longest record includes recovered episodes only",delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();Observe(q,0,1,Inside());Observe(q,1,2,Inside(401,401));Observe(q,101,3,Inside());var longest=q.LongestRecovered;Observe(q,102,4,Inside(401,401));q.ResetContext(10000000,origin,Frame(5),"Reset");Yes(object.ReferenceEquals(q.LongestRecovered,longest),"long abandoned interval excluded");Eq(q.RecoveredTicks,100L,"mean excludes censored intervals");
+ });
+ Test("Bounded aggregates stay consistent through ten thousand observations",delegate{
+  var q=new ExecutionOSQuotePauseDiagnosticsV4();var rng=new Random(164);long now=0;Observe(q,now,1,Inside());for(int i=2;i<10002;i++){now+=rng.Next(0,100000);if(i%103==0)q.ResetContext(now,origin,Frame(i),"test reset");else Observe(q,now,i,rng.Next(3)==0?Inside(401,401):Inside());Eq(q.Started,q.Recovered+q.Abandoned+(q.Active==null?0L:1L),"episode accounting");Eq(BinSum(q),q.Recovered,"histogram accounting");}Eq(q.Bins.Length,8,"fixed aggregate storage");
+ });
+ Test("Real locked-quote pause records exact recovery callback and stable engine context",delegate{
+  var v=NewQ();var engine=Engine(v);long resets=engine.ResetCount;Add(v,false,100.25,5.2);Eq(Q(v).Started,1L,"onset");Eq(Q(v).Active.StartCallback.Kind,1,"depth");Eq(Q(v).Active.StartCallback.Operation,0,"add");Remove(v,true,0,5.21);Eq(Q(v).Recovered,1L,"recovered");Yes(Math.Abs(Q(v).LatestClosed.Duration/(double)TimeSpan.TicksPerMillisecond-10)<.01,"10ms observed interval");Eq(Q(v).LatestClosed.EndCallback.DataType,1,"ask recovery");Eq(Q(v).LatestClosed.EndCallback.Operation,2,"remove recovery");Eq(engine.ResetCount,resets,"no extra detector reset");Yes(engine.QuoteReady&&engine.IsWarm,"original recovery semantics");End(v);
+ });
+ Test("Crossed recovery can restore the same inside without a context reset",delegate{
+  var v=NewQ();Add(v,false,100.5,5.2);Remove(v,false,0,5.22);Eq(Q(v).CrossedStarts,1L,"crossed onset");Yes(Q(v).Describe(Q(v).LatestClosed,0,.25).Contains("same-inside-restored"),"recovery type");End(v);
+ });
+ Test("Missing-side pause measures return of confirmed inside depth",delegate{
+  var v=NewQ();for(int i=0;i<4;i++)Update(v,true,i,0,5.2+i*.01);Yes(Q(v).Active!=null,"missing ask observed");Update(v,true,0,200,5.24);Eq(Q(v).MissingStarts,1L,"unconfirmed onset");Eq(Q(v).Recovered,1L,"confirmed quote recovered");End(v);
+ });
+ Test("Trade quote snapshots are captured without reopening the L2 gate",delegate{
+  var v=NewQ();Add(v,false,100.25,5.2);Trade(v,true,100.5,1,5.21,100.25,100.5);Yes(!Engine(v).QuoteReady&&Q(v).Active!=null,"L1 snapshot never reopens gate");Eq(Q(v).Active.LastTrade.Bid,100.25,"L1 bid diagnostic");Eq(Q(v).Active.LastTrade.Ask,100.5,"L1 ask diagnostic");Eq(Q(v).Active.LastTrades,1L,"trade callback counted once despite two synchronizations");Remove(v,true,0,5.22);End(v);
+ });
+ Test("A pause links a real suppressed qualified event with logging off",delegate{
+  var v=NewQ();Abs(v,false);Add(v,false,100.25,6.6);Eq(Q(v).Active.QualifiedSuppressed,1,"real qualification linked");Yes(Q(v).Active.Affected.Contains("BuyerAbsorption")&&Q(v).LatestQualifiedAffected!=null,"identity sampled");Eq(v.Printed.Count,1,"only one diagnostic periodic sample independent of flow logging");Remove(v,true,0,6.61);Eq(Q(v).LatestQualifiedAffected.Outcome,"Recovered","affected record later updated with recovery");End(v);
+ });
+ Test("Disconnect during a pause is abandoned, not recovered",delegate{
+  var v=NewQ();Add(v,false,100.25,5.2);v.SuperDom.IsConnected=false;Refresh(v,5.3);Eq(Q(v).Abandoned,1L,"context interruption");Eq(Q(v).Recovered,0L,"not false recovery");Yes(Q(v).Active==null&&!Q(v).HasBaseline,"await valid context");End(v);
+ });
+ Test("Header reset and detector disable cannot leave an open diagnostic episode",delegate{
+  foreach(bool header in new[]{false,true}){var v=NewQ();Add(v,false,100.25,5.2);if(header)v.OnColumnLabelClicked(null,null);else{v.FlowDetectionEnabled=false;Refresh(v,5.3);}Eq(Q(v).Abandoned,1L,"explicit boundary");Yes(Q(v).Active==null,"closed");End(v);}
+ });
+ Test("Starting capture in an already-paused gate does not invent its start",delegate{
+  var v=New();Add(v,false,100.25,5.2);v.LogQuotePauseDiagnostics=true;Refresh(v,5.3);Eq(Q(v).Started,0L,"left-censored start excluded");Remove(v,true,0,5.4);Eq(Q(v).Recovered,0L,"no complete interval");Yes(Q(v).HasBaseline,"now ready to measure next pause");End(v);
+ });
+ Test("Toggling diagnostics rebuilds only its recorder and leaves core untouched",delegate{
+  var v=NewQ();var core=Engine(v);long resets=core.ResetCount;v.LogQuotePauseDiagnostics=false;Refresh(v,5.1);Yes(Q(v)==null,"disabled recorder released");Yes(object.ReferenceEquals(core,Engine(v)),"same detector");Eq(core.ResetCount,resets,"no detector reset");v.LogQuotePauseDiagnostics=true;Refresh(v,5.11);Yes(Q(v)!=null&&Q(v).HasBaseline,"new diagnostic run");Eq((long)Field(v,"quotePauseRun"),2L,"run identity distinguishes capture");End(v);
+ });
+ Test("Output is bounded by five real seconds rather than quote event rate",delegate{
+  var v=NewQ();int initial=v.Printed.Count;for(int i=0;i<500;i++){Add(v,false,100.25,5.2+i*.002);Remove(v,false,0,5.201+i*.002);}for(int i=0;i<10;i++)Refresh(v,6.3+i*.01);Eq(v.Printed.Count,initial,"no per-pause or per-callback output");Eq(Q(v).Recovered,500L,"every observed pause counted");Call(v,"PrintQuotePauseSample");Eq(v.Printed.Count,initial,"direct call still rate bounded");typeof(ExecutionOSPullingStacking_v4_Experimental).GetField("lastQuotePausePrint",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(v,long.MinValue);Call(v,"PrintQuotePauseSample");Eq(v.Printed.Count,initial+1,"one coalesced sample");Yes(v.Printed.Last().Contains("QUOTE-DIAG")&&v.Printed.Last().Contains("longest-recovered={")&&v.Printed.Last().Contains("latest-qualified-affected={"),"bounded representative details");End(v);
+ });
+ Test("Instrument changes start a separate capture without leaking old prices",delegate{
+  var v=NewQ();Add(v,false,100.25,5.2);v.SuperDom.Instrument=new Instrument{FullName="OTHER TEST"};Refresh(v,5.3);Eq(Q(v).Started,0L,"new instrument capture");Eq((long)Field(v,"quotePauseRun"),2L,"new run");End(v);
+ });
+ Test("Adapter playback rewind starts a fresh capture rather than bridging elapsed time",delegate{
+  var v=NewQ();Add(v,false,100.25,5.2);Refresh(v,5.15);Eq((long)Field(v,"quotePauseRun"),2L,"new rewind run");Eq(Q(v).Started,0L,"no old episodes in new capture");Eq(Q(v).Recovered,0L,"no false recovery");Yes(Q(v).Active==null,"old pause not resumed");End(v);
+ });
+ Test("Switching from playback to live cannot mix different clock domains",delegate{
+  var v=NewQ();Add(v,false,100.25,5.2);Connection.PlaybackConnection=null;Call(v,"OnRollingRefresh",new object[]{null});Eq((long)Field(v,"quotePauseRun"),2L,"clock-mode capture boundary");Eq(Q(v).Recovered,0L,"no stopwatch versus absolute-date duration");Eq(Q(v).Started,0L,"new clock begins clean");End(v);
+ });
+ Test("Diagnostics flag serializes but runtime records do not",delegate{
+  var v=NewQ();Add(v,false,100.25,5.2);var ser=new XmlSerializer(typeof(FlowHarness));string xml;using(var w=new StringWriter()){ser.Serialize(w,v);xml=w.ToString();}Yes(xml.Contains("LogQuotePauseDiagnostics"),"option persists");Yes(!xml.Contains("QuotePauseSummary")&&!xml.Contains("quotePauseCallback")&&!xml.Contains("observed-starts"),"runtime records excluded");End(v);
+ });
+ foreach(bool enabled in new[]{false,true}){bool on=enabled;Test("Full adapter parity against committed 16.3 diagnostics="+enabled,delegate{
+  var current=New(true,true);current.LogQuotePauseDiagnostics=on;SuperDomColumn previous=Previous();var vs=new SuperDomColumn[]{current,previous};int step=0;
+  for(int pulse=0;pulse<2;pulse++){foreach(var v in vs){GTrade(v,false,60,5.1+pulse*.4);GUpdate(v,false,0,140,5.11+pulse*.4);GUpdate(v,false,0,200,5.16+pulse*.4);}Compare(current,previous,step++);}
+  foreach(double t in new[]{5.9,6.5}){foreach(var v in vs){Time(t);GCall(v,"OnRollingRefresh",new object[]{null});}Compare(current,previous,step++);}Eq(Engine(current).QualifiedCount,1L,"positive real qualification in parity trace");
+  foreach(var v in vs)GAdd(v,100.25,6.6);Compare(current,previous,step++);foreach(var v in vs)GRemove(v,6.61);Compare(current,previous,step++);
+  var rng=new Random(16164);double now=6.7;
+  for(int i=0;i<1500;i++){now+=rng.Next(1,20)/1000.0;bool ask=rng.Next(2)==0;long qty=rng.Next(1,400);int pos=rng.Next(3),action=rng.Next(5);
+   foreach(var v in vs){if(action==0)GTrade(v,ask,qty%80+1,now);else if(action==1){GAdd(v,100.5,now);GRemove(v,now+.0001);}else if(action<=3)GUpdate(v,ask,pos,qty,now);else{Time(now);GCall(v,"OnRollingRefresh",new object[]{null});}}
+   Compare(current,previous,step++);
+  }
+  Yes(Engine(current).QuotePauseCount>10,"many actual quote pauses compared");End(current);GState(previous,State.Terminated);Console.WriteLine("PARITY 1500 callbacks plus qualification and quote pauses; diagnostics="+on);
+ });}
+ Console.WriteLine("RESULT "+passed+" quote-pause diagnostic scenarios passed; 0 failed");return 0;
+ }catch(Exception ex){Console.Error.WriteLine("FAIL "+ex);return 1;}}
+}

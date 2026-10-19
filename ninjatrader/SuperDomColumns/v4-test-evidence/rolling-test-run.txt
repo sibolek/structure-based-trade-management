@@ -1,5 +1,5 @@
-/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Core.cs(51,33): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ExecutionMatchedObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Tests.csproj]
-/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Core.cs(50,51): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ContributionObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-vp86d6fa/rolling/Tests.csproj]
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/rolling/Core.cs(51,33): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ExecutionMatchedObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/rolling/Tests.csproj]
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/rolling/Core.cs(50,51): warning CS0649: Field 'ExecutionOSRollingLiquidityV4.ContributionObserver' is never assigned to, and will always have its default value null [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/rolling/Tests.csproj]
 PASS Initial Add and bootstrap Update seed zero
 PASS Net additions and cancellations
 PASS Pure execution trade-first
@@ -35,11 +35,11 @@ PASS Atomic snapshot preserves known zeros without fabricated execution interval
 PASS Snapshot trigger uncertainty affects only the addressed level
 PASS Provider source clock can lag receipt time across rolling expiry
 PASS Reset fence cannot confuse lagged depth with pre-reset execution
-BENCH horizon=3s events=1000000 wallMs=287.3 eventsPerSecond=3480643 allocatedBytes=120524632 retainedEntries=30000
-BENCH horizon=5s events=1000000 wallMs=208.1 eventsPerSecond=4805560 allocatedBytes=121048944 retainedEntries=50000
-BENCH horizon=10s events=1000000 wallMs=197.0 eventsPerSecond=5076975 allocatedBytes=122097584 retainedEntries=100000
-BENCH horizon=30s events=1000000 wallMs=234.2 eventsPerSecond=4269426 allocatedBytes=128389048 retainedEntries=300000
-BENCH multiLevel=20 horizon=30s events=1000000 wallMs=876.5 eventsPerSecond=1140853 allocatedBytes=125248928 retainedEntries=300000 matchedVolume=100000
+BENCH horizon=3s events=1000000 wallMs=184.0 eventsPerSecond=5434966 allocatedBytes=120524632 retainedEntries=30000
+BENCH horizon=5s events=1000000 wallMs=167.1 eventsPerSecond=5982965 allocatedBytes=121048944 retainedEntries=50000
+BENCH horizon=10s events=1000000 wallMs=81.8 eventsPerSecond=12223041 allocatedBytes=122097584 retainedEntries=100000
+BENCH horizon=30s events=1000000 wallMs=192.5 eventsPerSecond=5194565 allocatedBytes=128389048 retainedEntries=300000
+BENCH multiLevel=20 horizon=30s events=1000000 wallMs=403.9 eventsPerSecond=2475555 allocatedBytes=125248928 retainedEntries=300000 matchedVolume=100000
 RESULT 35 calculation scenarios passed; 0 failed
 
 Welcome to .NET 10.0!

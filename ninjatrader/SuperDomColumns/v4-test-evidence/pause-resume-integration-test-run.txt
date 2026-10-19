@@ -1,0 +1,20 @@
+PASS Pause policy defaults off for saved configuration compatibility
+PASS Real absorption pause/resume updates retained summary logging=False
+PASS Real absorption pause/resume updates retained summary logging=True
+PASS A paused event expires without quote recovery
+PASS Trade snapshot does not reopen depth gate while event paused
+PASS Paused qualification ends on actual adverse print
+PASS Coverage loss cannot be bridged by later valid quotes
+PASS Real initiative pause/resume retains qualified record
+PASS Recovery failure has a specific retained ending
+PASS Quote recorder distinguishes paused from suppressed qualification
+PASS Configuration change deliberately rebuilds context
+PASS Disconnect while paused clears retained history
+PASS Header reset while paused clears retained history
+PASS Playback rewind while paused cannot revive old event
+PASS Older paused event cannot replace a newer qualification summary
+PASS Runtime pause flags are not serialized as saved state
+PASS Duplicate qualification cannot clear an existing pause
+PARITY 1500 callbacks plus actual qualification, pause and recovery; policy enabled versus strict
+PASS Enabled lifecycle preserves P/S over qualification, pause and 1500 callbacks
+RESULT 18 pause resume adapter scenarios passed; 0 failed

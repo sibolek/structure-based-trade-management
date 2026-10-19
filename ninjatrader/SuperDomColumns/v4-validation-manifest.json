@@ -1,30 +1,35 @@
 {
-  "build": "2026-10-16.3 EXP",
-  "source_sha256": "a794505f8066a816caceca3287eb6ca9f74c004b16384fdac3162b9cacee1222",
-  "current_manifest": "compact-summary-validation-manifest.json",
-  "current_guide": "NinjaTrader-v4-Compact-Summary-Guide.html",
+  "build": "2026-10-16.5 EXP",
+  "source_sha256": "7a4e923094f1fdabdf1293027c268e847ed3399b6c372f6ab8b9a412892b1cf1",
+  "current_manifest": "pause-resume-validation-manifest.json",
+  "current_guide": "NinjaTrader-v4-Pause-Resume-Guide.html",
   "event_reason_reference": "Event-Endings-Reference.md",
-  "publication_notes": "v4-compact-checkpoint-notes-2026-10-16.md",
+  "publication_notes": "v4-pause-resume-checkpoint-notes-2026-10-18.md",
   "publication_validation": {
+    "date_mountain": "2026-10-18",
     "scenarios": {
       "rolling": 35,
       "history-integration": 36,
       "summary-integration": 36,
+      "quote-pause-integration": 42,
       "diagnostics": 23,
       "repair": 57,
+      "pause-resume-integration": 18,
       "repair-integration": 20,
       "flow-integration": 29,
       "readiness": 18,
       "flow": 39,
       "diagnostics-integration": 6,
+      "pause-resume": 34,
       "compatibility": 37,
       "readiness-integration": 13
     },
-    "total_passed": 349,
+    "total_passed": 443,
     "failed": 0,
-    "source_sha256": "a794505f8066a816caceca3287eb6ca9f74c004b16384fdac3162b9cacee1222",
-    "guide_layout": "v4-test-evidence/guide-layout-check-16.3.json"
+    "source_sha256": "7a4e923094f1fdabdf1293027c268e847ed3399b6c372f6ab8b9a412892b1cf1",
+    "guide_layout": "v4-test-evidence/guide-layout-check-16.5.json",
+    "compiler": "C# 5 / .NET 10 / API-shaped stubs; not NinjaTrader assemblies"
   },
-  "native_validation": "User screenshots support specific displayed behavior; full native compiler and WPF validation not independently established",
-  "git_publication_record": "Containing Git commit and remote branch"
+  "native_observations": "User screenshot and ES 16.5 log show one qualified Sell Initiative pausing, resuming and ending on a failed dominance recheck. No independent native compiler/WPF certification or installed-source hash attestation.",
+  "git_publication_record": "Containing Git commit and remote branch; historical package flags describe creation time."
 }

@@ -1,3 +1,4 @@
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/diagnostics/Flow.cs(18,23): warning CS0649: Field 'ExecutionOSFlowEvidenceV4.Settings.PauseQualifiedOnQuoteLoss' is never assigned to, and will always have its default value false [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/diagnostics/Tests.csproj]
 PASS Fresh absorption snapshot identifies replenishment, duration and matching blockers side=False
 PASS Absorption terminal snapshot refreshes direct adverse print before cached metrics side=False
 PASS Absorption coverage loss captures omitted level before state clearing side=False

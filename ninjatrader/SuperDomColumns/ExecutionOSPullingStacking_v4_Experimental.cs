@@ -124,6 +124,9 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 if (v3Terminated || State != State.Active) return;
                 if ((!marketData.IsReset || marketData.Instrument != null)
                     && !MatchesInstrument(marketData.Instrument)) return;
+                BeginQuotePauseCallback(2, marketData.MarketDataType == MarketDataType.Last ? 0
+                    : marketData.MarketDataType == MarketDataType.Bid ? 1 : marketData.MarketDataType == MarketDataType.Ask ? 2 : 3,
+                    0, -1, marketData.Price, marketData.Volume, marketData.Time.Ticks, marketData.Bid, marketData.Ask, marketData.IsReset);
                 long now = EnsureV3Context();
                 if (marketData.IsReset)
                 {
@@ -220,6 +223,9 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 if (v3Terminated || State != State.Active) return;
                 if ((!marketDepth.IsReset || marketDepth.Instrument != null)
                     && !MatchesInstrument(marketDepth.Instrument)) return;
+                BeginQuotePauseCallback(1, marketDepth.MarketDataType == MarketDataType.Bid ? 0 : marketDepth.MarketDataType == MarketDataType.Ask ? 1 : 2,
+                    marketDepth.Operation == Cbi.Operation.Add ? 0 : marketDepth.Operation == Cbi.Operation.Update ? 1 : marketDepth.Operation == Cbi.Operation.Remove ? 2 : 3,
+                    marketDepth.Position, marketDepth.Price, marketDepth.Volume, marketDepth.Time.Ticks, 0, 0, marketDepth.IsReset);
                 long now = EnsureV3Context();
 
                 if (marketDepth.IsReset)
@@ -839,6 +845,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             {
                 if (State == State.Active)
                 {
+                    BeginQuotePauseCallback(4, 0, 0, -1, 0, 0, 0, 0, 0, false);
                     long now = EnsureV3Context();
                     if (CalculationMode == ExecutionOSPullingStackingCalculationModeV4.RollingWindow || FlowDetectionEnabled)
                         CheckRollingSession(now);
@@ -1406,6 +1413,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 DetectInitiative = true;
                 ShowFlowCandidates = true;
                 LogFlowEvents = false;
+                PauseQualifiedEventsOnQuoteLoss = false;
+                LogQuotePauseDiagnostics = false;
                 FlowWindowSeconds = 5;
                 FlowMinimumVolume = 100;
                 FlowMinimumReplenishment = 50;
@@ -1964,7 +1973,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
 
     public partial class ExecutionOSPullingStacking_v4_Experimental
     {
-        private const string RollingBuildId = "2026-10-16.3 EXP";
+        private const string RollingBuildId = "2026-10-16.5 EXP";
         private ExecutionOSRollingLiquidityV4 rolling;
         private Timer rollingRefreshTimer;
         private BarsRequest rollingSessionRequest;
@@ -2068,7 +2077,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             long now = RawClockTicks();
             bool playback = Cbi.Connection.PlaybackConnection != null;
             if (clockInitialized && (playback != usingPlaybackClock || now < lastClockTicks))
-                ResetV3FeedState(now, true);
+            { RestartQuotePauseClockCapture(); ResetV3FeedState(now, true); }
             clockInitialized = true; usingPlaybackClock = playback; lastClockTicks = now;
 
             Cbi.Instrument instrument = SuperDom == null ? null : SuperDom.Instrument;
@@ -2444,12 +2453,14 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 if (v3Terminated || State != State.Active) return;
                 try
                 {
+                    BeginQuotePauseCallback(3, 0, 0, -1, 0, 0, 0, 0, 0, false);
                     long now = EnsureV3Context();
                     if (CalculationMode == ExecutionOSPullingStackingCalculationModeV4.RollingWindow || FlowDetectionEnabled)
                     {
                         RequestRollingCalendar(); CheckRollingSession(now);
                         FinishFlowEvent(now);
                         PrintFlowStatusSample();
+                        PrintQuotePauseSample();
                         // One coalesced 10 Hz refresh also covers quiet-market expiry.
                         refresh = true;
                     }
@@ -2566,6 +2577,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 key = key * 397 ^ ExecutionReconciliationMilliseconds;
                 key = key * 397 ^ (DetectAbsorption ? 1 : 0);
                 key = key * 397 ^ (DetectInitiative ? 1 : 0);
+                key = key * 397 ^ (PauseQualifiedEventsOnQuoteLoss ? 1 : 0);
                 return key;
             }
         }
@@ -2574,6 +2586,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             if (flow != null) flow.DiagnosticsEnabled = LogFlowEvents;
             if (!FlowDetectionEnabled)
             {
+                ResetQuotePauseContext(now, "Detection disabled");
                 if (flow != null) flow.Reset(now, "Detection disabled");
                 DrainFlowTransitions(); ClearLastQualifiedFlowSignal("Detection disabled");
                 DetachFlowBook(); flow = null; flowRuntimeError = null; return;
@@ -2594,7 +2607,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                     ConfirmationMs = FlowConfirmationMilliseconds, MaximumAdverseTicks = FlowMaximumAdverseTicks,
                     MinimumAdvanceTicks = FlowMinimumAdvanceTicks, DisplayMs = FlowDisplayMilliseconds,
                     CooldownMs = FlowCooldownMilliseconds, ReconciliationMs = ExecutionReconciliationMilliseconds,
-                    Absorption = DetectAbsorption, Initiative = DetectInitiative
+                    Absorption = DetectAbsorption, Initiative = DetectInitiative,
+                    PauseQualifiedOnQuoteLoss = PauseQualifiedEventsOnQuoteLoss
                 });
                 }
                 catch (ArgumentException)
@@ -2631,11 +2645,13 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 flowContributionFloor = rolling == null ? 0 : rolling.LatestContributionId;
                 flowSourceRegressions = rolling == null ? 0 : rolling.TimestampRegressionCount; }
             ClearLastQualifiedFlowSignal(reason);
+            ResetQuotePauseContext(now, reason);
         }
         private void StopFlowEvidence()
         {
             if (flow != null) flow.Reset(RawClockTicks(), "Column terminated");
             ClearLastQualifiedFlowSignal("Column terminated");
+            ResetQuotePauseContext(RawClockTicks(), "Column terminated");
             DetachFlowBook();
         }
         private void SynchronizeFlowCoverage(long now)
@@ -2659,14 +2675,15 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             flow.SetReady(context, now, failure ?? "Context ready");
             if (flow.ResetCount != resetsBefore)
                 flowContributionFloor = rolling == null ? 0 : rolling.LatestContributionId;
-            long bid = 0, ask = 0, quantity;
-            bool bidKnown = context && rolling.TryInsideDepth(ExecutionOSRollingLiquidityV4.Side.Bid, out bid, out quantity);
-            bool askKnown = context && rolling.TryInsideDepth(ExecutionOSRollingLiquidityV4.Side.Ask, out ask, out quantity);
+            long bid = 0, ask = 0, quantity, bidQuantity = 0, askQuantity = 0;
+            bool bidKnown = context && rolling.TryInsideDepth(ExecutionOSRollingLiquidityV4.Side.Bid, out bid, out bidQuantity);
+            bool askKnown = context && rolling.TryInsideDepth(ExecutionOSRollingLiquidityV4.Side.Ask, out ask, out askQuantity);
             bool quotes = bidKnown && askKnown && bid < ask;
             string quoteReason = !bidKnown && !askKnown ? "Inside bid and ask unconfirmed"
                 : !bidKnown ? "Inside bid unconfirmed" : !askKnown ? "Inside ask unconfirmed"
                 : bid == ask ? "Inside quotes locked (tick " + bid + ")"
                 : "Inside quotes crossed (bid tick " + bid + ", ask tick " + ask + ")";
+            ObserveQuotePause(now, context, failure, bidKnown, askKnown, bid, ask, bidQuantity, askQuantity, quoteReason);
             flow.SetQuoteReady(context && quotes, now, quoteReason);
             flow.BeginCoverage();
             if (context)
@@ -2702,7 +2719,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             }
             catch (Exception ex)
             { flowRuntimeError = "Flow evaluation failure (" + ex.GetType().Name + ")"; flow.SetReady(false, now, flowRuntimeError);
-                ClearLastQualifiedFlowSignal(flowRuntimeError); }
+                ClearLastQualifiedFlowSignal(flowRuntimeError); ResetQuotePauseContext(now, flowRuntimeError); }
         }
         private void DrainFlowTransitions()
         {
@@ -2711,13 +2728,15 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 while ((signal = flow.TakeTransition()) != null)
                 {
                     RememberQualifiedFlowTransition(signal);
+                    ObserveQuotePauseSuppression(signal);
                     if (!LogFlowEvents || v3Terminated) continue;
                     double tickSize = SuperDom.Instrument.MasterInstrument.TickSize;
-                    Print("ExecutionOS Flow v4 [" + SuperDom.Instrument.FullName + "] build 2026-10-16.3 EXP; "
+                    Print("ExecutionOS Flow v4 [" + SuperDom.Instrument.FullName + "] build 2026-10-16.5 EXP; "
                         + "NT-local " + SessionClockNow().ToString("yyyy-MM-dd HH:mm:ss.fff")
                         + "; generation " + flowGeneration + "; id " + signal.Id
                         + "; event receipt ms " + ((signal.Updated - flowLogOrigin) / TimeSpan.TicksPerMillisecond)
-                        + "; detected receipt ms " + ((signal.Detected - flowLogOrigin) / TimeSpan.TicksPerMillisecond) + "; " + signal.Pattern + "; " + signal.State
+                        + "; detected receipt ms " + ((signal.Detected - flowLogOrigin) / TimeSpan.TicksPerMillisecond) + "; " + signal.Pattern + "; "
+                        + (signal.QuoteTransition == 1 ? "Paused" : signal.QuoteTransition == 2 ? "Resumed" : signal.State.ToString())
                         + "; price " + (signal.Price * tickSize).ToString(Core.Globals.GeneralOptions.CurrentCulture)
                         + "; executed " + signal.Executed + "; eligible for matching " + signal.Eligible + "; matched " + signal.Matched
                         + "; net replenishment " + signal.Replenished + "; refill observations " + signal.Refills
@@ -2734,9 +2753,92 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             if (lastFlowStatusPrint != long.MinValue && realNow - lastFlowStatusPrint < 5 * TimeSpan.TicksPerSecond) return;
             lastFlowStatusPrint = realNow;
             Print("ExecutionOS Flow v4 [" + (rollingInstrument == null ? "no instrument" : rollingInstrument.FullName)
-                + "] build 2026-10-16.3 EXP; STATUS; " + FlowStatus
+                + "] build 2026-10-16.5 EXP; STATUS; " + FlowStatus
                 + "; last-qualified " + LastQualifiedFlowSummary + "; flow-render " + FlowRenderingStatus);
         }
+        [Display(Name = "Pause qualified events on quote loss", GroupName = "Flow detection (experimental)", Order = 645)]
+        public bool PauseQualifiedEventsOnQuoteLoss { get; set; }
+
+        [Display(Name = "Log quote pause diagnostics", GroupName = "Quote pause diagnostics", Order = 820)]
+        public bool LogQuotePauseDiagnostics { get; set; }
+        private ExecutionOSQuotePauseDiagnosticsV4 quotePauseDiagnostics;
+        private ExecutionOSQuotePauseDiagnosticsV4.Callback quotePauseCallback;
+        private string quotePauseInstrument;
+        private long quotePauseRun, quotePauseSequence, lastQuotePausePrint = long.MinValue;
+
+        [XmlIgnore]
+        [ReadOnly(true)]
+        [Display(Name = "Quote pause summary", GroupName = "Quote pause diagnostics", Order = 830)]
+        public string QuotePauseSummary
+        {
+            get { lock (collectionSync) return !LogQuotePauseDiagnostics ? "Disabled"
+                : quotePauseDiagnostics == null ? "Waiting for a callback" : quotePauseDiagnostics.Summary(RawClockTicks()); }
+        }
+        private void BeginQuotePauseCallback(int kind, int dataType, int operation, int position,
+            double price, long volume, long sourceTicks, double bid, double ask, bool reset)
+        {
+            if (!LogQuotePauseDiagnostics)
+            { quotePauseDiagnostics = null; quotePauseInstrument = null; return; }
+            string instrument = SuperDom == null || SuperDom.Instrument == null ? "no instrument" : SuperDom.Instrument.FullName;
+            if (quotePauseDiagnostics == null || instrument != quotePauseInstrument)
+            {
+                quotePauseDiagnostics = new ExecutionOSQuotePauseDiagnosticsV4(); quotePauseInstrument = instrument;
+                quotePauseRun++; quotePauseSequence = 0; lastQuotePausePrint = long.MinValue;
+            }
+            quotePauseCallback = new ExecutionOSQuotePauseDiagnosticsV4.Callback { Sequence = ++quotePauseSequence,
+                Kind = kind, DataType = dataType, Operation = operation, Position = position, Price = price,
+                Volume = volume, SourceTicks = sourceTicks, Bid = bid, Ask = ask, Reset = reset };
+            quotePauseDiagnostics.CallbackArrived(quotePauseCallback);
+        }
+        private void ResetQuotePauseContext(long now, string reason)
+        {
+            if (LogQuotePauseDiagnostics && quotePauseDiagnostics != null)
+            {
+                ExecutionOSQuotePauseDiagnosticsV4.Callback boundary = quotePauseCallback; boundary.Kind = 5;
+                quotePauseDiagnostics.ResetContext(now, SessionClockNow(), boundary, reason);
+            }
+        }
+        private void RestartQuotePauseClockCapture()
+        {
+            if (!LogQuotePauseDiagnostics || quotePauseDiagnostics == null) return;
+            // Never aggregate a live stopwatch interval with an absolute playback clock,
+            // or merge observations from opposite sides of a playback rewind.
+            quotePauseDiagnostics = new ExecutionOSQuotePauseDiagnosticsV4(); quotePauseRun++;
+            quotePauseSequence = 1; quotePauseCallback.Sequence = 1; lastQuotePausePrint = long.MinValue;
+        }
+        private void ObserveQuotePause(long now, bool context, string failure, bool bidKnown, bool askKnown,
+            long bid, long ask, long bidQuantity, long askQuantity, string reason)
+        {
+            if (!LogQuotePauseDiagnostics || quotePauseDiagnostics == null) return;
+            quotePauseDiagnostics.Observe(now, SessionClockNow(), flowGeneration, flow.ResetCount, context,
+                failure ?? flow.LastResetReason, new ExecutionOSQuotePauseDiagnosticsV4.Quote { BidKnown = bidKnown,
+                    AskKnown = askKnown, Bid = bid, Ask = ask, BidQuantity = bidQuantity, AskQuantity = askQuantity }, reason, quotePauseCallback);
+        }
+        private void ObserveQuotePauseSuppression(ExecutionOSFlowEvidenceV4.Signal signal)
+        {
+            if (LogQuotePauseDiagnostics && quotePauseDiagnostics != null && signal.QuoteTransition == 1)
+                quotePauseDiagnostics.Paused(flowGeneration, signal.Id, signal.Pattern.ToString(), signal.Reason);
+            if (LogQuotePauseDiagnostics && quotePauseDiagnostics != null && signal.State == ExecutionOSFlowEvidenceV4.Stage.Suppressed)
+                quotePauseDiagnostics.Suppressed(flowGeneration, signal.Id, signal.Pattern.ToString(), signal.QualifiedAt > 0, signal.Reason);
+        }
+        private void PrintQuotePauseSample()
+        {
+            if (!LogQuotePauseDiagnostics || quotePauseDiagnostics == null || v3Terminated) return;
+            long realNow = (long)(System.Diagnostics.Stopwatch.GetTimestamp()
+                * ((double)TimeSpan.TicksPerSecond / System.Diagnostics.Stopwatch.Frequency));
+            if (lastQuotePausePrint != long.MinValue && realNow - lastQuotePausePrint < 5 * TimeSpan.TicksPerSecond) return;
+            lastQuotePausePrint = realNow; long now = RawClockTicks();
+            double tickSize = SuperDom == null || SuperDom.Instrument == null ? 0 : SuperDom.Instrument.MasterInstrument.TickSize;
+            Print("ExecutionOS Quote v4 [" + quotePauseInstrument + "] build " + RollingBuildId
+                + "; QUOTE-DIAG; run=" + quotePauseRun + "; NT-local=" + SessionClockNow().ToString("yyyy-MM-dd HH:mm:ss.fff")
+                + "; clock=" + (Cbi.Connection.PlaybackConnection == null ? "live receipt stopwatch" : "playback receipt clock")
+                + "; " + quotePauseDiagnostics.Summary(now)
+                + "; open-detail={" + quotePauseDiagnostics.Describe(quotePauseDiagnostics.Active, now, tickSize)
+                + "}; latest-closed={" + quotePauseDiagnostics.Describe(quotePauseDiagnostics.LatestClosed, now, tickSize)
+                + "}; longest-recovered={" + quotePauseDiagnostics.Describe(quotePauseDiagnostics.LongestRecovered, now, tickSize)
+                + "}; latest-qualified-affected={" + quotePauseDiagnostics.Describe(quotePauseDiagnostics.LatestQualifiedAffected, now, tickSize) + "}");
+        }
+
         private void DrawFlowEvidence(DrawingContext dc, PriceRow row, double renderWidth, double verticalOffset, double dpi)
         {
             if (!FlowDetectionEnabled || flow == null || flowRuntimeError != null || renderWidth <= 0) return;
@@ -2763,6 +2865,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
         private ExecutionOSFlowEvidenceV4.Stage lastQualifiedFlowOutcome;
         private DateTime lastQualifiedFlowTime, lastQualifiedFlowEndedTime;
         private long lastQualifiedFlowGeneration;
+        private bool lastQualifiedFlowPaused;
         private string lastQualifiedFlowReason, lastFlowHistoryClearReason = "No qualification recorded";
         private double lastFlowRenderWidth, lastFlowRenderDpi;
         private int lastFlowLiveLabels, lastFlowHistoryLabels, lastFlowCompactLabels, lastFlowNoSpace;
@@ -2823,7 +2926,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
 
         private void ClearLastQualifiedFlowSignal(string reason)
         {
-            lastQualifiedFlowSignal = null; lastQualifiedFlowReason = null;
+            lastQualifiedFlowSignal = null; lastQualifiedFlowReason = null; lastQualifiedFlowPaused = false;
             lastQualifiedFlowTime = lastQualifiedFlowEndedTime = DateTime.MinValue; lastQualifiedFlowGeneration = 0;
             fixedFlowSummaryLines.Clear(); fixedFlowSummaryKey = null;
             lastFlowHistoryClearReason = reason; lastFlowHistoryVisibility = "No retained qualification; " + reason;
@@ -2833,10 +2936,21 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
         {
             if (v3Terminated || !FlowDetectionEnabled || (flow != null && flow.Faulted))
             { ClearLastQualifiedFlowSignal("Detector inactive or faulted"); return; }
+            if (signal.QuoteTransition != 0)
+            {
+                if (lastQualifiedFlowSignal != null && lastQualifiedFlowGeneration == flowGeneration
+                    && lastQualifiedFlowSignal.Id == signal.Id && lastQualifiedFlowSignal.Pattern == signal.Pattern
+                    && lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Qualified)
+                {
+                    lastQualifiedFlowPaused = signal.QuotePaused; lastQualifiedFlowReason = signal.Reason;
+                }
+                return; // Resume is not a new qualification and cannot replace newer history.
+            }
             if (signal.State == ExecutionOSFlowEvidenceV4.Stage.Qualified)
             {
                 if (lastQualifiedFlowSignal != null && lastQualifiedFlowGeneration == flowGeneration
                     && lastQualifiedFlowSignal.Id == signal.Id) return;
+                lastQualifiedFlowPaused = false;
                 lastQualifiedFlowSignal = signal.Copy(); lastQualifiedFlowGeneration = flowGeneration;
                 lastQualifiedFlowTime = SessionClockNow(); lastQualifiedFlowEndedTime = DateTime.MinValue;
                 lastQualifiedFlowOutcome = signal.State;
@@ -2847,6 +2961,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 && signal.State != ExecutionOSFlowEvidenceV4.Stage.Candidate)
             {
                 // Keep qualification price, time and metrics frozen. Only the recorded outcome changes.
+                lastQualifiedFlowPaused = false;
                 lastQualifiedFlowOutcome = signal.State; lastQualifiedFlowReason = signal.Reason;
                 lastQualifiedFlowEndedTime = SessionClockNow();
             }
@@ -2920,7 +3035,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
 
         private string FlowTrackingEndLabel()
         {
-            if (lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Qualified) return "Active — still tracking";
+            if (lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Qualified)
+                return lastQualifiedFlowPaused ? "Paused: quote validation" : "Active — still tracking";
             if (lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Expired) return "Ended: Expired";
             string reason = lastQualifiedFlowReason ?? "";
             if (lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Invalidated)
@@ -2929,6 +3045,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             if (reason.StartsWith("Inside bid", StringComparison.Ordinal)
                 || reason.StartsWith("Inside ask", StringComparison.Ordinal)
                 || reason.StartsWith("Inside quotes", StringComparison.Ordinal)) return "Ended: Quote validation failed";
+            if (reason == "Quote recovery evidence no longer qualifies") return "Ended: Recovery check failed";
             if (reason == "Trade classification deteriorated" || reason == "Execution evidence quality deteriorated")
                 return "Ended: Execution validation failed";
             if (reason == "Coverage lost" || reason == "Observation coverage lost") return "Ended: Depth coverage lost";
@@ -2962,7 +3079,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             string price = rollingInstrument == null ? "unavailable"
                 : (lastQualifiedFlowSignal.Price * rollingInstrument.MasterInstrument.TickSize)
                     .ToString(Core.Globals.GeneralOptions.CurrentCulture);
-            string tracking = lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Qualified
+            string tracking = lastQualifiedFlowOutcome == ExecutionOSFlowEvidenceV4.Stage.Qualified && !lastQualifiedFlowPaused
                 ? "Active" : FlowTrackingEndLabel();
             string key = lastQualifiedFlowGeneration + "/" + lastQualifiedFlowSignal.Id + "/" + price
                 + "/" + lastQualifiedFlowTime.Ticks + "/" + lastQualifiedFlowEndedTime.Ticks
@@ -2976,6 +3093,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
                 AddFixedFlowSummaryLine(lastQualifiedFlowTime.ToString("HH:mm:ss.fff") + " NT-local",
                     size, Brushes.WhiteSmoke, textWidth, dpi);
                 AddFixedFlowSummaryLine(tracking, size, Brushes.WhiteSmoke, textWidth, dpi);
+                if (lastQualifiedFlowPaused)
+                    AddFixedFlowSummaryLine(lastQualifiedFlowReason ?? "Quote validation pending", size, Brushes.Silver, textWidth, dpi);
                 if (lastQualifiedFlowOutcome != ExecutionOSFlowEvidenceV4.Stage.Qualified)
                 {
                     AddFixedFlowSummaryLine(lastQualifiedFlowReason ?? "Reason unavailable", size, Brushes.Silver, textWidth, dpi);
@@ -3053,6 +3172,220 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             lastFlowNoSpace++;
             if (history || (lastQualifiedFlowSignal != null && signal.Id == lastQualifiedFlowSignal.Id))
                 lastFlowHistoryVisibility = "Insufficient measured label space; summary retained";
+        }
+    }
+    #endregion
+
+    #region v4 Quote pause recorder
+    // Observational only. No reference to either calculation engine and no gate writes.
+    internal sealed class ExecutionOSQuotePauseDiagnosticsV4
+    {
+        internal struct Callback
+        {
+            internal long Sequence, SourceTicks, Volume;
+            internal int Kind, DataType, Operation, Position;
+            internal double Price, Bid, Ask;
+            internal bool Reset;
+        }
+        internal struct Quote
+        {
+            internal bool BidKnown, AskKnown;
+            internal long Bid, Ask, BidQuantity, AskQuantity;
+            internal bool Valid { get { return BidKnown && AskKnown && Bid < Ask; } }
+        }
+        internal sealed class Pause
+        {
+            internal long Id, Generation, ResetCount, Start, End, LastCountedSequence = long.MinValue;
+            internal DateTime StartLocal, EndLocal;
+            internal Quote Before, FirstInvalid, LastInvalid, After;
+            internal Callback BeforeCallback, StartCallback, LastInvalidCallback, EndCallback, LastTrade;
+            internal string Reason, LatestReason, Outcome, Affected = "";
+            internal bool IntervalComparable = true;
+            internal int SeenKinds, QualifiedSuppressed, CandidatesSuppressed, QualifiedPaused, StoredIds, OmittedIds;
+            internal long BidDepth, AskDepth, OtherDepth, LastTrades, BidData, AskData, OtherData, Refreshes, Renders;
+            internal long Duration { get { return Math.Max(0, End - Start); } }
+        }
+        internal Pause Active, LatestClosed, LongestRecovered, LatestQualifiedAffected;
+        internal long Started, Recovered, Abandoned, InitialInvalidCallbacks, ZeroDurationRecoveries;
+        internal long LockedStarts, CrossedStarts, MissingStarts;
+        internal readonly long[] Bins = new long[8];
+        internal long RecoveredTicks, Generation, ResetCount;
+        internal bool HasBaseline;
+        private bool haveIdentity;
+        private long lastNow = long.MinValue, lastInitialSequence = long.MinValue;
+        private Quote lastValid;
+        private Callback lastValidCallback;
+        private string lastContext = "Waiting for a trusted spread";
+        private static readonly long[] DurationUpperMilliseconds = { 1, 5, 10, 50, 100, 500, 1000 };
+
+        internal void CallbackArrived(Callback callback)
+        { if (Active != null) Count(Active, callback); }
+
+        internal void ResetContext(long now, DateTime local, Callback callback, string reason)
+        {
+            Abort(now, local, callback, reason);
+            HasBaseline = false; haveIdentity = false; lastContext = reason;
+        }
+        internal void Observe(long now, DateTime local, long generation, long resetCount,
+            bool context, string contextReason, Quote quote, string invalidReason, Callback callback)
+        {
+            if (!haveIdentity || Generation != generation || ResetCount != resetCount || now < lastNow)
+            {
+                Abort(now, local, callback, now < lastNow ? "Receipt clock rewind" : "Context changed: " + contextReason);
+                HasBaseline = false; haveIdentity = true; Generation = generation; ResetCount = resetCount;
+            }
+            lastNow = now;
+            if (!context)
+            {
+                Abort(now, local, callback, contextReason); HasBaseline = false; lastContext = contextReason; return;
+            }
+            if (!HasBaseline)
+            {
+                if (quote.Valid)
+                { HasBaseline = true; lastValid = quote; lastValidCallback = callback; lastContext = "Trusted baseline observed"; }
+                else if (lastInitialSequence != callback.Sequence)
+                { InitialInvalidCallbacks++; lastInitialSequence = callback.Sequence; lastContext = "Initial/unmeasured invalid spread: " + invalidReason; }
+                return;
+            }
+            if (quote.Valid)
+            {
+                if (Active != null)
+                {
+                    Count(Active, callback); Active.After = quote; Active.End = now; Active.EndLocal = local;
+                    Active.EndCallback = callback; Active.Outcome = "Recovered"; Recovered++;
+                    long duration = Active.Duration; RecoveredTicks += duration;
+                    if (duration == 0) ZeroDurationRecoveries++;
+                    int bin = 0;
+                    while (bin < DurationUpperMilliseconds.Length && duration > DurationUpperMilliseconds[bin] * TimeSpan.TicksPerMillisecond) bin++;
+                    Bins[bin]++;
+                    LatestClosed = Active;
+                    if (LongestRecovered == null || duration > LongestRecovered.Duration) LongestRecovered = Active;
+                    Active = null;
+                }
+                lastValid = quote; lastValidCallback = callback; lastContext = "Trusted spread available"; return;
+            }
+            int kind = InvalidKind(quote);
+            if (Active == null)
+            {
+                Started++;
+                if (kind == 1) LockedStarts++; else if (kind == 2) CrossedStarts++; else MissingStarts++;
+                Active = new Pause { Id = Started, Generation = generation, ResetCount = resetCount, Start = now,
+                    StartLocal = local, Before = lastValid, BeforeCallback = lastValidCallback,
+                    FirstInvalid = quote, StartCallback = callback, Reason = invalidReason, Outcome = "Open" };
+            }
+            Active.LastInvalid = quote; Active.LastInvalidCallback = callback;
+            Active.LatestReason = invalidReason; Active.SeenKinds |= kind; Count(Active, callback);
+        }
+        private static int InvalidKind(Quote quote)
+        { return !quote.BidKnown || !quote.AskKnown ? 4 : quote.Bid == quote.Ask ? 1 : 2; }
+        private static void Count(Pause pause, Callback callback)
+        {
+            if (pause.LastCountedSequence == callback.Sequence) return;
+            pause.LastCountedSequence = callback.Sequence;
+            if (callback.Kind == 1)
+            { if (callback.DataType == 0) pause.BidDepth++; else if (callback.DataType == 1) pause.AskDepth++; else pause.OtherDepth++; }
+            else if (callback.Kind == 2)
+            {
+                if (callback.DataType == 0) { pause.LastTrades++; pause.LastTrade = callback; }
+                else if (callback.DataType == 1) pause.BidData++;
+                else if (callback.DataType == 2) pause.AskData++;
+                else pause.OtherData++;
+            }
+            else if (callback.Kind == 3) pause.Refreshes++;
+            else if (callback.Kind == 4) pause.Renders++;
+        }
+        private void Abort(long now, DateTime local, Callback callback, string reason)
+        {
+            if (Active == null) return;
+            Active.IntervalComparable = now >= Active.Start && (lastNow == long.MinValue || now >= lastNow);
+            Active.End = now; Active.EndLocal = local; Active.EndCallback = callback;
+            Active.Outcome = "Abandoned: " + reason; LatestClosed = Active; Abandoned++; Active = null;
+        }
+        internal void Paused(long generation, long id, string pattern, string reason)
+        {
+            if (Active == null || Active.Generation != generation || reason != Active.Reason) return;
+            Active.QualifiedPaused++; LatestQualifiedAffected = Active;
+            if (Active.StoredIds < 6)
+            {
+                Active.Affected += (Active.StoredIds == 0 ? "" : ",") + "P:Q:generation=" + generation + "/id=" + id + "/" + pattern;
+                Active.StoredIds++;
+            }
+            else Active.OmittedIds++;
+        }
+        internal void Suppressed(long generation, long id, string pattern, bool qualified, string reason)
+        {
+            if (Active == null || Active.Generation != generation || reason != Active.Reason) return;
+            if (qualified) { Active.QualifiedSuppressed++; LatestQualifiedAffected = Active; }
+            else Active.CandidatesSuppressed++;
+            if (Active.StoredIds < 6)
+            {
+                Active.Affected += (Active.StoredIds == 0 ? "" : ",") + (qualified ? "Q" : "C")
+                    + ":generation=" + generation + "/id=" + id + "/" + pattern;
+                Active.StoredIds++;
+            }
+            else Active.OmittedIds++;
+        }
+        private static string Number(double value)
+        { return value.ToString("0.########", System.Globalization.CultureInfo.InvariantCulture); }
+        private static string Milliseconds(long ticks)
+        { return (ticks / (double)TimeSpan.TicksPerMillisecond).ToString("F3", System.Globalization.CultureInfo.InvariantCulture); }
+        private static string Local(DateTime time) { return time.ToString("yyyy-MM-dd HH:mm:ss.fff"); }
+        private static string Price(long ticks, double tickSize) { return Number(ticks * tickSize); }
+        private static string Inside(Quote quote, double tickSize)
+        {
+            return (quote.BidKnown ? Price(quote.Bid, tickSize) + "x" + quote.BidQuantity : "unconfirmed")
+                + "/" + (quote.AskKnown ? Price(quote.Ask, tickSize) + "x" + quote.AskQuantity : "unconfirmed");
+        }
+        private static string Frame(Callback callback)
+        {
+            string kind = callback.Kind == 1 ? "Depth " + (callback.DataType == 0 ? "Bid" : callback.DataType == 1 ? "Ask" : "Other")
+                + " op=" + (callback.Operation == 0 ? "Add" : callback.Operation == 1 ? "Update" : callback.Operation == 2 ? "Remove" : "Other") + " pos=" + callback.Position
+                : callback.Kind == 2 ? (callback.DataType == 0 ? "L1 Last" : callback.DataType == 1 ? "L1 Bid" : callback.DataType == 2 ? "L1 Ask" : "L1 Other")
+                : callback.Kind == 3 ? "Refresh" : callback.Kind == 4 ? "Render" : callback.Kind == 5 ? "Context boundary associated with last callback" : "Unspecified";
+            return "seq=" + callback.Sequence + " " + kind
+                + (callback.Kind == 1 || callback.Kind == 2 ? " price=" + Number(callback.Price) + " qty=" + callback.Volume
+                    + "; source-as-delivered=" + (callback.SourceTicks > 0 ? new DateTime(callback.SourceTicks).ToString("yyyy-MM-dd HH:mm:ss.fffffff") : "unstamped")
+                    + (callback.Kind == 2 && callback.DataType == 0 ? "; L1-snapshot=" + Number(callback.Bid) + "/" + Number(callback.Ask) : "")
+                    + (callback.Reset ? "; reset=True" : "") : "");
+        }
+        internal string Summary(long now)
+        {
+            return "observed-starts=" + Started + "; recovered=" + Recovered + "; abandoned=" + Abandoned
+                + "; open=" + (Active == null ? "none" : Active.Id + " age-ms=" + Milliseconds(Math.Max(0, now - Active.Start)))
+                + "; start-kinds locked/crossed/unconfirmed=" + LockedStarts + "/" + CrossedStarts + "/" + MissingStarts
+                + "; recovered-duration-bins-ms [<=1,>1-5,>5-10,>10-50,>50-100,>100-500,>500-1000,>1000]="
+                + string.Join(",", Array.ConvertAll(Bins, delegate(long n) { return n.ToString(System.Globalization.CultureInfo.InvariantCulture); }))
+                + "; recovered-mean-ms=" + (Recovered == 0 ? "n/a" : Milliseconds(RecoveredTicks / Recovered))
+                + "; zero-receipt-duration=" + ZeroDurationRecoveries + "; initial-invalid-callbacks=" + InitialInvalidCallbacks
+                + "; baseline=" + HasBaseline + "; context=" + lastContext;
+        }
+        internal string Describe(Pause pause, long now, double tickSize)
+        {
+            if (pause == null) return "none";
+            bool open = pause.Outcome == "Open", recovered = pause.Outcome == "Recovered";
+            return "pause=" + pause.Id + "; generation=" + pause.Generation + "; flow-reset-count=" + pause.ResetCount
+                + "; outcome=" + pause.Outcome + "; " + (open ? "open-age-ms=" : recovered ? "duration-ms=" : "censored-observed-ms=")
+                + (!open && !recovered && !pause.IntervalComparable ? "unavailable-clock-rewind"
+                    : Milliseconds(open ? Math.Max(0, now - pause.Start) : pause.Duration))
+                + "; start NT-local=" + Local(pause.StartLocal) + (open ? "" : "; end NT-local=" + Local(pause.EndLocal))
+                + "; reason=" + pause.Reason + "; latest-invalid-reason=" + pause.LatestReason
+                + "; observed-kind-mask [locked=1,crossed=2,unconfirmed=4]=" + pause.SeenKinds
+                + "; before-inside=" + Inside(pause.Before, tickSize) + "; first-invalid=" + Inside(pause.FirstInvalid, tickSize)
+                + "; last-invalid=" + Inside(pause.LastInvalid, tickSize)
+                + (recovered ? "; recovered-inside=" + Inside(pause.After, tickSize) + "; recovery-price-change="
+                    + (pause.After.Bid == pause.Before.Bid && pause.After.Ask == pause.Before.Ask ? "same-inside-restored"
+                        : pause.After.Bid > pause.Before.Bid && pause.After.Ask > pause.Before.Ask ? "both-higher"
+                        : pause.After.Bid < pause.Before.Bid && pause.After.Ask < pause.Before.Ask ? "both-lower" : "one-sided-or-mixed") : "")
+                + "; before-callback={" + Frame(pause.BeforeCallback) + "}; start-callback={" + Frame(pause.StartCallback)
+                + "}; last-invalid-callback={" + Frame(pause.LastInvalidCallback) + "}"
+                + (open ? "" : "; end-callback={" + Frame(pause.EndCallback) + "}")
+                + "; callbacks-including-start-and-recovery-if-present bid-depth/ask-depth/other-depth/L1-last/L1-bid/L1-ask/L1-other/refresh/render="
+                + pause.BidDepth + "/" + pause.AskDepth + "/" + pause.OtherDepth + "/" + pause.LastTrades + "/" + pause.BidData + "/" + pause.AskData
+                + "/" + pause.OtherData + "/" + pause.Refreshes + "/" + pause.Renders
+                + "; last-trade-during-pause={" + (pause.LastTrade.Sequence == 0 ? "none" : Frame(pause.LastTrade)) + "}"
+                + (pause.QualifiedPaused == 0 ? "" : "; paused-qualified=" + pause.QualifiedPaused)
+                + "; suppressed-qualified/candidates=" + pause.QualifiedSuppressed + "/" + pause.CandidatesSuppressed
+                + "; affected={" + pause.Affected + "}; omitted-ids=" + pause.OmittedIds;
         }
     }
     #endregion
@@ -3499,6 +3832,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             internal int DisplayMs = 3000, CooldownMs = 5000, ReconciliationMs = 250;
             internal int Capacity = 100000;
             internal bool Absorption = true, Initiative = true;
+            internal bool PauseQualifiedOnQuoteLoss;
             internal Settings Copy() { return (Settings)MemberwiseClone(); }
             internal void Validate()
             {
@@ -3519,6 +3853,8 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             internal long Executed, Eligible, Matched, Replenished, HeldMs, AdvanceTicks, FavorablePrice;
             internal int Refills, Dominance;
             internal string Reason;
+            internal bool QuotePaused;
+            internal int QuoteTransition; // 0 = qualification/terminal, 1 = pause, 2 = resume.
             // Snapshots are replaced, never mutated after publication to a queued signal copy.
             internal DiagnosticSnapshot Diagnostics, LastConfirmationInterruption;
             internal long ConfirmationInterruptions;
@@ -3676,7 +4012,13 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             if (Faulted || !ready) { quoteReady = false; return; }
             if (!value)
             {
-                if (quoteReady) { QuotePauseCount++; SuppressAll(now, reason); }
+                if (quoteReady)
+                {
+                    QuotePauseCount++;
+                    if (settings.PauseQualifiedOnQuoteLoss)
+                    { quoteReady = false; haveQuote = false; PauseQualifiedOrSuppressCandidates(now, reason); }
+                    else SuppressAll(now, reason);
+                }
                 quoteReady = false; haveQuote = false; QuotePauseReason = reason;
                 return;
             }
@@ -3920,6 +4262,90 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
         {
             Faulted = true; ready = false; SuppressAll(now, reason); Status = "Unavailable: " + reason;
         }
+        // Only already-qualified events survive a quote interruption. Candidate
+        // confirmation is discarded exactly as in the strict policy.
+        private void PauseQualifiedOrSuppressCandidates(long now, string reason)
+        {
+            foreach (Level level in levels.Values)
+            {
+                if (level.Active == null) continue;
+                if (level.Active.State == Stage.Qualified) PauseQualified(level.Active, now, reason);
+                else { End(level.Active, Stage.Suppressed, now, reason); level.Active = null; }
+            }
+            if (buyInitiative != null)
+            {
+                if (buyInitiative.State == Stage.Qualified) PauseQualified(buyInitiative, now, reason);
+                else { End(buyInitiative, Stage.Suppressed, now, reason); buyInitiative = null; }
+            }
+            if (sellInitiative != null)
+            {
+                if (sellInitiative.State == Stage.Qualified) PauseQualified(sellInitiative, now, reason);
+                else { End(sellInitiative, Stage.Suppressed, now, reason); sellInitiative = null; }
+            }
+        }
+        private void PauseQualified(Signal signal, long now, string reason)
+        {
+            if (signal.QuotePaused) return;
+            signal.QuotePaused = true; signal.QuoteTransition = 1;
+            signal.Updated = now; signal.Reason = reason; Emit(signal);
+        }
+        private void ExpirePausedQualifications(long now)
+        {
+            foreach (Level level in levels.Values)
+                if (ExpirePaused(level.Active, now))
+                { level.Active = null; level.CooldownUntil = now + Ms(settings.CooldownMs); }
+            if (ExpirePaused(buyInitiative, now))
+            { buyInitiative = null; buyCooldown = now + Ms(settings.CooldownMs); }
+            if (ExpirePaused(sellInitiative, now))
+            { sellInitiative = null; sellCooldown = now + Ms(settings.CooldownMs); }
+        }
+        private bool ExpirePaused(Signal signal, long now)
+        {
+            if (signal == null || !signal.QuotePaused || now - signal.QualifiedAt < Ms(settings.DisplayMs)) return false;
+            End(signal, Stage.Expired, now, "Display lifetime elapsed"); return true;
+        }
+        private bool RecheckPaused(Signal signal, bool supported, long now)
+        {
+            if (signal == null || !signal.QuotePaused) return true;
+            // SetQuoteReady(true) alone is insufficient: Quote() must supply a
+            // confirmed spread before the completed callback can resume tracking.
+            if (!QuoteReady || !haveQuote) return false;
+            if (!supported)
+            {
+                End(signal, Stage.Suppressed, now, "Quote recovery evidence no longer qualifies");
+                return false;
+            }
+            signal.QuotePaused = false; signal.QuoteTransition = 2;
+            signal.Updated = now; signal.Reason = "Quote validation recovered; tracking resumed";
+            Emit(signal); return true;
+        }
+        private void RecheckPausedQualifications(long now, bool quality)
+        {
+            if (!QuoteReady || !haveQuote) return;
+            foreach (Level level in levels.Values)
+            {
+                Signal signal = level.Active;
+                if (signal == null || !signal.QuotePaused) continue;
+                RecheckPaused(signal, AbsorptionSupported(level, now, quality), now);
+                if (signal.State != Stage.Qualified)
+                { level.Active = null; level.CooldownUntil = now + Ms(settings.CooldownMs); }
+            }
+            if (buyInitiative != null && buyInitiative.QuotePaused)
+            {
+                Signal signal = buyInitiative;
+                RecheckPaused(signal, InitiativeSupported(true, buys, sells.Executed, now, quality), now);
+                if (signal.State != Stage.Qualified)
+                { buyInitiative = null; buyCooldown = now + Ms(settings.CooldownMs); }
+            }
+            if (sellInitiative != null && sellInitiative.QuotePaused)
+            {
+                Signal signal = sellInitiative;
+                RecheckPaused(signal, InitiativeSupported(false, sells, buys.Executed, now, quality), now);
+                if (signal.State != Stage.Qualified)
+                { sellInitiative = null; sellCooldown = now + Ms(settings.CooldownMs); }
+            }
+        }
+
         private void SuppressAll(long now, string reason)
         {
             foreach (Level level in levels.Values)
@@ -4031,6 +4457,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
         private void ObserveContinuity(long now)
         {
             if (updateDepth != 0) return; // Reconciliation observers are internal steps of one callback.
+            ExpirePausedQualifications(now);
             bool quality = ClassifiedEnough();
             foreach (Level level in levels.Values)
             {
@@ -4063,9 +4490,11 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             if (Faulted || !ready) return;
             // Rule state is checked on every completed callback. Only status text is throttled.
             bool classifiedEnough = ClassifiedEnough();
-            if (QuoteReady && settings.Absorption)
+            RecheckPausedQualifications(now, classifiedEnough);
+            bool usableQuotes = QuoteReady && (!settings.PauseQualifiedOnQuoteLoss || haveQuote);
+            if (usableQuotes && settings.Absorption)
                 foreach (KeyValuePair<Key, Level> pair in levels) Absorption(pair.Key, pair.Value, now, classifiedEnough);
-            if (QuoteReady)
+            if (usableQuotes)
             { Initiative(true, buys, sells.Executed, now, classifiedEnough);
                 Initiative(false, sells, buys.Executed, now, classifiedEnough); }
             prune.Clear();
@@ -4187,6 +4616,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
         private void End(Signal signal, Stage state, long now, string reason)
         {
             if (signal.State != Stage.Candidate && signal.State != Stage.Qualified) return;
+            signal.QuotePaused = false; signal.QuoteTransition = 0;
             signal.State = state; signal.Updated = now; signal.Reason = reason; Emit(signal);
         }
         private void Emit(Signal signal)
@@ -4336,7 +4766,7 @@ namespace NinjaTrader.NinjaScript.SuperDomColumns
             Signal initiative = displaySide == Side.Ask ? buyInitiative : sellInitiative;
             if (initiative != null && initiative.Price == price && (result == null
                 || (initiative.State == Stage.Qualified && result.State != Stage.Qualified) || initiative.Updated > result.Updated)) result = initiative;
-            return result != null && (result.State == Stage.Candidate || result.State == Stage.Qualified) ? result.Copy() : null;
+            return result != null && !result.QuotePaused && (result.State == Stage.Candidate || result.State == Stage.Qualified) ? result.Copy() : null;
         }
     }
     #endregion

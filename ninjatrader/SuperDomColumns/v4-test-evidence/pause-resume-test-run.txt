@@ -1,0 +1,35 @@
+PASS Qualified pause/recheck retains identity and original metrics kind=0
+PASS Original display deadline continues through quote pause kind=0
+PASS Reported adverse print during pause remains terminal kind=0
+PASS Hard context loss supersedes pause kind=0
+PASS L1 snapshot and ready flag alone cannot resume kind=0
+PASS Qualified pause/recheck retains identity and original metrics kind=1
+PASS Original display deadline continues through quote pause kind=1
+PASS Reported adverse print during pause remains terminal kind=1
+PASS Hard context loss supersedes pause kind=1
+PASS L1 snapshot and ready flag alone cannot resume kind=1
+PASS Qualified pause/recheck retains identity and original metrics kind=2
+PASS Original display deadline continues through quote pause kind=2
+PASS Reported adverse print during pause remains terminal kind=2
+PASS Hard context loss supersedes pause kind=2
+PASS L1 snapshot and ready flag alone cannot resume kind=2
+PASS Qualified pause/recheck retains identity and original metrics kind=3
+PASS Original display deadline continues through quote pause kind=3
+PASS Reported adverse print during pause remains terminal kind=3
+PASS Hard context loss supersedes pause kind=3
+PASS L1 snapshot and ready flag alone cannot resume kind=3
+PASS Recovered spread with inadequate advance fails recheck buy=False
+PASS Observed 819ms interruption can recover without timer grace buy=False
+PASS Recovered spread with inadequate advance fails recheck buy=True
+PASS Observed 819ms interruption can recover without timer grace buy=True
+PASS Absorption coverage loss still ends paused event ask=False
+PASS Candidates remain suppressed and restart confirmation ask=False
+PASS Absorption coverage loss still ends paused event ask=True
+PASS Candidates remain suppressed and restart confirmation ask=True
+PASS Stale execution evidence fails recovery without extending lifetime
+PASS Unknown prints continue degrading quality during pause
+PASS Source timing uncertainty still terminates paused absorption
+PASS Strict policy remains the default
+PASS Repeated pause cycles do not requalify or extend expiry
+PASS Paused transitions are immutable snapshots
+RESULT 34 pause resume core scenarios passed; 0 failed

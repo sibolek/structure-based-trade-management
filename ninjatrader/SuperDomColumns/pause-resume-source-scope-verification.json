@@ -1,0 +1,41 @@
+{
+  "build": "2026-10-16.5 EXP",
+  "source_sha256": "7a4e923094f1fdabdf1293027c268e847ed3399b6c372f6ab8b9a412892b1cf1",
+  "previous_sha256": "11742cabb49db5fcf1c1db961d51eedfd90b0a1d8e2791c2f938b8841794a431",
+  "CRLF": true,
+  "rolling_calculation_core_unchanged": true,
+  "unchanged_adapter_methods": [
+    "DrawBidValue",
+    "DrawAskValue",
+    "DrawSpoofAlert",
+    "TrackSpoofCandidate",
+    "ProcessRollingDepth",
+    "ProcessRollingTrade",
+    "SynchronizeFlowCoverage",
+    "OnMarketDepth",
+    "OnMarketData",
+    "EnsureV3Context",
+    "OnRollingRefresh"
+  ],
+  "protected_repository_sources": {
+    "ExecutionOSPullingStacking.cs": "a521f8c49dc62dcac8391d813ad5eb3399922764f7a42b4bfd69899dcc001298",
+    "ExecutionOSPullingStacking_v3.cs": "6d6d7770feeb9442a01984cec190782683a5c106b078c6d88c193e7c4c655902"
+  },
+  "pause_policy_default": false,
+  "pause_policy_recommended_for_test": true,
+  "threshold_defaults_unchanged": true,
+  "quote_validity_gate_unchanged": true,
+  "new_grace_period_ms": null,
+  "candidate_quote_suppression_unchanged": true,
+  "qualified_identity_price_time_metrics_preserved": true,
+  "original_qualification_display_deadline_retained": true,
+  "new_lifecycle_transitions": [
+    "Paused",
+    "Resumed"
+  ],
+  "new_terminal_reason": "Quote recovery evidence no longer qualifies",
+  "native_compilation_verified": false,
+  "installed": false,
+  "committed": false,
+  "pushed": false
+}

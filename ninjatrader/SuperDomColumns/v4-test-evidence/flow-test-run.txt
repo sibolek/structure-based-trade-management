@@ -1,3 +1,4 @@
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/flow/Flow.cs(18,23): warning CS0649: Field 'ExecutionOSFlowEvidenceV4.Settings.PauseQualifiedOnQuoteLoss' is never assigned to, and will always have its default value false [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/flow/Tests.csproj]
 PASS Buyer absorption requires matched selling, replenishment and a hold
 PASS Seller absorption is the mirrored pattern
 PASS Executions without replenishment remain candidates
@@ -37,5 +38,5 @@ PASS Classification deterioration suppresses already qualified absorption
 PASS Confirmation duration is measured after all conditions first agree
 PASS Withdrawals offset refills in net replenishment
 PASS Execution-only correction is not a refill observation
-BENCH flow input pairs=100000 wallMs=492.2 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
+BENCH flow input pairs=100000 wallMs=406.0 retainedTrades=5000 retainedContributions=5250; excludes NinjaTrader/WPF
 RESULT 39 flow scenarios passed; 0 failed

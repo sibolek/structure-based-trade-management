@@ -1,0 +1,66 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using F=ExecutionOSFlowEvidenceV4;
+internal static class Program
+{
+ static int passed;
+ static long T(double s){return (long)Math.Round(s*TimeSpan.TicksPerSecond);}
+ static void Check(bool v,string s){if(!v)throw new Exception(s);}
+ static void Eq(long a,long b,string s){Check(a==b,s+": "+a+" != "+b);}
+ static void Test(string s,Action a){a();passed++;Console.WriteLine("PASS "+s);}
+ static F New(F.Settings settings=null){F f=new F(settings??new F.Settings());f.Reset(0,"start");f.SetReady(true,0,"ready");f.BeginCoverage();f.Quantity(F.Side.Bid,100,200,0);f.Quantity(F.Side.Ask,101,200,0);f.EndCoverage(0);f.Quote(100,101);f.SetQuoteReady(true,0,"quotes ready");f.Evaluate(T(5));return f;}
+ static long Trade(F f,int d,long p,long q,double t,bool match=true,long bid=100,long ask=101){if(f.QuoteReady)f.Quote(bid,ask);long id=f.AddTrade(d,p,q,bid,ask,T(t));if(match)f.MatchTrade(id,q);f.Evaluate(T(t));return id;}
+ static List<F.Signal> Drain(F f){List<F.Signal> a=new List<F.Signal>();F.Signal s;while((s=f.TakeTransition())!=null)a.Add(s);return a;}
+ static void AbsPrepare(F f,bool ask=false){int d=ask?1:-1;long p=ask?101:100;F.Side side=ask?F.Side.Ask:F.Side.Bid;Trade(f,d,p,60,5.1);f.Contribution(1,side,p,60,T(5.12),T(5.12));Trade(f,d,p,60,5.5);f.Contribution(2,side,p,60,T(5.52),T(5.52));f.Evaluate(T(5.9));}
+ static void InitiativePrepare(F f,bool buy=true){int d=buy?1:-1;Trade(f,d,buy?101:103,50,5.1,false,buy?100:103,buy?101:104);Trade(f,d,102,50,5.5,false,buy?101:102,buy?102:103);Trade(f,d,buy?103:101,50,5.9,false,buy?102:101,buy?103:102);}
+ static void Stage(F f,F.Side side,long price,F.Stage stage){F.Signal s=f.At(side,price);Check(s!=null&&s.State==stage,"expected "+stage+" at "+price);}
+ static void No(F f,F.Side side,long price){Check(f.At(side,price)==null,"ended marker must stay removed");}
+ static F Pausable(){return New(new F.Settings{PauseQualifiedOnQuoteLoss=true});}
+ static F.Signal Latest(F f){var a=Drain(f);return a.Count==0?null:a[a.Count-1];}
+ static void Qualify(F f,int kind){if(kind<2){AbsPrepare(f,kind==1);f.Evaluate(T(6.4));}else{InitiativePrepare(f,kind==2);f.Evaluate(T(6.4));}}
+ static void Recover(F f,int kind,double t){f.SetQuoteReady(true,T(t),"ready");f.Quote(kind==2?102:kind==3?101:100,kind==2?103:kind==3?102:101);f.Evaluate(T(t));}
+ public static int Main(){try{
+ for(int k=0;k<4;k++){int kind=k;Test("Qualified pause/recheck retains identity and original metrics kind="+kind,delegate{
+ var f=Pausable();Qualify(f,kind);var qualified=Latest(f);Check(qualified!=null&&qualified.State==F.Stage.Qualified,"fixture qualified");long count=f.QualifiedCount;
+ f.SetQuoteReady(false,T(6.41),"Inside quotes locked");var p=Latest(f);Check(p.QuotePaused&&p.QuoteTransition==1&&p.State==F.Stage.Qualified,"nonterminal pause");Eq(p.Id,qualified.Id,"same ID");Check(f.At(kind==1||kind==2?F.Side.Ask:F.Side.Bid,p.Price)==null,"no active row label while paused");
+ f.SetQuoteReady(false,T(6.415),"Inside quotes crossed");Eq(Drain(f).Count,0,"no repeated pause event");Recover(f,kind,6.42);var r=Latest(f);Check(r!=null&&r.QuoteTransition==2&&!r.QuotePaused,"resumed");Eq(r.Id,qualified.Id,"identity preserved");Eq(r.QualifiedAt,qualified.QualifiedAt,"original qualified time");Eq(r.Price,qualified.Price,"original price");Eq(r.Executed,qualified.Executed,"qualification metrics frozen");Eq(f.QualifiedCount,count,"resume not another qualification");
+ });Test("Original display deadline continues through quote pause kind="+kind,delegate{
+ var f=Pausable();Qualify(f,kind);var q=Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);f.Evaluate(T(9.4));var e=Latest(f);Check(e!=null&&e.State==F.Stage.Expired&&!e.QuotePaused&&e.QuoteTransition==0,"ended on original 3 second deadline");Eq(e.QualifiedAt,q.QualifiedAt,"deadline anchor unchanged");Recover(f,kind,9.41);Check(!Drain(f).Exists(delegate(F.Signal x){return x.QuoteTransition==2;}),"never resumed expired event");
+ });Test("Reported adverse print during pause remains terminal kind="+kind,delegate{
+ var f=Pausable();Qualify(f,kind);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);long price=kind==0?98:kind==1?103:kind==2?100:104;f.AddTrade(kind==1||kind==3?1:-1,price,1,100,101,T(6.42));f.Evaluate(T(6.42));var e=Latest(f);Check(e!=null&&e.State==F.Stage.Invalidated&&!e.QuotePaused,"adverse print ends while paused");Recover(f,kind,6.43);Check(!Drain(f).Exists(delegate(F.Signal x){return x.QuoteTransition==2;}),"cannot resurrect");
+ });Test("Hard context loss supersedes pause kind="+kind,delegate{
+ var f=Pausable();Qualify(f,kind);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);f.SetReady(false,T(6.42),"Feed disconnected");var e=Latest(f);Check(e!=null&&e.State==F.Stage.Suppressed&&!e.QuotePaused,"terminal reset");Eq(f.RetainedTrades,0,"old evidence cleared");Recover(f,kind,6.43);Check(!Drain(f).Exists(delegate(F.Signal x){return x.QuoteTransition==2;}),"no reset recovery");
+ });Test("L1 snapshot and ready flag alone cannot resume kind="+kind,delegate{
+ var f=Pausable();Qualify(f,kind);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);f.AddTrade(kind==1||kind==2?1:-1,kind==0?100:kind==1?101:kind==2?103:101,1,100,101,T(6.415));f.Evaluate(T(6.415));Check(!f.QuoteReady,"L1 does not open gate");f.SetQuoteReady(true,T(6.42),"ready");f.Evaluate(T(6.42));Check(!Drain(f).Exists(delegate(F.Signal x){return x.QuoteTransition==2;}),"fresh confirmed Quote required");Recover(f,kind,6.43);Check(Latest(f).QuoteTransition==2,"fresh depth permits recheck");
+ });}
+ foreach(bool buy in new[]{false,true}){bool b=buy;Test("Recovered spread with inadequate advance fails recheck buy="+b,delegate{
+ var f=Pausable();Qualify(f,b?2:3);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);f.SetQuoteReady(true,T(6.42),"ready");f.Quote(b?100:103,b?101:104);f.Evaluate(T(6.42));var e=Latest(f);Check(e!=null&&e.State==F.Stage.Suppressed&&e.Reason=="Quote recovery evidence no longer qualifies","current quote advance rechecked");
+ });Test("Observed 819ms interruption can recover without timer grace buy="+b,delegate{
+ var f=Pausable();Qualify(f,b?2:3);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);f.Evaluate(T(7.229));Recover(f,b?2:3,7.229);Check(Latest(f).QuoteTransition==2,"current evidence remains supported after 819ms");
+ });}
+ foreach(bool ask in new[]{false,true}){bool a=ask;Test("Absorption coverage loss still ends paused event ask="+a,delegate{
+ var f=Pausable();Qualify(f,a?1:0);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);f.BeginCoverage();f.Quantity(a?F.Side.Bid:F.Side.Ask,a?100:101,200,T(6.42));f.EndCoverage(T(6.42));var e=Latest(f);Check(e.State==F.Stage.Suppressed&&e.Reason=="Observation coverage lost","loss not bridged");Recover(f,a?1:0,6.43);Check(!Drain(f).Exists(delegate(F.Signal x){return x.QuoteTransition==2;}),"coverage loss terminal");
+ });Test("Candidates remain suppressed and restart confirmation ask="+a,delegate{
+ var f=Pausable();AbsPrepare(f,a);var q=Latest(f);Check(q.State==F.Stage.Candidate,"candidate fixture");f.SetQuoteReady(false,T(5.95),"Inside quotes locked");var e=Latest(f);Check(e.State==F.Stage.Suppressed&&e.QuoteTransition==0,"candidates never pause");Recover(f,a?1:0,6);var n=f.At(a?F.Side.Ask:F.Side.Bid,a?101:100);Check(n.State==F.Stage.Candidate&&n.Id!=q.Id,"new candidate");Eq(n.QualifyingSince,T(6),"full confirmation restarts");f.Evaluate(T(6.499));Eq(f.QualifiedCount,0,"cannot qualify early");f.Evaluate(T(6.5));Eq(f.QualifiedCount,1,"full confirmation");
+ });}
+ Test("Stale execution evidence fails recovery without extending lifetime",delegate{
+ var f=Pausable();Qualify(f,2);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);Recover(f,2,7.401);var e=Latest(f);Check(e.State==F.Stage.Suppressed&&e.Reason=="Quote recovery evidence no longer qualifies","existing 1500ms quiet criterion enforced");
+ });
+ Test("Unknown prints continue degrading quality during pause",delegate{
+ var f=Pausable();Qualify(f,2);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);f.AddTrade(0,103,100,102,103,T(6.42));f.Evaluate(T(6.42));var e=Latest(f);Check(e.State==F.Stage.Suppressed&&e.Reason=="Trade classification deteriorated","quality not ignored");Recover(f,2,6.43);Check(!Drain(f).Exists(delegate(F.Signal x){return x.QuoteTransition==2;}),"failed event not revived");
+ });
+ Test("Source timing uncertainty still terminates paused absorption",delegate{
+ var f=Pausable();Qualify(f,0);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");Drain(f);f.AttributionUncertain(T(6.42));var e=Latest(f);Check(e.State==F.Stage.Suppressed&&e.Reason=="Depth source timing uncertain","source fence remains");
+ });
+ Test("Strict policy remains the default",delegate{Check(!new F.Settings().PauseQualifiedOnQuoteLoss,"explicit opt in");var f=New();Qualify(f,2);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");var e=Latest(f);Check(e.State==F.Stage.Suppressed&&!e.QuotePaused,"unchanged strict behavior");});
+ Test("Repeated pause cycles do not requalify or extend expiry",delegate{
+ var f=Pausable();Qualify(f,2);var q=Latest(f);for(int i=0;i<100;i++){double t=6.41+i*.001;f.SetQuoteReady(false,T(t),"Inside quotes locked");Recover(f,2,t+.0005);}var all=Drain(f);Eq(all.Count,200,"one pause and resume per edge");Eq(f.QualifiedCount,1,"single qualification");Check(all.TrueForAll(delegate(F.Signal x){return x.QualifiedAt==q.QualifiedAt&&x.Id==q.Id;}),"identity and original clock retained");f.Evaluate(T(9.4));Check(Latest(f).State==F.Stage.Expired,"original deadline");
+ });
+ Test("Paused transitions are immutable snapshots",delegate{
+ var f=Pausable();Qualify(f,2);Latest(f);f.SetQuoteReady(false,T(6.41),"Inside quotes locked");var p=Latest(f);Recover(f,2,6.42);var r=Latest(f);Check(p.QuotePaused&&p.QuoteTransition==1&&!r.QuotePaused&&r.QuoteTransition==2,"copies not aliased");
+ });
+ Console.WriteLine("RESULT "+passed+" pause resume core scenarios passed; 0 failed");return 0;
+ }catch(Exception ex){Console.Error.WriteLine("FAIL "+ex);return 1;}}
+}

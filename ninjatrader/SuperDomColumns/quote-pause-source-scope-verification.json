@@ -1,0 +1,43 @@
+{
+  "v4 Rolling calculation core": {
+    "unchanged": true,
+    "normalized_sha256": "197002ba39be0f6754b8b280dab0a44f75335c4a5703436e30deba1a689a86b4"
+  },
+  "v4 Flow evidence core": {
+    "unchanged": true,
+    "normalized_sha256": "abf4a419bff7753b3722b160935a3c5c4d70f2a323bc673bd79cb4019812408a"
+  },
+  "previous_sha256": "a794505f8066a816caceca3287eb6ca9f74c004b16384fdac3162b9cacee1222",
+  "source_sha256": "11742cabb49db5fcf1c1db961d51eedfd90b0a1d8e2791c2f938b8841794a431",
+  "modified_adapter_methods": [
+    "OnMarketData",
+    "OnMarketDepth",
+    "OnRender",
+    "OnStateChange",
+    "EnsureV3Context",
+    "OnRollingRefresh",
+    "EnsureFlowContext",
+    "ResetFlowEvidence",
+    "StopFlowEvidence",
+    "SynchronizeFlowCoverage",
+    "FinishFlowEvent",
+    "DrainFlowTransitions"
+  ],
+  "new_adapter_methods": [
+    "BeginQuotePauseCallback",
+    "ObserveQuotePause",
+    "ObserveQuotePauseSuppression",
+    "PrintQuotePauseSample",
+    "ResetQuotePauseContext",
+    "RestartQuotePauseClockCapture"
+  ],
+  "detector_configuration_key_unchanged": true,
+  "numeric_spoof_and_fixed_panel_renderers_unchanged": true,
+  "source_CRLF": true,
+  "diagnostics_default": false,
+  "retained_pause_record_references_maximum": 4,
+  "histogram_bins": 8,
+  "sample_interval_real_seconds_per_run": 5,
+  "first_sample_after_new_run_may_be_immediate": true,
+  "per_callback_or_per_pause_Print_added": false
+}

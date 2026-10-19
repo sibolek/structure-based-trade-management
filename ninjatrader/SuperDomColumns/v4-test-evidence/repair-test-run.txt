@@ -1,3 +1,4 @@
+/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/repair/Flow.cs(18,23): warning CS0649: Field 'ExecutionOSFlowEvidenceV4.Settings.PauseQualifiedOnQuoteLoss' is never assigned to, and will always have its default value false [/private/var/folders/6x/g2t0xr8d6ng68fnfpvwss8cc0000gn/T/executionos-v4-tests-7w17zhrn/repair/Tests.csproj]
 PASS Absorption adverse excursion, side=False, phase=1ms
 PASS Absorption adverse excursion, side=True, phase=1ms
 PASS Initiative adverse excursion, buy=True, phase=1ms

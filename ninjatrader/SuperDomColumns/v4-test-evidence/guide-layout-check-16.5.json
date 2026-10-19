@@ -1,0 +1,50 @@
+[
+  {
+    "width": 1440,
+    "scroll": 1440,
+    "anchors": [],
+    "localLinks": [
+      "ExecutionOSPullingStacking_v4_Experimental.cs",
+      "ExecutionOS-v4-Pause-Resume-source-bundle.zip",
+      "README-v4-Pause-Resume.md",
+      "Event-Endings-Reference.md",
+      "rollback/ExecutionOSPullingStacking_v4_2026-10-16.4.cs.txt",
+      "pause-resume-validation-manifest.json",
+      "pause-resume-source-scope-verification.json",
+      "v4-pause-resume-source.diff"
+    ],
+    "missingLocal": []
+  },
+  {
+    "width": 768,
+    "scroll": 768,
+    "anchors": [],
+    "localLinks": [
+      "ExecutionOSPullingStacking_v4_Experimental.cs",
+      "ExecutionOS-v4-Pause-Resume-source-bundle.zip",
+      "README-v4-Pause-Resume.md",
+      "Event-Endings-Reference.md",
+      "rollback/ExecutionOSPullingStacking_v4_2026-10-16.4.cs.txt",
+      "pause-resume-validation-manifest.json",
+      "pause-resume-source-scope-verification.json",
+      "v4-pause-resume-source.diff"
+    ],
+    "missingLocal": []
+  },
+  {
+    "width": 390,
+    "scroll": 390,
+    "anchors": [],
+    "localLinks": [
+      "ExecutionOSPullingStacking_v4_Experimental.cs",
+      "ExecutionOS-v4-Pause-Resume-source-bundle.zip",
+      "README-v4-Pause-Resume.md",
+      "Event-Endings-Reference.md",
+      "rollback/ExecutionOSPullingStacking_v4_2026-10-16.4.cs.txt",
+      "pause-resume-validation-manifest.json",
+      "pause-resume-source-scope-verification.json",
+      "v4-pause-resume-source.diff"
+    ],
+    "missingLocal": []
+  }
+]

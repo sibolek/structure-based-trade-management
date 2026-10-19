@@ -1,6 +1,28 @@
+# Build 2026-10-16.5: optional qualified-event pause and recheck
+
+Set **Flow detection (experimental) → Pause qualified events on quote loss = True** to test this behavior. The new option defaults to False; False keeps the strict behavior documented in the historical reference below. Changing this detection option rebuilds the detector, clears its last-event record, and requires fresh warm-up.
+
+- **Paused: quote validation / Paused log transition:** the event qualified earlier and quotes are now unconfirmed, locked, or crossed. The event is retained but its live row label is hidden. Its original qualification time and display deadline remain in force. Candidates are still suppressed and must start fresh confirmation after recovery.
+- **Active / Resumed log transition:** confirmed valid L2 quotes returned, and the event passed a recheck using the current retained execution evidence, normal age/quiet checks, advance or absorption support, classification quality, and coverage. This is the same qualification, not a new signal or an additional Qualified count. An L1 trade snapshot alone cannot reopen the L2 gate.
+- **Ended: Recovery check failed / Quote recovery evidence no longer qualifies:** the spread became valid, but the event failed the current full support checks. Inspect checks-now/blockers in that event row for detail. It does not resume or restart its display lifetime.
+- **Ended: Expired / Display lifetime elapsed:** the original Marker display deadline elapsed, including time spent paused. With a 3000 ms marker lifetime, an event qualified at 12:00:00.000 expires at 12:00:03.000 even if it resumed at 12:00:02.500. The ending is recognized at the next callback/refresh that evaluates the deadline.
+- Existing adverse-price, execution-quality, absorption coverage, source-timing, capacity/fault and context-reset rules continue operating. A terminal event cannot be revived by later quote recovery. A reset may clear the card entirely.
+
+The fixed card shows Paused only while the latest retained qualification is paused. It returns to Active if that same event resumes, or shows its specific Ended state. Pauses can be too short to notice visually; use Paused/Resumed log rows. A newer qualification replaces the card; a later resume of an older event cannot overwrite it. A gray LAST marker is historical, not current active confirmation.
+
+The quote diagnostic record adds **paused-qualified** and samples **P:Q:generation=.../id=...** separately from suppressed-qualified/candidates. It retains the existing bounded sampling and five-second quote diagnostic output cadence. Flow event transitions are logged individually when Log flow events is enabled.
+
+No arbitrary quote grace time is introduced. Invalid quotes still block all new qualification. Unconfirmed recovery does not resume the event. Preserve original/v3 scripts and the 16.4 rollback source. This experimental policy changes tracking lifecycle, not execution or P/S arithmetic.
+
+---
+
+## Historical strict-policy and shared-ending reference
+
+The preserved reference below describes builds through 16.4 and the 16.5 option set to False. When the new option is True, replace its immediate qualified-event quote-suppression rule with the pause/recheck behavior above. Candidate quote suppression and all other specified ending/reset rules still apply.
+
 ## Event endings explained
 
-This reference describes the actual rules in builds **2026-10-16.2 EXP and 2026-10-16.3 EXP**. Those builds share the same detector. This is a documentation update; it changes no settings or indicator code.
+This reference describes the actual rules in builds **2026-10-16.2 EXP, 2026-10-16.3 EXP, and 2026-10-16.4 EXP**. Those builds share the same detection rules. Build 16.4 adds observational quote-pause diagnostics; it does not change the quote gate or thresholds.
 
 ### What “price retraced” means
 
