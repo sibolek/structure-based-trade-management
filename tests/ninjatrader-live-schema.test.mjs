@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { NinjaTraderMarketDataProvider } from '../schwab-bridge/ninjatrader-market-data-provider.mjs';
 import { uniqueTradingDates } from '../schwab-bridge/dss-input-assembler.mjs';
-import { assessQuoteEvidence, CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from '../schwab-bridge/market-data-provider.mjs';
+import { assessQuoteEvidence, CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from '../schwab-bridge/ninjatrader-quote-evidence.mjs';
 
 const config = JSON.parse(fs.readFileSync(new URL('../docs/ninjatrader-market-data.live-verified.json', import.meta.url)));
 const sample = JSON.parse(fs.readFileSync(new URL('./fixtures/ninjatrader/live-market-sample.json', import.meta.url)));

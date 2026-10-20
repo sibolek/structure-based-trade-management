@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
 import { NinjaTraderOAuthStore, NinjaTraderReadOnlyClient, endpointFor } from './ninjatrader-mcp-client.mjs';
 import { NinjaTraderMarketDataProvider } from './ninjatrader-market-data-provider.mjs';
-import { assessQuoteEvidence, CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from './market-data-provider.mjs';
+import { assessQuoteEvidence, CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from './ninjatrader-quote-evidence.mjs';
 
 export function validateOAuthCallback(rawUrl, expectedState) {
   const url = new URL(rawUrl, 'http://127.0.0.1:8791');

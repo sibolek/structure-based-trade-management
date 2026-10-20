@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { NinjaTraderMarketDataProvider } from '../schwab-bridge/ninjatrader-market-data-provider.mjs';
 import { createConfiguredMarketDataProviders } from '../schwab-bridge/market-data-provider-factory.mjs';
-import { assessQuoteEvidence, CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from '../schwab-bridge/market-data-provider.mjs';
+import { assessQuoteEvidence, CURRENT_LIVE_QUOTE_EVIDENCE_POLICY } from '../schwab-bridge/ninjatrader-quote-evidence.mjs';
 import { config, now, quotePayload, candle } from './fixtures/ninjatrader/config.mjs';
 
 function fixture(payload = quotePayload, cfg = config) {
