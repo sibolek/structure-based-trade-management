@@ -157,7 +157,7 @@ test('browser authorization uses the separately discovered official consent orig
 test('default market-data clients cannot read account/position resources', async () => {
   let calls = 0; const client = new NinjaTraderReadOnlyClient({ oauthProvider: provider(), fetchImpl: async () => { calls++; } });
   await assert.rejects(client.readAccountList(), /RESOURCE_DENIED/);
-  await assert.rejects(client.readPositionList(), /RESOURCE_DENIED/); assert.equal(calls, 0);
+  await assert.rejects(client.readPositionList(), /RESOURCE_DENIED/); await assert.rejects(client.readOrderList(), /RESOURCE_DENIED/); assert.equal(calls, 0);
 });
 test('explicit monitor capability permits only portfolio/fill tools and two fixed observation resources', async t => {
   const requests = [];
@@ -167,19 +167,19 @@ test('explicit monitor capability permits only portfolio/fill tools and two fixe
     if (!Object.hasOwn(m, 'id')) return new Response(null, { status: 202 });
     let result;
     if (m.method === 'initialize') result = { protocolVersion: m.params.protocolVersion, capabilities: { tools: {}, resources: {} }, serverInfo: { name: 'synthetic-monitor', version: '1' } };
-    else if (m.method === 'tools/list') result = { tools: ['my_portfolio', 'fill_history', 'place_order', 'cancel_order', 'risk_settings'].map(name => ({ name, inputSchema: { type: 'object' }, annotations: { readOnlyHint: !['place_order', 'cancel_order'].includes(name) } })) };
+    else if (m.method === 'tools/list') result = { tools: ['my_portfolio', 'fill_history', 'order_history', 'place_order', 'cancel_order', 'risk_settings'].map(name => ({ name, inputSchema: { type: 'object' }, annotations: { readOnlyHint: !['place_order', 'cancel_order'].includes(name) } })) };
     else if (m.method === 'resources/read') result = { contents: [{ uri: m.params.uri, mimeType: 'application/json', text: '[]' }] };
     else if (m.method === 'tools/call') result = { content: [{ type: 'text', text: '{"ok":true}' }] };
     return new Response(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }), { headers: { 'Content-Type': 'application/json' } });
   };
   const client = new NinjaTraderReadOnlyClient({ oauthProvider: provider(), fetchImpl, accountObservation: true }); t.after(() => client.close());
-  assert.deepEqual((await client.toolCatalog()).map(tool => tool.name), ['my_portfolio', 'fill_history']);
-  assert.deepEqual(await client.readAccountList(), []); assert.deepEqual(await client.readPositionList(), []);
+  assert.deepEqual((await client.toolCatalog()).map(tool => tool.name), ['my_portfolio', 'fill_history', 'order_history']);
+  assert.deepEqual(await client.readAccountList(), []); assert.deepEqual(await client.readPositionList(), []); assert.deepEqual(await client.readOrderList(), []);
   assert.deepEqual(await client.callTool('my_portfolio', { account: 'synthetic' }), { ok: true });
   const before = requests.length;
   for (const name of ['place_order', 'modify_order', 'cancel_order', 'close_position', 'update_risk_settings', 'create_alert', 'risk_settings'])
     await assert.rejects(client.callTool(name, {}), /TOOL_DENIED/);
-  await assert.rejects(client.fetch(endpoint, { method: 'POST', body: JSON.stringify({ method: 'resources/read', params: { uri: 'tradovate://orders' } }) }), /RPC_DENIED/);
+  await assert.rejects(client.fetch(endpoint, { method: 'POST', body: JSON.stringify({ method: 'resources/read', params: { uri: 'tradovate://risk-settings' } }) }), /RPC_DENIED/);
   assert.equal(requests.length, before);
 });
 

@@ -186,7 +186,7 @@ test('omitted orders retain prior values as stale instead of falsely reporting z
   assert.equal(state.accounts[0].workingOrdersObservedAt, before); assert.equal(state.workingOrders[0].stale, true);
   assert.equal(state.workingOrders[0].observedAt, before);
   const logs = []; logSnapshot(state, row => logs.push(row));
-  assert.match(logs.join('\n'), /Working orders:\s+unavailable/); assert.match(logs.join('\n'), /WORKING ORDER \(STALE\)/);
+  assert.match(logs.join('\n'), /Working orders:\s+unavailable/); assert.match(logs.join('\n'), /ORDER — STATUS UNCONFIRMED/);
   f.raw.portfolio.workingOrders = []; await f.monitor.poll(); state = f.monitor.snapshot();
   assert.deepEqual(state.workingOrders, []); assert.equal(state.accounts[0].workingOrdersStatus, 'CURRENT');
   const g = fixture(); delete g.raw.portfolio.workingOrders; await g.monitor.initialize();
@@ -227,17 +227,18 @@ test('change logger ignores poll timestamps/reordering and does not repeat an or
   await f.monitor.poll(); logChanges(f.monitor.snapshot());
   assert.equal(messages.length, 1); assert.match(messages[0], /Stop price:\s+5995[\s\S]*Order ID:\s+43/);
 });
-test('change logger reports removals even when counts stay the same and keeps order coverage changes visible', async () => {
+test('change logger retains disappeared orders as unconfirmed and keeps coverage changes visible', async () => {
   const f = fixture(); f.raw.portfolio.workingOrders = [stopOrder()]; await f.monitor.initialize();
   const messages = [], logChanges = createMonitorChangeLogger(row => messages.push(row)); logChanges(f.monitor.snapshot()); messages.length = 0;
   f.raw.portfolio.workingOrders = [stopOrder({ id: 43 })]; await f.monitor.poll(); logChanges(f.monitor.snapshot());
-  assert.equal(messages.length, 2); assert.match(messages.join('\n'), /WORKING ORDER NO LONGER REPORTED[\s\S]*Order ID:\s+42/);
+  assert.equal(messages.length, 3); assert.match(messages.join('\n'), /ORDER — STATUS UNCONFIRMED[\s\S]*Order ID:\s+42/);
   assert.doesNotMatch(messages.join('\n'), /cancelled|filled/i);
   messages.length = 0; delete f.raw.portfolio.workingOrders; await f.monitor.poll(); logChanges(f.monitor.snapshot());
-  assert.match(messages.join('\n'), /Working orders:\s+unavailable/); assert.match(messages.join('\n'), /WORKING ORDER \(STALE\)/);
+  assert.match(messages.join('\n'), /Working orders:\s+0 current; 1 status unconfirmed/); assert.match(messages.join('\n'), /ORDER — STATUS UNCONFIRMED/);
   messages.length = 0; f.advance(); await f.monitor.poll(); logChanges(f.monitor.snapshot()); assert.deepEqual(messages, []);
   f.raw.portfolio.workingOrders = []; await f.monitor.poll(); logChanges(f.monitor.snapshot());
-  assert.match(messages.join('\n'), /Working orders:\s+0/); assert.match(messages.join('\n'), /NO LONGER REPORTED/);
+  assert.match(messages.join('\n'), /Working orders:\s+0 current; 2 status unconfirmed/); assert.doesNotMatch(messages.join('\n'), /NO LONGER REPORTED|ORDER CANCELLED/);
+  assert.equal(f.monitor.snapshot().unconfirmedOrders.length, 2);
 });
 test('runner has no unchanged heartbeat, suppresses repeated errors, reports recovery and still emits new fills once', async () => {
   const f = fixture(), messages = [], controller = new AbortController(); let iteration = 0, clock = START;
@@ -257,7 +258,7 @@ test('runner has no unchanged heartbeat, suppresses repeated errors, reports rec
   assert.equal(messages.filter(row => row.startsWith('\nNINJATRADER MONITOR STATUS')).length, 3); // startup, degraded, recovery
   assert.equal(messages.filter(row => row.includes('⚠ Monitor poll failed: NINJATRADER_RATE_LIMIT_COOLDOWN')).length, 1);
   assert.equal(messages.filter(row => row.startsWith('\nNEW NINJATRADER EXECUTION')).length, 1);
-  assert.equal(messages.filter(row => /WORKING ORDER/.test(row)).length, 3); // initial, stale, recovered
+  assert.equal(messages.filter(row => /NINJATRADER (WORKING ORDER|ORDER — STATUS UNCONFIRMED)/.test(row)).length, 3); // initial, stale, recovered
   assert.ok(!messages.some(row => /last successful read/.test(row)));
 });
 

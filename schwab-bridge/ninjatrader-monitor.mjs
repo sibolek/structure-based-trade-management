@@ -49,14 +49,15 @@ export function formatNinjaTraderFill(fill, timeZone = 'America/Denver') {
     ['Detected', displayTime(fill.detectedAt, timeZone)], ['Observed delay', delay],
   ]);
 }
-function snapshotLogRows(state) {
+function snapshotLogRows(state, { timeZone = 'America/Denver' } = {}) {
   const rows = [];
   const add = (key, line, removal = null) => rows.push({ key, line, removal });
   const unknownOrders = state.accounts.filter(account => account.workingOrdersStatus !== 'CURRENT').length;
-  const orderSummary = unknownOrders ? `unavailable for ${unknownOrders} account(s)` : state.workingOrders.filter(order => !order.stale).length;
+  const unconfirmedCount = (state.unconfirmedOrders || []).length;
+  const orderSummary = unconfirmedCount ? `${state.workingOrders.filter(order => !order.stale).length} current; ${unconfirmedCount} status unconfirmed` : unknownOrders ? `unavailable for ${unknownOrders} account(s)` : state.workingOrders.filter(order => !order.stale).length;
   add('status', block('NINJATRADER MONITOR STATUS', [
     ['Environment', state.environment.toUpperCase()], ['Status', state.status], ['Accounts', state.accounts.length],
-    ['Open positions', state.positions.length], ['Working orders', orderSummary], ['Snapshot', state.stale ? 'STALE' : 'current'],
+    ['Open positions', state.positions.length], ['Working orders', orderSummary], ['Snapshot', state.stale ? 'STALE' : (unknownOrders || unconfirmedCount) ? 'current; orders unconfirmed' : 'current'],
   ]));
   for (const account of state.accounts) add(JSON.stringify(['account', account.accountId]),
     block('NINJATRADER ACCOUNT SNAPSHOT', [['Account', account.accountDisplay], ['Current equity', money(account.netLiquidation, account.currency)],
@@ -66,20 +67,33 @@ function snapshotLogRows(state) {
     block('NINJATRADER POSITION', [['Account', position.accountDisplay], ['Symbol', position.symbol], ['Position', `${position.side} ${Math.abs(position.quantity)}`],
       ['Position avg', priceText(position.averagePrice)], ['Mark price', priceText(position.currentPrice)], ['Data feed', position.dataFeedMode || 'timeliness unknown']]),
     block('POSITION NO LONGER REPORTED', [['Account', position.accountDisplay], ['Symbol', position.symbol]]));
-  for (const order of state.workingOrders) add(JSON.stringify(['order', order.accountId, order.orderId]),
-    block(`NINJATRADER WORKING ORDER${order.stale || state.stale ? ' (STALE)' : ''}`, [
-      ['Account', order.accountDisplay], ['Symbol', order.symbol], ['Instruction', order.action], ['Quantity', order.quantity],
-      ['Order type', order.orderType], ['Stop price', priceText(order.stopPrice)],
-      ['Limit price', order.limitPrice == null && ['Stop', 'Market', 'MIT', 'TrailingStop'].includes(order.orderType) ? 'Not applicable' : priceText(order.limitPrice)],
-      ['Order status', order.status], ['Time in force', order.timeInForce], ['Order ID', order.orderId],
-    ]), block('WORKING ORDER NO LONGER REPORTED', [['Account', order.accountDisplay], ['Symbol', order.symbol], ['Order ID', order.orderId]]));
+  for (const order of [...state.workingOrders, ...(state.unconfirmedOrders || [])]) {
+    const unconfirmed = order.stale || state.stale;
+    add(JSON.stringify(['order', order.accountId, order.orderId]),
+      block(unconfirmed ? 'NINJATRADER ORDER — STATUS UNCONFIRMED' : 'NINJATRADER WORKING ORDER', [
+        ['Account', order.accountDisplay], ['Symbol', order.symbol], ['Instruction', order.action], ['Quantity', order.quantity],
+        ['Order type', order.orderType], ['Stop price', priceText(order.stopPrice)],
+        ['Limit price', order.limitPrice == null && ['Stop', 'Market', 'MIT', 'TrailingStop'].includes(order.orderType) ? 'Not applicable' : priceText(order.limitPrice)],
+        ['Order status', unconfirmed ? 'Unconfirmed' : order.status],
+        ...(unconfirmed ? [['Last status', order.status], ['Last observed', displayTime(order.observedAt, timeZone)]] : []),
+        ['Time in force', order.timeInForce], ['Order ID', order.orderId],
+      ]), block('WORKING ORDER NO LONGER REPORTED', [['Account', order.accountDisplay], ['Symbol', order.symbol], ['Order ID', order.orderId]]));
+  }
+  for (const event of state.orderEvents || []) {
+    if (state.workingOrders.some(order => order.accountId === event.accountId && order.orderId === event.orderId)) continue;
+    const position = event.positionQuantity === 0 ? 'FLAT' : event.positionQuantity > 0 ? `LONG ${event.positionQuantity}` : event.positionQuantity < 0 ? `SHORT ${Math.abs(event.positionQuantity)}` : 'unconfirmed';
+    add(JSON.stringify(['order', event.accountId, event.orderId]), block(`NINJATRADER ORDER ${event.status.toUpperCase()}`, [
+      ['Account', event.accountDisplay], ['Symbol', event.symbol], ['Order ID', event.orderId], ['Order status', event.status],
+      ['Position', position], ['Confirmation', 'Broker order record'], ['Observed', displayTime(event.observedAt, timeZone)],
+    ]));
+  }
   return rows;
 }
-export function logSnapshot(state, log) { for (const row of snapshotLogRows(state)) log(row.line); }
-export function createMonitorChangeLogger(log) {
+export function logSnapshot(state, log, options) { for (const row of snapshotLogRows(state, options)) log(row.line); }
+export function createMonitorChangeLogger(log, options) {
   let previous = new Map();
   return state => {
-    const next = new Map(snapshotLogRows(state).map(row => [row.key, row]));
+    const next = new Map(snapshotLogRows(state, options).map(row => [row.key, row]));
     for (const [key, row] of next) if (previous.get(key)?.line !== row.line) log(row.line);
     for (const [key, row] of previous) if (!next.has(key) && row.removal) log(row.removal);
     previous = next;
@@ -96,8 +110,9 @@ export async function runNinjaTraderMonitor({ settings, client, signal, log = co
     if (settings.refreshCheck) log('✓ NinjaTrader token refresh verified; rotated credentials saved privately without browser sign-in.');
     log('Required read-only portfolio/fill tools are available. Account-list read permission is checked at monitor startup.'); return;
   }
-  const logChanges = createMonitorChangeLogger(log);
-  let api;
+  const logChanges = createMonitorChangeLogger(log, { timeZone: settings.timeZone });
+  let api, wakeWait = null, pendingUpdate = false;
+  const onUpdate = () => { if (!pendingUpdate) { pendingUpdate = true; wakeWait?.abort(); } };
   try {
     await monitor.initialize();
     const initial = monitor.snapshot();
@@ -117,28 +132,43 @@ export async function runNinjaTraderMonitor({ settings, client, signal, log = co
     log(`✓ Local UI API: ${origin}/api/state (read-only, loopback only)`);
     log(`✓ Market-data relay: ${marketDataProvider ? 'available; use EXECUTIONOS_NINJATRADER_MONITOR_URL=' + origin : 'not configured'}`);
     log('Press Ctrl+C to stop.\n');
-    let failures = 0, delay = settings.pollMs, lastErrorCode = null;
+    let subscribed = false;
+    try { subscribed = await client.watchAccountUpdates?.(onUpdate) || false; } catch { /* Preserve polling if setup is unavailable. */ }
+    log(subscribed ? '✓ Order/position push subscriptions accepted; polling remains enabled' : '✓ Order/position push unavailable; using polling');
+    let failures = 0, lastErrorCode = null, nextRegularRead = now() + settings.pollMs, nextFastRead = now() + 1000, retryAt = 0;
     while (!signal?.aborted) {
-      try { await wait(delay, undefined, { signal }); } catch (error) { if (signal?.aborted) break; throw error; }
+      const due = Math.min(nextRegularRead, pendingUpdate ? Math.max(nextFastRead, retryAt) : Infinity);
+      const delay = Math.max(0, due - now());
+      if (delay > 0) {
+        wakeWait = new AbortController();
+        try { await wait(delay, undefined, { signal: signal ? AbortSignal.any([signal, wakeWait.signal]) : wakeWait.signal }); }
+        catch (error) { if (!signal?.aborted && !wakeWait.signal.aborted) throw error; }
+        finally { wakeWait = null; }
+      }
       if (signal?.aborted) break;
-      const started = now();
+      const started = now(), regular = started >= nextRegularRead;
+      if (!regular && !(pendingUpdate && started >= nextFastRead && started >= retryAt)) continue;
+      pendingUpdate = false; nextFastRead = started + 5000;
       try {
-        await monitor.poll();
+        // Push refreshes skip fill history; they cannot consume its per-minute
+        // budget or postpone the separately scheduled regular fill poll.
+        await monitor.poll({ readFills: regular || failures > 0 });
         logChanges(monitor.snapshot());
-        failures = 0; lastErrorCode = null;
-        delay = Math.max(0, settings.pollMs - (now() - started));
+        failures = 0; lastErrorCode = null; retryAt = 0;
+        if (regular) nextRegularRead = started + settings.pollMs;
       } catch (error) {
         failures++;
         const code = monitorError(error);
-        delay = /RATE_LIMIT|TOOL_ERROR/.test(code) ? 60000 : Math.min(60000, settings.pollMs * 2 ** Math.min(failures, 5));
+        const backoff = /RATE_LIMIT|TOOL_ERROR/.test(code) ? 60000 : Math.min(60000, settings.pollMs * 2 ** Math.min(failures, 5));
+        retryAt = now() + backoff; nextRegularRead = retryAt;
         logChanges(monitor.snapshot());
-        if (code !== lastErrorCode) log(`\n⚠ Monitor poll failed: ${code}\nPrevious observations marked stale. Retrying in ${delay} ms...\n`);
+        if (code !== lastErrorCode) log(`\n⚠ Monitor poll failed: ${code}\nPrevious observations marked stale. Retrying in ${backoff} ms...\n`);
         lastErrorCode = code;
         if (/TOOL_REQUEST_FAILED|CONNECT_FAILED|SESSION_RECONNECT_REQUIRED/.test(code)) await client.resetConnection?.();
       }
     }
     return monitor.snapshot();
-  } finally { monitor.stop(); await api?.stop(); }
+  } finally { client.stopAccountUpdates?.(); wakeWait?.abort(); monitor.stop(); await api?.stop(); }
 }
 
 export async function main(args = process.argv.slice(2), env = process.env) {

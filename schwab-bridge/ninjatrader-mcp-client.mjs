@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { discoverOAuthServerInfo } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -12,7 +13,8 @@ export const NINJATRADER_ENDPOINTS = Object.freeze({
   live: 'https://mcp-live.tradovateapi.com/mcp',
 });
 const TOOLS = new Set(['describe', 'search_contracts', 'market_snapshot', 'market_history']);
-const OBSERVATION_TOOLS = ['my_portfolio', 'fill_history'];
+const UPDATE_RESOURCES = ['tradovate://orders', 'tradovate://positions'];
+const OBSERVATION_TOOLS = ['my_portfolio', 'fill_history', 'order_history'];
 export function endpointFor(environment) {
   if (!Object.hasOwn(NINJATRADER_ENDPOINTS, environment)) throw new Error('NINJATRADER_ENVIRONMENT_INVALID');
   return NINJATRADER_ENDPOINTS[environment];
@@ -108,6 +110,7 @@ export class NinjaTraderOAuthStore {
 
 export class NinjaTraderReadOnlyClient {
   #client; #transport; #pending; #tools; #tail = Promise.resolve(); #last = new Map(); #blockedUntil = 0;
+  #streamOpen = false; #updateListener = null; #updatesActive = false; #subscriptionClient; #subscriptionRetryAt = 0; #streamFailed = false;
   #allowedTools; #accountObservation; #authMetadata; #refreshPending; #refreshRetryAt = 0; #refreshFailure = null; #forceRefresh = false; #terminalRefreshFailure = null;
   constructor({ environment = 'demo', oauthProvider, fetchImpl = fetch, now = Date.now, minIntervalMs = 1000, accountObservation = false } = {}) {
     this.endpoint = endpointFor(environment);
@@ -125,8 +128,9 @@ export class NinjaTraderReadOnlyClient {
       if (url.href === this.endpoint && (init.method || 'GET') === 'POST') {
         let message;
         try { message = JSON.parse(init.body); } catch { throw new Error('NINJATRADER_RPC_DENIED'); }
-        const observationResource = this.#accountObservation && message.method === 'resources/read'
-          && ['tradovate://account-list', 'tradovate://positions'].includes(message.params?.uri);
+        const observationResource = this.#accountObservation && ((message.method === 'resources/read'
+          && ['tradovate://account-list', ...UPDATE_RESOURCES].includes(message.params?.uri))
+          || (['resources/subscribe', 'resources/unsubscribe'].includes(message.method) && UPDATE_RESOURCES.includes(message.params?.uri)));
         if ((!observationResource && !['initialize', 'notifications/initialized', 'notifications/cancelled', 'tools/list', 'tools/call', 'ping'].includes(message.method))
             || (message.method === 'tools/call' && !this.#allowedTools.has(message.params?.name))) throw new Error('NINJATRADER_RPC_DENIED');
       }
@@ -137,8 +141,15 @@ export class NinjaTraderReadOnlyClient {
         headers.set('Authorization', `Bearer ${this.oauth.tokens().access_token}`);
         init = { ...init, headers };
       }
-      const response = await fetchImpl(input, { ...init, redirect: 'error',
-        signal: AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(15000)]) });
+      // Bound connection/header time for the long-lived notification GET,
+      // without aborting its body every 15 seconds. POST RPCs stay bounded.
+      const stream = isMcp && init.method === 'GET', headerTimeout = new AbortController();
+      const timer = stream ? setTimeout(() => headerTimeout.abort(), 15000) : null;
+      let response;
+      try { response = await fetchImpl(input, { ...init, redirect: 'error',
+        signal: AbortSignal.any([...(init.signal ? [init.signal] : []), stream ? headerTimeout.signal : AbortSignal.timeout(15000)]) }); }
+      finally { if (timer) clearTimeout(timer); }
+      if (stream) this.#streamOpen = response.ok && response.headers.get('content-type')?.split(';')[0].trim() === 'text/event-stream';
       if (isMcp && response.status === 401) this.#forceRefresh = true;
       if (isMcp && response.status === 429) {
         const retry = response.headers.get('retry-after');
@@ -160,6 +171,15 @@ export class NinjaTraderReadOnlyClient {
     if (!this.oauth.tokens()) throw new Error('NINJATRADER_AUTHORIZATION_REQUIRED');
     await this.#refresh();
     this.#client = new Client({ name: 'ExecutionOS-read-only', version: '0.1.0' }, { capabilities: {} });
+    this.#client.setNotificationHandler(ResourceUpdatedNotificationSchema, notification => {
+      if (UPDATE_RESOURCES.includes(notification.params.uri)) {
+        try { this.#updateListener?.(notification.params.uri); } catch { /* A wakeup cannot change broker state. */ }
+      }
+    });
+    this.#client.onerror = () => {
+      this.#streamOpen = false;
+      if (this.#updateListener) { this.#updatesActive = false; this.#streamFailed = true; this.#subscriptionRetryAt = this.now() + 60000; }
+    };
     this.#transport = new StreamableHTTPClientTransport(new URL(this.endpoint), { fetch: this.fetch,
       reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 1000, maxReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1 } });
     await this.#client.connect(this.#transport, { timeout: 20000 });
@@ -172,6 +192,33 @@ export class NinjaTraderReadOnlyClient {
       if (page === 19) throw new Error('NINJATRADER_TOOL_DISCOVERY_LIMIT');
     }
     this.#tools = new Map(tools.map(tool => [tool.name, tool]));
+    await this.#ensureAccountUpdates();
+  }
+  async #ensureAccountUpdates() {
+    if (!this.#updateListener || this.#streamFailed) return false;
+    if (this.#updatesActive && this.#subscriptionClient === this.#client) return true;
+    if (this.now() < this.#subscriptionRetryAt) return false;
+    if (!this.#streamOpen) return false;
+    this.#subscriptionRetryAt = this.now() + 60000;
+    if (!this.#client.getServerCapabilities()?.resources?.subscribe) return false;
+    try {
+      for (const uri of UPDATE_RESOURCES) await this.#client.subscribeResource({ uri }, { timeout: 15000 });
+      if (this.#streamFailed || !this.#streamOpen) return false;
+      this.#subscriptionClient = this.#client; this.#updatesActive = true; return true;
+    } catch { return false; } // Polling remains authoritative if subscriptions are unavailable.
+  }
+  async watchAccountUpdates(listener) {
+    if (!this.#accountObservation) throw new Error('NINJATRADER_RESOURCE_DENIED');
+    if (typeof listener !== 'function') throw new Error('NINJATRADER_UPDATE_LISTENER_INVALID');
+    const run = this.#tail.then(async () => { this.#updateListener = listener; await this.connect(); return this.#ensureAccountUpdates(); });
+    this.#tail = run.catch(() => {}); return run;
+  }
+  stopAccountUpdates() { this.#updateListener = null; }
+  async #prepareObservationConnection() {
+    // A dead notification stream must not stop polling. Retry its session at
+    // most once a minute, and restore subscriptions after normal reconnects.
+    if (this.#streamFailed && this.now() >= this.#subscriptionRetryAt) await this.close();
+    await this.connect(); await this.#ensureAccountUpdates();
   }
   // Refresh is non-interactive: never register another client, discard tokens,
   // or fall back to browser consent after a network/server/parse failure.
@@ -239,7 +286,7 @@ export class NinjaTraderReadOnlyClient {
     if (!this.#allowedTools.has(name)) throw new Error('NINJATRADER_TOOL_DENIED');
     // Serialize SDK operations, including rotating-token refresh.
     const run = this.#tail.then(async () => {
-      await this.connect();
+      await this.#prepareObservationConnection();
       if (!this.#tools.has(name)) throw new Error('NINJATRADER_REQUIRED_TOOL_UNAVAILABLE');
       const tool = this.#tools.get(name);
       if (tool.annotations?.readOnlyHint === false || tool.annotations?.destructiveHint === true) throw new Error('NINJATRADER_TOOL_ANNOTATION_REJECTED');
@@ -262,14 +309,15 @@ export class NinjaTraderReadOnlyClient {
     return run;
   }
   async close() {
-    try { await this.#client?.close(); } finally { this.#client = undefined; this.#transport = undefined; this.#tools = undefined; this.#pending = undefined; }
+    try { await this.#client?.close(); } finally { this.#client = undefined; this.#transport = undefined; this.#tools = undefined; this.#pending = undefined; this.#streamOpen = false; this.#updatesActive = false; this.#subscriptionClient = undefined; this.#subscriptionRetryAt = 0; this.#streamFailed = false; }
   }
   readAccountList() { return this.#readObservationResource('tradovate://account-list'); }
   readPositionList() { return this.#readObservationResource('tradovate://positions'); }
+  readOrderList() { return this.#readObservationResource('tradovate://orders'); }
   async #readObservationResource(uri) {
     if (!this.#accountObservation) throw new Error('NINJATRADER_RESOURCE_DENIED');
     const run = this.#tail.then(async () => {
-      await this.connect(); await this.#refresh();
+      await this.#prepareObservationConnection(); await this.#refresh();
       let result;
       try { result = await this.#client.readResource({ uri }, { timeout: 15000 }); }
       catch (error) { throw new Error(this.now() < this.#blockedUntil ? 'NINJATRADER_RATE_LIMIT_COOLDOWN' : [401, 404].includes(error?.code) ? 'NINJATRADER_SESSION_RECONNECT_REQUIRED' : 'NINJATRADER_OBSERVATION_RESOURCE_READ_FAILED_CHECK_READ_PERMISSIONS'); }

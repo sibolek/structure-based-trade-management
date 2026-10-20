@@ -73,8 +73,27 @@ export function normalizeMonitorFills(payload, account, environment) {
   });
 }
 
+const TERMINAL_ORDER_STATUS = Object.freeze({ Canceled: 'Cancelled', Cancelled: 'Cancelled', Filled: 'Filled', Rejected: 'Rejected', Expired: 'Expired', Completed: 'Completed' });
+// Match structured current order records by exact account, stable ID, symbol
+// and side. A cancel command, missing row or Completed status never means Canceled.
+export function normalizeMonitorTerminalOrders(payload, account, environment, trackedOrders) {
+  if (!Array.isArray(payload?.items) || payload.items.length >= 5000) fail('NINJATRADER_MONITOR_ORDER_HISTORY_UNVERIFIED');
+  const tracked = new Map(trackedOrders.map(order => [order.orderId, order])), seen = new Set(), result = [];
+  for (const row of payload.items) {
+    const prior = tracked.get(row?.orderId); if (!prior) continue;
+    if (seen.has(row.orderId) || row.account !== account.name || row.symbol !== prior.symbol || row.action !== prior.action) fail('NINJATRADER_MONITOR_ORDER_IDENTITY_MISMATCH');
+    seen.add(row.orderId);
+    const status = Object.hasOwn(TERMINAL_ORDER_STATUS, row.ordStatus) ? TERMINAL_ORDER_STATUS[row.ordStatus] : null; if (!status) continue;
+    const quantity = numeric(row.quantity), filledQuantity = numeric(row.filledQty);
+    if (!Number.isSafeInteger(quantity) || quantity <= 0 || (row.filledQty != null && (!Number.isSafeInteger(filledQuantity) || filledQuantity < 0 || filledQuantity > quantity))) fail('NINJATRADER_MONITOR_ORDER_HISTORY_UNVERIFIED');
+    result.push({ ...opaqueAccount(account.name, environment), orderId: row.orderId, symbol: prior.symbol, action: row.action, quantity, filledQuantity,
+      status, brokerStatus: row.ordStatus, brokerOrderTime: row.timestamp == null ? null : instant(row.timestamp), source: 'NINJATRADER', environment });
+  }
+  return result;
+}
+
 export class NinjaTraderMonitor {
-  #client; #accounts = null; #seen = new Map(); #busy = false;
+  #client; #accounts = null; #seen = new Map(); #busy = false; #pendingOrders = new Map(); #orderHistoryNextRead = new Map(); #hasOrderHistory = false;
   constructor({ client, environment = 'demo', pollMs = 5000, accountSelectors = [], now = Date.now, onFill = () => {} } = {}) {
     if (!client || typeof client.readAccountList !== 'function' || typeof client.callTool !== 'function') fail('NINJATRADER_MONITOR_CLIENT_REQUIRED');
     if (!['live', 'demo'].includes(environment) || !Number.isFinite(pollMs) || pollMs < 2000 || pollMs > 60000) fail('NINJATRADER_MONITOR_CONFIG_INVALID');
@@ -82,12 +101,13 @@ export class NinjaTraderMonitor {
     this.#client = client; this.environment = environment; this.pollMs = pollMs; this.accountSelectors = [...accountSelectors]; this.now = now; this.onFill = onFill;
     this.state = { schema: 'executionos.ninjatrader.monitor.v1', version: 1, source: 'NINJATRADER', environment,
       readOnly: true, executionEnabled: false, executionOwnershipVerified: false, continuousFillCoverageVerified: false,
-      status: 'BOOTING', pollMs, accounts: [], positions: [], workingOrders: [], executions: [], baselineCompletedAt: null,
-      baselineFillCount: 0, lastSuccessfulAt: null, lastError: null, updatedAt: new Date(now()).toISOString() };
+      status: 'BOOTING', pollMs, accounts: [], positions: [], workingOrders: [], unconfirmedOrders: [], orderEvents: [], executions: [], baselineCompletedAt: null,
+      baselineFillCount: 0, lastFillSuccessfulAt: null, lastSuccessfulAt: null, lastError: null, updatedAt: new Date(now()).toISOString() };
   }
   async initialize() {
     const tools = await this.#client.toolCatalog();
     if (!['my_portfolio', 'fill_history'].every(name => tools.some(tool => tool.name === name))) fail('NINJATRADER_MONITOR_READ_PERMISSIONS_REQUIRED');
+    this.#hasOrderHistory = tools.some(tool => tool.name === 'order_history');
     const available = normalizeMonitorAccountList(await this.#client.readAccountList(), this.environment);
     this.#accounts = this.accountSelectors.length ? available.filter(account => this.accountSelectors.includes(account.name) || this.accountSelectors.includes(account.accountId)) : available;
     if (this.accountSelectors.some(selector => !this.#accounts.some(account => [account.name, account.accountId].includes(selector)))) fail('NINJATRADER_MONITOR_ACCOUNT_SELECTION_INVALID');
@@ -95,13 +115,15 @@ export class NinjaTraderMonitor {
     this.state.status = 'BASELINING';
     return this.poll();
   }
-  async poll() {
+  async poll({ readFills = true } = {}) {
     if (!this.#accounts) fail('NINJATRADER_MONITOR_NOT_INITIALIZED');
     if (this.#busy) fail('NINJATRADER_MONITOR_POLL_IN_PROGRESS');
+    if (typeof readFills !== 'boolean' || (!readFills && !this.state.baselineCompletedAt)) fail('NINJATRADER_MONITOR_FILL_BASELINE_REQUIRED');
     this.#busy = true;
     try {
-      const started = this.now(), accounts = [], positions = [], workingOrders = [], fills = [];
-      let positionResource = null;
+      const started = this.now(), accounts = [], positions = [], workingOrders = [], fills = [], orderEvents = [], unconfirmedOrders = [];
+      const pendingOrders = new Map(this.#pendingOrders);
+      let positionResource = null, orderResource, orderResourceRead = false;
       const startDate = new Date(started - 86400000).toISOString().slice(0, 10);
       const endDate = new Date(started + 86400000).toISOString().slice(0, 10);
       for (const account of this.#accounts) {
@@ -122,13 +144,39 @@ export class NinjaTraderMonitor {
         }
         const observedAt = new Date(this.now()).toISOString();
         const normalized = normalizeMonitorPortfolio(raw, account, this.environment, observedAt);
-        const orders = normalizeMonitorWorkingOrders(raw, account, this.environment, observedAt);
+        let orders = normalizeMonitorWorkingOrders(raw, account, this.environment, observedAt);
+        // Empty projected branches are omitted by this beta. A successful
+        // independent empty orders resource proves zero working orders.
+        if (orders === null && typeof this.#client.readOrderList === 'function') {
+          if (!orderResourceRead) { orderResource = await this.#client.readOrderList(); orderResourceRead = true; }
+          const resourceRows = Array.isArray(orderResource) ? orderResource : orderResource?.orders;
+          if (Array.isArray(resourceRows) && resourceRows.length === 0) orders = [];
+        }
+        const priorOrders = this.state.workingOrders.filter(row => row.accountId === account.accountId);
+        const currentIds = orders === null ? new Set() : new Set(orders.map(order => order.orderId));
+        for (const order of priorOrders) if (!currentIds.has(order.orderId)) pendingOrders.set(`${account.accountId}:${order.orderId}`, order);
+        for (const order of orders || []) pendingOrders.delete(`${account.accountId}:${order.orderId}`);
+        const missing = [...pendingOrders.values()].filter(order => order.accountId === account.accountId);
+        const terminalIds = new Set();
+        if (missing.length && this.#hasOrderHistory && started >= (this.#orderHistoryNextRead.get(account.accountId) || 0)) {
+          // One query per affected account, at most once per 15 seconds, only
+          // while known orders have disappeared. No extra steady-state history poll.
+          this.#orderHistoryNextRead.set(account.accountId, this.now() + 15000);
+          const history = await this.#client.callTool('order_history', { account: account.name, startDate, endDate, format: 'objects' });
+          for (const order of normalizeMonitorTerminalOrders(history, account, this.environment, missing)) {
+            terminalIds.add(order.orderId); pendingOrders.delete(`${account.accountId}:${order.orderId}`);
+            orderEvents.push({ ...order, observedAt: new Date(this.now()).toISOString(),
+              positionQuantity: normalized.positions.find(position => position.symbol === order.symbol)?.quantity ?? 0 });
+          }
+        }
         const priorAccount = this.state.accounts.find(row => row.accountId === account.accountId);
         normalized.account.workingOrdersStatus = orders === null ? 'UNAVAILABLE' : 'CURRENT';
         normalized.account.workingOrdersObservedAt = orders === null ? priorAccount?.workingOrdersObservedAt ?? null : observedAt;
-        workingOrders.push(...(orders ?? this.state.workingOrders.filter(row => row.accountId === account.accountId).map(row => ({ ...row, stale: true }))));
+        workingOrders.push(...(orders ?? priorOrders.filter(order => !terminalIds.has(order.orderId)).map(row => ({ ...row, stale: true }))));
+        const displayedIds = new Set((orders ?? priorOrders.filter(order => !terminalIds.has(order.orderId))).map(order => order.orderId));
+        unconfirmedOrders.push(...[...pendingOrders.values()].filter(order => order.accountId === account.accountId && !displayedIds.has(order.orderId)).map(order => ({ ...order, stale: true })));
         accounts.push(normalized.account); positions.push(...normalized.positions);
-        fills.push(...normalizeMonitorFills(await this.#client.callTool('fill_history', { account: account.name, startDate, endDate, format: 'objects' }), account, this.environment));
+        if (readFills) fills.push(...normalizeMonitorFills(await this.#client.callTool('fill_history', { account: account.name, startDate, endDate, format: 'objects' }), account, this.environment));
       }
       const detectedAt = new Date(this.now()).toISOString(), baseline = !this.state.baselineCompletedAt;
       const nextSeen = new Map(this.#seen), fresh = [];
@@ -139,13 +187,17 @@ export class NinjaTraderMonitor {
         if (!prior && !baseline) fresh.push({ ...fill, detectedAt });
         nextSeen.set(key, { fingerprint, executionTime: fill.executionTime });
       }
-      for (const [key, row] of nextSeen) if (Date.parse(row.executionTime) < Date.parse(`${startDate}T00:00:00Z`)) nextSeen.delete(key);
+      for (const [key, row] of nextSeen) if (readFills && Date.parse(row.executionTime) < Date.parse(`${startDate}T00:00:00Z`)) nextSeen.delete(key);
       if (nextSeen.size > 50000) fail('NINJATRADER_MONITOR_FILL_MEMORY_LIMIT');
+      if (pendingOrders.size > 1000) fail('NINJATRADER_MONITOR_ORDER_RECONCILIATION_LIMIT');
+      this.#pendingOrders = pendingOrders;
       this.#seen = nextSeen;
-      this.state = { ...this.state, status: 'OBSERVING', accounts, positions, workingOrders,
+      this.state = { ...this.state, status: 'OBSERVING', accounts, positions, workingOrders, unconfirmedOrders,
+        orderEvents: [...orderEvents.reverse(), ...this.state.orderEvents].slice(0, 100),
         executions: [...fresh.slice().reverse(), ...this.state.executions].slice(0, 100),
         baselineCompletedAt: this.state.baselineCompletedAt || detectedAt,
         baselineFillCount: baseline ? fills.length : this.state.baselineFillCount,
+        lastFillSuccessfulAt: readFills ? detectedAt : this.state.lastFillSuccessfulAt,
         lastSuccessfulAt: detectedAt, updatedAt: detectedAt, lastError: null };
       for (const fill of fresh) { try { this.onFill(clone(fill)); } catch { /* Presentation cannot change observation state. */ } }
       return this.snapshot();
