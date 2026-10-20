@@ -1,0 +1,144 @@
+{
+  "capturedAt": "2026-10-20T00:25:14.246Z",
+  "minuteWindow": {
+    "startDate": 1792452300000,
+    "endDate": 1792455900000
+  },
+  "quote": {
+    "snapshots": [
+      {
+        "percentChange": -0.054948606891201755,
+        "settlementPrice": 7734.5,
+        "description": "Micro E-mini S&P 500",
+        "dataFeedMode": "RealTime",
+        "exchange": "CME",
+        "symbol": "MESZ6",
+        "openInterest": 194624,
+        "highPrice": 7748.5,
+        "tickValue": 1.25,
+        "bidSize": 18,
+        "valuePerPoint": 5,
+        "askSize": 23,
+        "expirationDate": "2026-12-18",
+        "askPrice": 7730.25,
+        "timestamp": "2026-10-20T00:25:14.775Z",
+        "lowPrice": 7725.25,
+        "maintenanceMargin": 2607.76,
+        "productType": "Futures",
+        "bidPrice": 7730,
+        "lastPrice": 7730.25,
+        "change": -4.25,
+        "openPrice": 7741,
+        "productName": "MES",
+        "initialMargin": 2868.54,
+        "tickSize": 0.25,
+        "totalVolume": 31159
+      }
+    ]
+  },
+  "minute": {
+    "barType": "Minute",
+    "barSize": 1,
+    "dataFeedMode": "RealTime",
+    "symbol": "MESZ6",
+    "bars": [
+      {
+        "timestamp": "2026-10-19T23:25:00Z",
+        "downVolume": 34,
+        "open": 7740.75,
+        "downTicks": 19,
+        "low": 7740.5,
+        "upVolume": 75,
+        "upTicks": 47,
+        "close": 7741.5,
+        "high": 7741.5
+      },
+      {
+        "timestamp": "2026-10-19T23:26:00Z",
+        "downVolume": 47,
+        "open": 7741.5,
+        "downTicks": 29,
+        "low": 7741,
+        "upVolume": 59,
+        "upTicks": 40,
+        "close": 7741,
+        "high": 7742
+      },
+      {
+        "timestamp": "2026-10-20T00:24:00Z",
+        "downVolume": 150,
+        "open": 7731.25,
+        "downTicks": 106,
+        "low": 7730.5,
+        "upVolume": 220,
+        "upTicks": 144,
+        "close": 7731,
+        "high": 7731.75
+      },
+      {
+        "timestamp": "2026-10-20T00:25:00Z",
+        "downVolume": 78,
+        "open": 7730.75,
+        "downTicks": 59,
+        "low": 7730,
+        "upVolume": 49,
+        "upTicks": 34,
+        "close": 7730.25,
+        "high": 7731.5
+      }
+    ]
+  },
+  "daily": {
+    "barType": "Daily",
+    "barSize": 1,
+    "dataFeedMode": "RealTime",
+    "symbol": "MESZ6",
+    "bars": [
+      {
+        "timestamp": "2026-09-01T00:00:00Z",
+        "downVolume": 2606,
+        "open": 7768.75,
+        "downTicks": 1404,
+        "low": 7689,
+        "upVolume": 2122,
+        "upTicks": 1106,
+        "close": 7710,
+        "high": 7775
+      },
+      {
+        "timestamp": "2026-09-02T00:00:00Z",
+        "downVolume": 1487,
+        "open": 7712.5,
+        "downTicks": 903,
+        "low": 7685.75,
+        "upVolume": 1500,
+        "upTicks": 982,
+        "close": 7733,
+        "high": 7757.5
+      },
+      {
+        "timestamp": "2026-10-19T00:00:00Z",
+        "downVolume": 535802,
+        "open": 7679,
+        "downTicks": 296798,
+        "low": 7677.5,
+        "upVolume": 533896,
+        "upTicks": 292913,
+        "close": 7740.25,
+        "high": 7773.25
+      },
+      {
+        "timestamp": "2026-10-20T00:00:00Z",
+        "downVolume": 15759,
+        "open": 7741,
+        "downTicks": 10046,
+        "low": 7725.25,
+        "upVolume": 15273,
+        "upTicks": 9459,
+        "close": 7731,
+        "high": 7748.5
+      }
+    ]
+  },
+  "fixtureSource": "Recorded first-party market-only responses; no accounts or orders read. Field values are a static sample, not current trading data."
+}

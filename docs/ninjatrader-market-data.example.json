@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "environment": "demo",
+  "bindingStatus": "UNVERIFIED_DO_NOT_ENABLE",
+  "bindingNotes": "Replace all paths and verify timestamp units/anchors using authenticated describe topics and market-only samples. This is NOT a published NinjaTrader response schema.",
+  "instruments": {},
+  "bindings": {
+    "quote": {
+      "rows": "/REPLACE_QUOTES_ARRAY",
+      "symbol": "/REPLACE_EXACT_CONTRACT",
+      "bid": "/REPLACE_BID",
+      "ask": "/REPLACE_ASK",
+      "last": "/REPLACE_LAST",
+      "quoteTime": "/REPLACE_SOURCE_QUOTE_TIME",
+      "timestampFormat": "iso",
+      "realtime": "/REPLACE_BOOLEAN_ENTITLEMENT"
+    },
+    "minute": {
+      "rows": "/REPLACE_BARS_ARRAY",
+      "symbol": "/REPLACE_EXACT_CONTRACT",
+      "timestamp": "/REPLACE_TIMESTAMP",
+      "timestampFormat": "iso",
+      "timestampAnchor": "start",
+      "open": "/REPLACE_OPEN",
+      "high": "/REPLACE_HIGH",
+      "low": "/REPLACE_LOW",
+      "close": "/REPLACE_CLOSE",
+      "volume": "/REPLACE_VOLUME",
+      "maxCount": 10000
+    },
+    "daily": {
+      "rows": "/REPLACE_BARS_ARRAY",
+      "symbol": "/REPLACE_EXACT_CONTRACT",
+      "timestamp": "/REPLACE_TIMESTAMP",
+      "timestampFormat": "iso",
+      "timestampAnchor": "start",
+      "open": "/REPLACE_OPEN",
+      "high": "/REPLACE_HIGH",
+      "low": "/REPLACE_LOW",
+      "close": "/REPLACE_CLOSE",
+      "volume": "/REPLACE_VOLUME",
+      "maxCount": 1000
+    }
+  }
+}

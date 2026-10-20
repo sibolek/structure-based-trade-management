@@ -84,9 +84,15 @@
     "research:diagnose-fast-winners": "node research/30-day-management-study/diagnose-fast-winner-sample.mjs",
     "research:diagnose-fast-winner-strata": "node research/30-day-management-study/diagnose-fast-winner-strata.mjs",
     "research:validate-fast-winners-schwab": "node research/30-day-management-study/validate-fast-winner-candidates-schwab.mjs",
-    "research:diagnose-minute-alignment": "node research/30-day-management-study/diagnose-minute-bar-alignment.mjs"
+    "research:diagnose-minute-alignment": "node research/30-day-management-study/diagnose-minute-bar-alignment.mjs",
+    "v24:ninjatrader": "node schwab-bridge/ninjatrader-read-only.mjs",
+    "v24:ninjatrader-test": "node --test tests/ninjatrader-*.test.mjs",
+    "ninjascript:monitor": "node schwab-bridge/ninjatrader-monitor.mjs",
+    "ninjatrader:monitor": "node schwab-bridge/ninjatrader-monitor.mjs",
+    "ninjascript:auth": "node schwab-bridge/ninjatrader-read-only.mjs auth --monitor"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@vitejs/plugin-react": "^5.0.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
