@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "environment": "live",
+  "bindingStatus": "VERIFIED_FROM_AUTHENTICATED_DISCOVERY",
+  "bindingVerifiedAt": "2026-10-20T00:25:14.246Z",
+  "bindingSource": "Authenticated NinjaTrader Live tools/list, describe market_snapshot_output/market_history_output/market_history_examples/barType, MES contract search and market-only samples.",
+  "instruments": {
+    "/MESZ26": {
+      "contract": "MESZ6",
+      "exchangeTimeZone": "America/Chicago"
+    }
+  },
+  "bindings": {
+    "quote": {
+      "rows": "/snapshots",
+      "symbol": "/symbol",
+      "bid": "/bidPrice",
+      "ask": "/askPrice",
+      "last": "/lastPrice",
+      "quoteTime": "/timestamp",
+      "timestampFormat": "iso",
+      "dataFeedMode": "/dataFeedMode",
+      "error": "/error",
+      "tick": "/tickSize",
+      "tickAmount": "/tickValue",
+      "futureMultiplier": "/valuePerPoint"
+    },
+    "minute": {
+      "rows": "/bars",
+      "symbol": "/symbol",
+      "timestamp": "/timestamp",
+      "timestampFormat": "iso",
+      "timestampAnchor": "start",
+      "open": "/open",
+      "high": "/high",
+      "low": "/low",
+      "close": "/close",
+      "volumeComponents": [
+        "/upVolume",
+        "/downVolume"
+      ],
+      "dataFeedMode": "/dataFeedMode",
+      "maxCount": 10000
+    },
+    "daily": {
+      "rows": "/bars",
+      "symbol": "/symbol",
+      "timestamp": "/timestamp",
+      "timestampFormat": "iso",
+      "timestampAnchor": "trade-date",
+      "open": "/open",
+      "high": "/high",
+      "low": "/low",
+      "close": "/close",
+      "volumeComponents": [
+        "/upVolume",
+        "/downVolume"
+      ],
+      "dataFeedMode": "/dataFeedMode",
+      "maxCount": 10000
+    }
+  }
+}

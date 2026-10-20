@@ -54,9 +54,19 @@ function broadDateWindow(date) {
   };
 }
 
-function uniqueTradingDates(bars) {
+export function uniqueTradingDates(bars) {
   return [...new Set((Array.isArray(bars) ? bars : [])
-    .map((bar) => tradingDateKey(bar?.timestamp))
+    .map((bar) => {
+      // The hosted NinjaTrader API labels Daily bars at UTC midnight by
+      // exchange trade date. Converting that label to New York loses a day.
+      if (bar?.source === "NINJATRADER" && bar?.timeframe === "1d" && bar?.timestampSemantics === "TRADING_DATE_LABEL") {
+        const date = bar.sessionTradingDate;
+        return typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)
+          && typeof bar.timestamp === "number" && Number.isFinite(bar.timestamp)
+          && new Date(bar.timestamp).toISOString() === `${date}T00:00:00.000Z` ? date : null;
+      }
+      return tradingDateKey(bar?.timestamp);
+    })
     .filter(Boolean))]
     .sort();
 }

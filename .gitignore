@@ -13,3 +13,7 @@ research/30-day-management-study/historical-study-trades.json
 research/30-day-management-study/schwab-minute-cache.json
 reports/eod/*.html
 .vscode/
+
+# Private NinjaTrader OAuth state and operator-specific mappings
+.executionos-ninjatrader-auth/
+.ninjatrader-config.json
