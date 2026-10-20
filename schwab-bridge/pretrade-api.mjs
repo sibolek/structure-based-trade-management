@@ -14,7 +14,7 @@ import { PreTradeTriggerPersistenceAuthority } from "./pretrade-trigger-persiste
 import { PreTradeTriggerPersistenceMonitor } from "./pretrade-trigger-persistence-monitor.mjs";
 import { createPreTradeTriggerApiHandler } from "./pretrade-trigger-api.mjs";
 import { createSchwabReadOnlyRequestJson } from "./schwab-read-only-request.mjs";
-import { SchwabMarketDataProvider } from "./schwab-market-data-provider.mjs";
+import { createConfiguredMarketDataProviders } from "./market-data-provider-factory.mjs";
 import { RegNmsEquityPriceIncrementResolver } from "./reg-nms-equity-price-increment.mjs";
 import { DssLiveInputAssembler } from "./dss-live-input-assembler.mjs";
 import { DssRuntime } from "./dss-runtime.mjs";
@@ -132,10 +132,12 @@ const handleLifecycleApi = createPreTradeLifecycleApiHandler({
   maxBodyBytes: MAX_BODY_BYTES,
 });
 
-// Permission evaluation uses only read-only Schwab GET requests. Access tokens are
-// read lazily and are never refreshed or written by this service.
+// Schwab remains the default, with its existing read-only credential behavior.
+// Optional NinjaTrader market-data reads cannot feed risk/ARM permission quotes.
 const requestJson = createSchwabReadOnlyRequestJson();
-const marketDataProvider = new SchwabMarketDataProvider({ requestJson, now: () => Date.now() });
+const configuredMarketData = await createConfiguredMarketDataProviders({ requestJson, now: () => Date.now() });
+const { marketDataProvider, permissionMarketDataProvider } = configuredMarketData;
+process.once("exit", () => configuredMarketData.releaseAuthLock?.());
 const dssInputAssembler = new DssLiveInputAssembler({
   marketDataProvider,
   instrumentMetadataResolver: new RegNmsEquityPriceIncrementResolver({ now: () => Date.now() }),
@@ -149,12 +151,12 @@ const dssPermissionService = new DssPermissionService({
   runtime: dssRuntime,
 });
 const accountRiskProvider = new SchwabAccountRiskProvider({ requestJson, now: () => Date.now() });
-const instrumentSizingMetadataProvider = new SchwabInstrumentSizingMetadataProvider({ marketDataProvider });
+const instrumentSizingMetadataProvider = new SchwabInstrumentSizingMetadataProvider({ marketDataProvider: permissionMarketDataProvider });
 const riskEvaluationRepository = new RiskEvaluationRepository({ filePath: RISK_EVALUATION_FILE });
 riskEvaluationRepository.load();
 const riskSizingPermissionService = new RiskSizingPermissionService({
   store,
-  marketDataProvider,
+  marketDataProvider: permissionMarketDataProvider,
   accountRiskProvider,
   instrumentSizingMetadataProvider,
   riskEvaluationRepository,
@@ -464,6 +466,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   json(res, 404, { error: "not found" }, origin);
+});
+
+server.once("close", () => {
+  void configuredMarketData.close().catch(() => console.error("[ExecutionOS] NINJATRADER_SHUTDOWN_FAILED"));
 });
 
 server.listen(PORT, HOST, () => {
