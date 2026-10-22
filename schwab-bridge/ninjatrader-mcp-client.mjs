@@ -1,6 +1,8 @@
+import { appendRenewalAudit, normalizeRenewalEvent, renewalExpiryClaim, renewalServerHint } from './ninjatrader-renewal-audit.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { discoverOAuthServerInfo } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -12,7 +14,8 @@ export const NINJATRADER_ENDPOINTS = Object.freeze({
   live: 'https://mcp-live.tradovateapi.com/mcp',
 });
 const TOOLS = new Set(['describe', 'search_contracts', 'market_snapshot', 'market_history']);
-const OBSERVATION_TOOLS = ['my_portfolio', 'fill_history'];
+const UPDATE_RESOURCES = ['tradovate://orders', 'tradovate://positions'];
+const OBSERVATION_TOOLS = ['my_portfolio', 'fill_history', 'order_history', 'cash_history'];
 export function endpointFor(environment) {
   if (!Object.hasOwn(NINJATRADER_ENDPOINTS, environment)) throw new Error('NINJATRADER_ENVIRONMENT_INVALID');
   return NINJATRADER_ENDPOINTS[environment];
@@ -98,6 +101,7 @@ export class NinjaTraderOAuthStore {
       this.data = next;
     } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
   }
+  recordRenewalEvent(event) { if (this.lockFd === undefined) throw new Error('NINJATRADER_AUTH_STORE_NOT_OWNED'); return appendRenewalAudit(path.dirname(this.file), this.environment, event); }
   close() {
     if (this.lockFd !== undefined) {
       fs.closeSync(this.lockFd); this.lockFd = undefined;
@@ -108,12 +112,16 @@ export class NinjaTraderOAuthStore {
 
 export class NinjaTraderReadOnlyClient {
   #client; #transport; #pending; #tools; #tail = Promise.resolve(); #last = new Map(); #blockedUntil = 0;
+  #streamOpen = false; #updateListener = null; #updatesActive = false; #subscriptionClient; #subscriptionRetryAt = 0; #streamFailed = false;
+  #renewalEvents = []; #renewalSuccesses = 0; #auditAvailable = null; #onAuthEvent;
   #allowedTools; #accountObservation; #authMetadata; #refreshPending; #refreshRetryAt = 0; #refreshFailure = null; #forceRefresh = false; #terminalRefreshFailure = null;
-  constructor({ environment = 'demo', oauthProvider, fetchImpl = fetch, now = Date.now, minIntervalMs = 1000, accountObservation = false } = {}) {
-    this.endpoint = endpointFor(environment);
+  constructor({ environment = 'demo', oauthProvider, fetchImpl = fetch, now = Date.now, minIntervalMs = 1000, accountObservation = false, onAuthEvent = () => {} } = {}) {
+    this.endpoint = endpointFor(environment); this.environment = environment;
     this.issuer = `https://${environment}.tradovateapi.com`;
     if (!oauthProvider || oauthProvider.endpoint !== this.endpoint) throw new Error('NINJATRADER_AUTH_ENVIRONMENT_MISMATCH');
     if (!Number.isFinite(minIntervalMs) || minIntervalMs < 1000) throw new Error('NINJATRADER_RATE_POLICY_INVALID');
+    if (typeof onAuthEvent !== 'function') throw new Error('NINJATRADER_AUTH_EVENT_HANDLER_INVALID');
+    this.#onAuthEvent = onAuthEvent;
     if (typeof accountObservation !== 'boolean') throw new Error('NINJATRADER_OBSERVATION_MODE_INVALID');
     this.#accountObservation = accountObservation;
     this.#allowedTools = new Set([...TOOLS, ...(accountObservation ? OBSERVATION_TOOLS : [])]);
@@ -125,8 +133,9 @@ export class NinjaTraderReadOnlyClient {
       if (url.href === this.endpoint && (init.method || 'GET') === 'POST') {
         let message;
         try { message = JSON.parse(init.body); } catch { throw new Error('NINJATRADER_RPC_DENIED'); }
-        const observationResource = this.#accountObservation && message.method === 'resources/read'
-          && ['tradovate://account-list', 'tradovate://positions'].includes(message.params?.uri);
+        const observationResource = this.#accountObservation && ((message.method === 'resources/read'
+          && ['tradovate://account-list', ...UPDATE_RESOURCES].includes(message.params?.uri))
+          || (['resources/subscribe', 'resources/unsubscribe'].includes(message.method) && UPDATE_RESOURCES.includes(message.params?.uri)));
         if ((!observationResource && !['initialize', 'notifications/initialized', 'notifications/cancelled', 'tools/list', 'tools/call', 'ping'].includes(message.method))
             || (message.method === 'tools/call' && !this.#allowedTools.has(message.params?.name))) throw new Error('NINJATRADER_RPC_DENIED');
       }
@@ -137,8 +146,15 @@ export class NinjaTraderReadOnlyClient {
         headers.set('Authorization', `Bearer ${this.oauth.tokens().access_token}`);
         init = { ...init, headers };
       }
-      const response = await fetchImpl(input, { ...init, redirect: 'error',
-        signal: AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(15000)]) });
+      // Bound connection/header time for the long-lived notification GET,
+      // without aborting its body every 15 seconds. POST RPCs stay bounded.
+      const stream = isMcp && init.method === 'GET', headerTimeout = new AbortController();
+      const timer = stream ? setTimeout(() => headerTimeout.abort(), 15000) : null;
+      let response;
+      try { response = await fetchImpl(input, { ...init, redirect: 'error',
+        signal: AbortSignal.any([...(init.signal ? [init.signal] : []), stream ? headerTimeout.signal : AbortSignal.timeout(15000)]) }); }
+      finally { if (timer) clearTimeout(timer); }
+      if (stream) this.#streamOpen = response.ok && response.headers.get('content-type')?.split(';')[0].trim() === 'text/event-stream';
       if (isMcp && response.status === 401) this.#forceRefresh = true;
       if (isMcp && response.status === 429) {
         const retry = response.headers.get('retry-after');
@@ -160,6 +176,15 @@ export class NinjaTraderReadOnlyClient {
     if (!this.oauth.tokens()) throw new Error('NINJATRADER_AUTHORIZATION_REQUIRED');
     await this.#refresh();
     this.#client = new Client({ name: 'ExecutionOS-read-only', version: '0.1.0' }, { capabilities: {} });
+    this.#client.setNotificationHandler(ResourceUpdatedNotificationSchema, notification => {
+      if (UPDATE_RESOURCES.includes(notification.params.uri)) {
+        try { this.#updateListener?.(notification.params.uri); } catch { /* A wakeup cannot change broker state. */ }
+      }
+    });
+    this.#client.onerror = () => {
+      this.#streamOpen = false;
+      if (this.#updateListener) { this.#updatesActive = false; this.#streamFailed = true; this.#subscriptionRetryAt = this.now() + 60000; }
+    };
     this.#transport = new StreamableHTTPClientTransport(new URL(this.endpoint), { fetch: this.fetch,
       reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 1000, maxReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1 } });
     await this.#client.connect(this.#transport, { timeout: 20000 });
@@ -172,6 +197,33 @@ export class NinjaTraderReadOnlyClient {
       if (page === 19) throw new Error('NINJATRADER_TOOL_DISCOVERY_LIMIT');
     }
     this.#tools = new Map(tools.map(tool => [tool.name, tool]));
+    await this.#ensureAccountUpdates();
+  }
+  async #ensureAccountUpdates() {
+    if (!this.#updateListener || this.#streamFailed) return false;
+    if (this.#updatesActive && this.#subscriptionClient === this.#client) return true;
+    if (this.now() < this.#subscriptionRetryAt) return false;
+    if (!this.#streamOpen) return false;
+    this.#subscriptionRetryAt = this.now() + 60000;
+    if (!this.#client.getServerCapabilities()?.resources?.subscribe) return false;
+    try {
+      for (const uri of UPDATE_RESOURCES) await this.#client.subscribeResource({ uri }, { timeout: 15000 });
+      if (this.#streamFailed || !this.#streamOpen) return false;
+      this.#subscriptionClient = this.#client; this.#updatesActive = true; return true;
+    } catch { return false; } // Polling remains authoritative if subscriptions are unavailable.
+  }
+  async watchAccountUpdates(listener) {
+    if (!this.#accountObservation) throw new Error('NINJATRADER_RESOURCE_DENIED');
+    if (typeof listener !== 'function') throw new Error('NINJATRADER_UPDATE_LISTENER_INVALID');
+    const run = this.#tail.then(async () => { this.#updateListener = listener; await this.connect(); return this.#ensureAccountUpdates(); });
+    this.#tail = run.catch(() => {}); return run;
+  }
+  stopAccountUpdates() { this.#updateListener = null; }
+  async #prepareObservationConnection() {
+    // A dead notification stream must not stop polling. Retry its session at
+    // most once a minute, and restore subscriptions after normal reconnects.
+    if (this.#streamFailed && this.now() >= this.#subscriptionRetryAt) await this.close();
+    await this.connect(); await this.#ensureAccountUpdates();
   }
   // Refresh is non-interactive: never register another client, discard tokens,
   // or fall back to browser consent after a network/server/parse failure.
@@ -183,7 +235,7 @@ export class NinjaTraderReadOnlyClient {
       if (!force && !this.#forceRefresh && this.now() < expiresAt) return;
       throw new Error(this.#refreshFailure || 'NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE');
     }
-    if (!this.#refreshPending) this.#refreshPending = this.#performRefresh().finally(() => { this.#refreshPending = undefined; });
+    if (!this.#refreshPending) this.#refreshPending = this.#observedRefresh(force ? 'forced' : this.#forceRefresh ? 'server_401' : 'scheduled').finally(() => { this.#refreshPending = undefined; });
     try { await this.#refreshPending; }
     catch (error) {
       const code = /^NINJATRADER_[A-Z0-9_]+$/.test(error?.message) ? error.message : 'NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE';
@@ -196,7 +248,39 @@ export class NinjaTraderReadOnlyClient {
       throw new Error(code);
     }
   }
-  async #performRefresh() {
+  authenticationStatus() {
+    const expiry = this.oauth.data?.expiresAt;
+    return { schema: 'executionos.ninjatrader.authentication.v1', environment: this.environment,
+      accessExpiresAt: Number.isFinite(expiry) ? new Date(expiry).toISOString() : null,
+      nextScheduledRefreshAt: Number.isFinite(expiry) ? new Date(expiry - 300000).toISOString() : null,
+      successfulRenewalsThisProcess: this.#renewalSuccesses, auditAvailable: this.#auditAvailable,
+      lastEvent: this.#renewalEvents.length ? structuredClone(this.#renewalEvents.at(-1)) : null };
+  }
+  #recordRenewal(event) {
+    const safe = normalizeRenewalEvent(event);
+    this.#renewalEvents.push(safe); this.#renewalEvents = this.#renewalEvents.slice(-20);
+    if (typeof this.oauth.recordRenewalEvent === 'function') {
+      try { this.oauth.recordRenewalEvent(safe); this.#auditAvailable = true; } catch { this.#auditAvailable = false; }
+    }
+    try { this.#onAuthEvent(structuredClone(safe)); } catch { /* Diagnostics cannot invalidate saved credentials. */ }
+  }
+  async #observedRefresh(trigger) {
+    const started = this.now(), before = this.oauth.tokens(), expiry = this.oauth.data?.expiresAt;
+    const details = { trigger, accessExpiresAt: Number.isFinite(expiry) ? new Date(expiry).toISOString() : null,
+      refreshExpiresAtClaim: renewalExpiryClaim(before?.refresh_token) };
+    this.#recordRenewal({ ...details, stage: 'STARTED', at: new Date(started).toISOString() });
+    try {
+      await this.#performRefresh(details);
+      this.#renewalSuccesses++;
+      this.#recordRenewal({ ...details, stage: 'SUCCEEDED', at: new Date(this.now()).toISOString(), elapsedMs: Math.max(0, this.now() - started),
+        accessExpiresAt: Number.isFinite(this.oauth.data?.expiresAt) ? new Date(this.oauth.data.expiresAt).toISOString() : null,
+        refreshExpiresAtClaim: renewalExpiryClaim(this.oauth.tokens()?.refresh_token), rotated: this.oauth.tokens()?.refresh_token !== before?.refresh_token });
+    } catch (error) {
+      this.#recordRenewal({ ...details, stage: 'FAILED', at: new Date(this.now()).toISOString(), elapsedMs: Math.max(0, this.now() - started), outcomeCode: /^NINJATRADER_[A-Z0-9_]+$/.test(error?.message || '') ? error.message : 'NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE' });
+      throw error;
+    }
+  }
+  async #performRefresh(details = {}) {
     const tokens = this.oauth.tokens(), registration = this.oauth.clientInformation?.();
     if (!tokens?.refresh_token) throw new Error('NINJATRADER_REFRESH_TOKEN_MISSING_REAUTHORIZE_REQUIRED');
     if (!registration?.client_id) throw new Error('NINJATRADER_REFRESH_CLIENT_MISSING_REAUTHORIZE_REQUIRED');
@@ -210,6 +294,8 @@ export class NinjaTraderReadOnlyClient {
     }
     const response = await this.fetch(this.#authMetadata.token_endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: registration.client_id, resource: this.endpoint }) });
+    details.httpStatus = response.status;
+    details.requestId = response.headers.get('x-request-id') || response.headers.get('x-correlation-id');
     if (response.status === 429) {
       const retry = response.headers.get('retry-after');
       const wait = retry && /^\d+(\.\d+)?$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - this.now();
@@ -219,6 +305,7 @@ export class NinjaTraderReadOnlyClient {
     if (response.status >= 500) throw new Error('NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE');
     let body;
     try { body = await response.json(); } catch { throw new Error('NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE'); }
+    details.oauthError = body?.error; details.serverHint = body?.error ? renewalServerHint(body?.error_description) : null;
     // This beta also returns OAuth errors inside HTTP 200 responses.
     if (['invalid_token', 'invalid_grant', 'access_denied'].includes(body?.error)) throw new Error('NINJATRADER_REFRESH_TOKEN_REJECTED_REAUTHORIZE_REQUIRED');
     if (['invalid_client', 'unauthorized_client'].includes(body?.error)) throw new Error('NINJATRADER_REFRESH_CLIENT_REJECTED_REAUTHORIZE_REQUIRED');
@@ -239,7 +326,7 @@ export class NinjaTraderReadOnlyClient {
     if (!this.#allowedTools.has(name)) throw new Error('NINJATRADER_TOOL_DENIED');
     // Serialize SDK operations, including rotating-token refresh.
     const run = this.#tail.then(async () => {
-      await this.connect();
+      await this.#prepareObservationConnection();
       if (!this.#tools.has(name)) throw new Error('NINJATRADER_REQUIRED_TOOL_UNAVAILABLE');
       const tool = this.#tools.get(name);
       if (tool.annotations?.readOnlyHint === false || tool.annotations?.destructiveHint === true) throw new Error('NINJATRADER_TOOL_ANNOTATION_REJECTED');
@@ -262,14 +349,15 @@ export class NinjaTraderReadOnlyClient {
     return run;
   }
   async close() {
-    try { await this.#client?.close(); } finally { this.#client = undefined; this.#transport = undefined; this.#tools = undefined; this.#pending = undefined; }
+    try { await this.#client?.close(); } finally { this.#client = undefined; this.#transport = undefined; this.#tools = undefined; this.#pending = undefined; this.#streamOpen = false; this.#updatesActive = false; this.#subscriptionClient = undefined; this.#subscriptionRetryAt = 0; this.#streamFailed = false; }
   }
   readAccountList() { return this.#readObservationResource('tradovate://account-list'); }
   readPositionList() { return this.#readObservationResource('tradovate://positions'); }
+  readOrderList() { return this.#readObservationResource('tradovate://orders'); }
   async #readObservationResource(uri) {
     if (!this.#accountObservation) throw new Error('NINJATRADER_RESOURCE_DENIED');
     const run = this.#tail.then(async () => {
-      await this.connect(); await this.#refresh();
+      await this.#prepareObservationConnection(); await this.#refresh();
       let result;
       try { result = await this.#client.readResource({ uri }, { timeout: 15000 }); }
       catch (error) { throw new Error(this.now() < this.#blockedUntil ? 'NINJATRADER_RATE_LIMIT_COOLDOWN' : [401, 404].includes(error?.code) ? 'NINJATRADER_SESSION_RECONNECT_REQUIRED' : 'NINJATRADER_OBSERVATION_RESOURCE_READ_FAILED_CHECK_READ_PERMISSIONS'); }

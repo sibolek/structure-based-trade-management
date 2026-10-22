@@ -6,6 +6,7 @@ import { NinjaTraderOAuthStore, NinjaTraderReadOnlyClient } from './ninjatrader-
 import { NinjaTraderMarketDataProvider } from './ninjatrader-market-data-provider.mjs';
 import { NinjaTraderMonitor, monitorError } from './ninjatrader-monitor-state.mjs';
 import { createNinjaTraderMonitorApi } from './ninjatrader-monitor-api.mjs';
+import { createNinjaTraderActionLogger, formatNinjaTraderActionFill } from './ninjatrader-action-log.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export function monitorConfig(env = process.env, args = process.argv.slice(2)) {
@@ -39,24 +40,39 @@ function displayTime(value, timeZone) {
   return new Intl.DateTimeFormat('en-US', { timeZone, hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, timeZoneName: 'short' }).format(new Date(value));
 }
 export function formatNinjaTraderFill(fill, timeZone = 'America/Denver') {
-  const executionMs = Date.parse(fill.executionTime || ''), detectedMs = Date.parse(fill.detectedAt || '');
-  const latencyMs = detectedMs - executionMs;
-  const delay = !Number.isFinite(latencyMs) ? 'unavailable' : `${latencyMs} ms${latencyMs < 0 ? ' (local/API clock skew)' : ''}`;
-  return block('NEW NINJATRADER EXECUTION', [
-    ['Account', fill.accountDisplay], ['Environment', fill.environment?.toUpperCase()], ['Symbol', fill.symbol],
-    ['Instruction', fill.action], ['Quantity', fill.quantity], ['Fill price', priceText(fill.price)],
-    ['Order ID', fill.orderId], ['Fill ID', fill.fillId], ['Broker fill', displayTime(fill.executionTime, timeZone)],
-    ['Detected', displayTime(fill.detectedAt, timeZone)], ['Observed delay', delay],
-  ]);
+  return formatNinjaTraderActionFill(fill, timeZone);
 }
-function snapshotLogRows(state) {
+function startupRoundTripFields(summary, timeZone = 'America/Denver') {
+  if (!summary || summary.status !== 'AVAILABLE') {
+    const reason = summary?.reason === 'AMBIGUOUS_FILL_SEQUENCE' ? 'Unavailable: ambiguous fill sequence'
+      : summary?.reason === 'POSITION_AND_FILL_TIMING_OVERLAP' ? 'Unavailable: fills overlap the position snapshot'
+      : summary?.status === 'UNAVAILABLE' ? 'Unavailable: incomplete entry history' : 'No complete trade found in recent history';
+    return [['Last trade', reason]];
+  }
+  const trade = summary.trade;
+  const dateTime = value => new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour12: false,
+    hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, timeZoneName: 'short' }).format(new Date(value));
+  const points = new Intl.NumberFormat('en-US', { maximumFractionDigits: 8, signDisplay: 'exceptZero' }).format(trade.grossPointsPerContract);
+  const pnl = summary.pnl;
+  const unavailableNet = pnl?.reason === 'FEES_NOT_ATTRIBUTABLE_TO_SINGLE_TRADE' ? 'Unavailable: fees not linked to this trade'
+    : pnl?.reason === 'COMMISSION_NOT_ASSESSED' || pnl?.reason === 'FEE_COMPONENTS_INCOMPLETE' ? 'Unavailable: fees not fully assessed'
+    : pnl?.reason === 'CASH_HISTORY_UNAVAILABLE' ? 'Unavailable: broker fee history unavailable' : 'Unavailable: fee/contract data unverified';
+  const cashFields = pnl?.status === 'AVAILABLE' ? [['Gross P/L', money(pnl.grossPnl, pnl.currency)], ['Fees & comm.', money(pnl.fees, pnl.currency)],
+    ['Net P/L', money(pnl.netPnl, pnl.currency)], ['P/L basis', 'Reconstructed from isolated posted ledger charges']]
+    : [['Net P/L', unavailableNet]];
+  return [['Last trade', `${trade.symbol} · ${trade.direction} (reconstructed)`], ['Closed qty', `${trade.quantity} contract(s) · peak ${trade.peakQuantity}`],
+    ['Entry avg', priceText(trade.entryAverage)], ['Opened', dateTime(trade.openedAt)], ['Exit avg', priceText(trade.exitAverage)], ['Closed', dateTime(trade.closedAt)],
+    ['Gross move', `${points} points/contract; before fees`], ...cashFields, ['History window', `${summary.startDate} through ${summary.endDate} (UTC request dates)`]];
+}
+function snapshotLogRows(state, { timeZone = 'America/Denver' } = {}) {
   const rows = [];
   const add = (key, line, removal = null) => rows.push({ key, line, removal });
   const unknownOrders = state.accounts.filter(account => account.workingOrdersStatus !== 'CURRENT').length;
-  const orderSummary = unknownOrders ? `unavailable for ${unknownOrders} account(s)` : state.workingOrders.filter(order => !order.stale).length;
+  const unconfirmedCount = (state.unconfirmedOrders || []).length;
+  const orderSummary = unconfirmedCount ? `${state.workingOrders.filter(order => !order.stale).length} current; ${unconfirmedCount} status unconfirmed` : unknownOrders ? `unavailable for ${unknownOrders} account(s)` : state.workingOrders.filter(order => !order.stale).length;
   add('status', block('NINJATRADER MONITOR STATUS', [
     ['Environment', state.environment.toUpperCase()], ['Status', state.status], ['Accounts', state.accounts.length],
-    ['Open positions', state.positions.length], ['Working orders', orderSummary], ['Snapshot', state.stale ? 'STALE' : 'current'],
+    ['Open positions', state.positions.length], ['Working orders', orderSummary], ['Snapshot', state.stale ? 'STALE' : (unknownOrders || unconfirmedCount) ? 'current; orders unconfirmed' : 'current'],
   ]));
   for (const account of state.accounts) add(JSON.stringify(['account', account.accountId]),
     block('NINJATRADER ACCOUNT SNAPSHOT', [['Account', account.accountDisplay], ['Current equity', money(account.netLiquidation, account.currency)],
@@ -65,29 +81,51 @@ function snapshotLogRows(state) {
   for (const position of state.positions) add(JSON.stringify(['position', position.accountId, position.symbol]),
     block('NINJATRADER POSITION', [['Account', position.accountDisplay], ['Symbol', position.symbol], ['Position', `${position.side} ${Math.abs(position.quantity)}`],
       ['Position avg', priceText(position.averagePrice)], ['Mark price', priceText(position.currentPrice)], ['Data feed', position.dataFeedMode || 'timeliness unknown']]),
-    block('POSITION NO LONGER REPORTED', [['Account', position.accountDisplay], ['Symbol', position.symbol]]));
-  for (const order of state.workingOrders) add(JSON.stringify(['order', order.accountId, order.orderId]),
-    block(`NINJATRADER WORKING ORDER${order.stale || state.stale ? ' (STALE)' : ''}`, [
-      ['Account', order.accountDisplay], ['Symbol', order.symbol], ['Instruction', order.action], ['Quantity', order.quantity],
-      ['Order type', order.orderType], ['Stop price', priceText(order.stopPrice)],
-      ['Limit price', order.limitPrice == null && ['Stop', 'Market', 'MIT', 'TrailingStop'].includes(order.orderType) ? 'Not applicable' : priceText(order.limitPrice)],
-      ['Order status', order.status], ['Time in force', order.timeInForce], ['Order ID', order.orderId],
-    ]), block('WORKING ORDER NO LONGER REPORTED', [['Account', order.accountDisplay], ['Symbol', order.symbol], ['Order ID', order.orderId]]));
+    current => current.status === 'OBSERVING' && current.stale === false && current.accounts.some(account => account.accountId === position.accountId)
+      ? block('NINJATRADER POSITION FLAT', [['Account', position.accountDisplay], ['Symbol', position.symbol], ['Position', 'FLAT'], ['Confirmation', 'Broker position snapshot']])
+      : block('POSITION NO LONGER REPORTED', [['Account', position.accountDisplay], ['Symbol', position.symbol]]));
+  for (const order of [...state.workingOrders, ...(state.unconfirmedOrders || [])]) {
+    const unconfirmed = order.stale || state.stale;
+    add(JSON.stringify(['order', order.accountId, order.orderId]),
+      block(unconfirmed ? 'NINJATRADER ORDER — STATUS UNCONFIRMED' : 'NINJATRADER WORKING ORDER', [
+        ['Account', order.accountDisplay], ['Symbol', order.symbol], ['Instruction', order.action], ['Quantity', order.quantity],
+        ['Order type', order.orderType], ['Stop price', priceText(order.stopPrice)],
+        ['Limit price', order.limitPrice == null && ['Stop', 'Market', 'MIT', 'TrailingStop'].includes(order.orderType) ? 'Not applicable' : priceText(order.limitPrice)],
+        ['Order status', unconfirmed ? 'Unconfirmed' : order.status],
+        ...(unconfirmed ? [['Last status', order.status], ['Last observed', displayTime(order.observedAt, timeZone)]] : []),
+        ['Time in force', order.timeInForce], ['Order ID', order.orderId],
+      ]), block('WORKING ORDER NO LONGER REPORTED', [['Account', order.accountDisplay], ['Symbol', order.symbol], ['Order ID', order.orderId]]));
+  }
+  for (const event of state.orderEvents || []) {
+    if (state.workingOrders.some(order => order.accountId === event.accountId && order.orderId === event.orderId)) continue;
+    const position = event.positionQuantity === 0 ? 'FLAT' : event.positionQuantity > 0 ? `LONG ${event.positionQuantity}` : event.positionQuantity < 0 ? `SHORT ${Math.abs(event.positionQuantity)}` : 'unconfirmed';
+    add(JSON.stringify(['order', event.accountId, event.orderId]), block(`NINJATRADER ORDER ${event.status.toUpperCase()}`, [
+      ['Account', event.accountDisplay], ['Symbol', event.symbol], ['Instruction', event.action], ['Quantity', event.quantity],
+      ['Order type', event.orderType], ['Stop price', priceText(event.stopPrice)],
+      ['Limit price', event.limitPrice == null && ['Stop', 'Market', 'MIT', 'TrailingStop'].includes(event.orderType) ? 'Not applicable' : priceText(event.limitPrice)],
+      ['Order ID', event.orderId], ['Order status', event.status], ['Filled quantity', event.filledQuantity],
+      ...(event.parentOrderId != null ? [['Parent order', event.parentOrderId]] : []),
+      ...(event.ocoOrderId != null ? [['OCO order', event.ocoOrderId]] : []),
+      ['Position', position], ['Confirmation', 'Broker order record'], ['Observed', displayTime(event.observedAt, timeZone)],
+      ...(event.orderDetailsSource === 'LAST_OBSERVED_WORKING_ORDER' ? [['Details source', 'Last observed working order'], ['Details as of', displayTime(event.orderDetailsObservedAt, timeZone)]] : []),
+    ]));
+  }
   return rows;
 }
-export function logSnapshot(state, log) { for (const row of snapshotLogRows(state)) log(row.line); }
-export function createMonitorChangeLogger(log) {
+export function logSnapshot(state, log, options) { for (const row of snapshotLogRows(state, options)) log(row.line); }
+export function createMonitorChangeLogger(log, options) {
   let previous = new Map();
   return state => {
-    const next = new Map(snapshotLogRows(state).map(row => [row.key, row]));
+    const next = new Map(snapshotLogRows(state, options).map(row => [row.key, row]));
     for (const [key, row] of next) if (previous.get(key)?.line !== row.line) log(row.line);
-    for (const [key, row] of previous) if (!next.has(key) && row.removal) log(row.removal);
+    for (const [key, row] of previous) if (!next.has(key) && row.removal) log(typeof row.removal === 'function' ? row.removal(state) : row.removal);
     previous = next;
   };
 }
 export async function runNinjaTraderMonitor({ settings, client, signal, log = console.log, createApi = createNinjaTraderMonitorApi, wait = pause, now = Date.now } = {}) {
-  const monitor = new NinjaTraderMonitor({ client, environment: settings.environment, pollMs: settings.pollMs,
-    accountSelectors: settings.accountSelectors, onFill: fill => log(formatNinjaTraderFill(fill, settings.timeZone)) });
+  const logActions = createNinjaTraderActionLogger(log, { timeZone: settings.timeZone });
+  const monitor = new NinjaTraderMonitor({ client, environment: settings.environment, pollMs: settings.pollMs, now,
+    accountSelectors: settings.accountSelectors, onFill: logActions.fill });
   if (settings.check || settings.refreshCheck) {
     if (settings.refreshCheck) await client.refreshAuthorization();
     const tools = await client.toolCatalog();
@@ -96,56 +134,82 @@ export async function runNinjaTraderMonitor({ settings, client, signal, log = co
     if (settings.refreshCheck) log('✓ NinjaTrader token refresh verified; rotated credentials saved privately without browser sign-in.');
     log('Required read-only portfolio/fill tools are available. Account-list read permission is checked at monitor startup.'); return;
   }
-  const logChanges = createMonitorChangeLogger(log);
-  let api;
+  let api, wakeWait = null, pendingUpdate = false;
+  const onUpdate = () => { if (!pendingUpdate) { pendingUpdate = true; wakeWait?.abort(); } };
   try {
     await monitor.initialize();
     const initial = monitor.snapshot();
-    log('\nEXECUTIONOS / NINJATRADER FILL MONITOR\n');
-    log(`✓ NinjaTrader authenticated (${settings.environment.toUpperCase()})`);
-    log(`✓ ${initial.accounts.length} authorized account(s)`);
-    log(`✓ Poll interval: ${settings.pollMs} ms`);
-    log('✓ Read-only: this monitor does not place, replace, or cancel orders');
-    log(`✓ Console time zone: ${settings.timeZone}`);
-    logChanges(initial);
-    log(`✓ Baseline complete (${initial.baselineFillCount} existing fill(s) ignored)`);
-    log('✓ MONITOR OBSERVING — new NinjaTrader execution fills will print below');
+    log(`NINJATRADER ${settings.environment.toUpperCase()} | OBSERVING · read-only | ${initial.accounts.length} account(s), ${initial.positions.length} open position(s), ${initial.workingOrders.filter(order => !order.stale).length} working order(s) | ${initial.baselineFillCount} prior fill(s) suppressed | poll ${settings.pollMs} ms | ${settings.timeZone}`);
+    for (const account of initial.accounts) log(block('NINJATRADER ACCOUNT SUMMARY (STARTUP)', [
+      ['Account', account.accountDisplay], ['Current equity', money(account.netLiquidation, account.currency)],
+      ['Cash balance', money(account.cashBalance, account.currency)], ['Open P&L', money(account.openPnl, account.currency)],
+      ...startupRoundTripFields(initial.startupRoundTrips.find(summary => summary.accountId === account.accountId), settings.timeZone),
+    ]));
+    logActions(initial);
     if (settings.once || signal?.aborted) return monitor.snapshot();
     const marketDataProvider = settings.marketConfig ? new NinjaTraderMarketDataProvider({ client, config: settings.marketConfig }) : null;
     api = createApi({ monitor, marketDataProvider, config: settings.marketConfig, port: settings.port, allowedOrigin: settings.allowedOrigin });
     const origin = await api.start();
     log(`✓ Local UI API: ${origin}/api/state (read-only, loopback only)`);
     log(`✓ Market-data relay: ${marketDataProvider ? 'available; use EXECUTIONOS_NINJATRADER_MONITOR_URL=' + origin : 'not configured'}`);
-    log('Press Ctrl+C to stop.\n');
-    let failures = 0, delay = settings.pollMs, lastErrorCode = null;
+    log('Press Ctrl+C to stop.');
+    let subscribed = false;
+    try { subscribed = await client.watchAccountUpdates?.(onUpdate) || false; } catch { /* Preserve polling if setup is unavailable. */ }
+    log(subscribed ? '✓ Order/position push subscriptions accepted; polling remains enabled' : '✓ Order/position push unavailable; using polling');
+    let failures = 0, lastErrorCode = null, nextRegularRead = now() + settings.pollMs, nextFastRead = now() + 1000, retryAt = 0;
     while (!signal?.aborted) {
-      try { await wait(delay, undefined, { signal }); } catch (error) { if (signal?.aborted) break; throw error; }
+      const due = Math.min(nextRegularRead, pendingUpdate ? Math.max(nextFastRead, retryAt) : Infinity);
+      const delay = Math.max(0, due - now());
+      if (delay > 0) {
+        wakeWait = new AbortController();
+        try { await wait(delay, undefined, { signal: signal ? AbortSignal.any([signal, wakeWait.signal]) : wakeWait.signal }); }
+        catch (error) { if (!signal?.aborted && !wakeWait.signal.aborted) throw error; }
+        finally { wakeWait = null; }
+      }
       if (signal?.aborted) break;
-      const started = now();
+      const started = now(), regular = started >= nextRegularRead;
+      if (!regular && !(pendingUpdate && started >= nextFastRead && started >= retryAt)) continue;
+      pendingUpdate = false; nextFastRead = started + 5000;
       try {
-        await monitor.poll();
-        logChanges(monitor.snapshot());
-        failures = 0; lastErrorCode = null;
-        delay = Math.max(0, settings.pollMs - (now() - started));
+        // Push refreshes skip fill history; they cannot consume its per-minute
+        // budget or postpone the separately scheduled regular fill poll.
+        await monitor.poll({ readFills: regular || failures > 0 });
+        logActions(monitor.snapshot());
+        if (failures) log('NINJATRADER MONITOR RECOVERED | observations current');
+        failures = 0; lastErrorCode = null; retryAt = 0;
+        if (regular) nextRegularRead = started + settings.pollMs;
       } catch (error) {
         failures++;
         const code = monitorError(error);
-        delay = /RATE_LIMIT|TOOL_ERROR/.test(code) ? 60000 : Math.min(60000, settings.pollMs * 2 ** Math.min(failures, 5));
-        logChanges(monitor.snapshot());
-        if (code !== lastErrorCode) log(`\n⚠ Monitor poll failed: ${code}\nPrevious observations marked stale. Retrying in ${delay} ms...\n`);
+        const backoff = /RATE_LIMIT|TOOL_ERROR/.test(code) ? 60000 : Math.min(60000, settings.pollMs * 2 ** Math.min(failures, 5));
+        retryAt = now() + backoff; nextRegularRead = retryAt;
+        if (code !== lastErrorCode) log(`NINJATRADER MONITOR WARNING | ${code} | observations stale | retry in ${backoff / 1000}s`);
         lastErrorCode = code;
         if (/TOOL_REQUEST_FAILED|CONNECT_FAILED|SESSION_RECONNECT_REQUIRED/.test(code)) await client.resetConnection?.();
       }
     }
     return monitor.snapshot();
-  } finally { monitor.stop(); await api?.stop(); }
+  } finally { client.stopAccountUpdates?.(); wakeWait?.abort(); monitor.stop(); await api?.stop(); }
 }
 
+export function createNinjaTraderAuthLogger(log = console.log, timeZone = 'America/Denver') {
+  let lastFailure = null;
+  return event => {
+    if (event.stage === 'STARTED') return;
+    const key = JSON.stringify([event.outcomeCode, event.httpStatus, event.oauthError, event.serverHint]);
+    if (event.stage === 'FAILED' && key === lastFailure) return;
+    lastFailure = event.stage === 'FAILED' ? key : null;
+    const details = event.stage === 'SUCCEEDED'
+      ? `token rotated: ${event.rotated ? 'yes' : 'no replacement returned'} | access expires: ${displayTime(event.accessExpiresAt, timeZone)}`
+      : `OAuth error: ${event.oauthError ?? '—'} | Server hint: ${event.serverHint ?? '—'} | result: ${event.outcomeCode}`;
+    log(`${displayTime(event.at, timeZone)} | NINJATRADER TOKEN RENEWAL ${event.stage} | ${event.trigger} | HTTP ${event.httpStatus ?? '—'} | ${details}`);
+  };
+}
 export async function main(args = process.argv.slice(2), env = process.env) {
   const settings = monitorConfig(env, args), controller = new AbortController();
   const stop = () => controller.abort();
   const store = new NinjaTraderOAuthStore({ directory: settings.directory, environment: settings.environment });
-  const client = new NinjaTraderReadOnlyClient({ environment: settings.environment, oauthProvider: store, accountObservation: true });
+  const client = new NinjaTraderReadOnlyClient({ environment: settings.environment, oauthProvider: store, accountObservation: true, onAuthEvent: createNinjaTraderAuthLogger(console.log, settings.timeZone) });
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
   for (const event of signals) process.on(event, stop);
   const release = () => store.close(); process.once('exit', release);

@@ -97,7 +97,7 @@ test('late failure on a second account publishes neither a partial snapshot nor 
     return { items: [fill(args.account === NAME ? 1 : 2, { account: args.account })] };
   };
   await assert.rejects(f.monitor.initialize()); assert.equal(f.monitor.snapshot().accounts.length, 0);
-  assert.equal(f.monitor.snapshot().baselineCompletedAt, null); broken = false;
+  assert.equal(f.monitor.snapshot().baselineCompletedAt, null); assert.deepEqual(f.monitor.snapshot().startupRoundTrips, []); broken = false;
   await f.monitor.poll(); assert.equal(f.monitor.snapshot().baselineFillCount, 2); assert.equal(f.notifications.length, 0);
 });
 test('concurrent polls are rejected instead of overlapping or double-reporting fills', async () => {
@@ -115,6 +115,37 @@ test('monitor config validates intervals, timezone, environment and command flag
   const settings = { environment: 'live', pollMs: 5000, accountSelectors: [], once: true, timeZone: 'America/Denver' };
   const state = await runNinjaTraderMonitor({ settings, client: f.client, log: message => messages.push(message), createApi: () => { throw new Error('must not run'); } });
   assert.equal(state.baselineFillCount, 1); assert.ok(!messages.join('\n').includes(NAME));
+});
+test('startup shows one masked account summary using the existing baseline read', async () => {
+  const f = fixture(), messages = [];
+  const state = await runNinjaTraderMonitor({ settings: { environment: 'live', pollMs: 5000, accountSelectors: [], once: true },
+    client: f.client, now: () => START, log: line => messages.push(line) });
+  const summaries = messages.filter(line => line.includes('NINJATRADER ACCOUNT SUMMARY (STARTUP)'));
+  assert.equal(summaries.length, 1);
+  assert.match(summaries[0], /Account:\s+••••3456/); assert.match(summaries[0], /Current equity:\s+\$10,000\.00/);
+  assert.match(summaries[0], /Cash balance:\s+\$10,000\.00/); assert.match(summaries[0], /Open P&L:\s+\$0\.00/);
+  assert.doesNotMatch(messages.join('\n'), /PRIVATE|0\.5%|max risk|ARMED/);
+  assert.deepEqual(f.calls.map(call => call.name), ['my_portfolio', 'fill_history']);
+  assert.equal(state.executionEnabled, false);
+});
+test('startup summaries keep accounts separate, preserve currency, and distinguish unavailable amounts from zero', async () => {
+  const f = fixture(), messages = [], second = 'SECOND-ACCOUNT-9876', original = f.client.callTool;
+  f.raw.accounts.push({ name: second });
+  f.client.callTool = async (name, args) => {
+    const data = await original(name, args);
+    if (name === 'my_portfolio') data.account = { name: args.account, currency: args.account === NAME ? 'EUR' : null,
+      netLiq: args.account === NAME ? 1234.56 : null, cashBalance: 0, openPnL: null };
+    if (name === 'fill_history') data.items = data.items.map(fill => ({ ...fill, account: args.account }));
+    return data;
+  };
+  await runNinjaTraderMonitor({ settings: { environment: 'live', pollMs: 5000, accountSelectors: [], once: true },
+    client: f.client, now: () => START, log: line => messages.push(line) });
+  const summaries = messages.filter(line => line.includes('NINJATRADER ACCOUNT SUMMARY (STARTUP)'));
+  assert.equal(summaries.length, 2); assert.match(summaries[0], /••••3456[\s\S]*€1,234\.56/);
+  assert.match(summaries[0], /Cash balance:\s+€0\.00/); assert.match(summaries[0], /Open P&L:\s+—/);
+  assert.match(summaries[1], /••••9876[\s\S]*Current equity:\s+—/);
+  assert.match(summaries[1], /Cash balance:\s+0 \(currency unavailable\)/);
+  assert.doesNotMatch(messages.join('\n'), /PRIVATE-ACCOUNT|SECOND-ACCOUNT/);
 });
 
 function relayFixture(t) {
@@ -186,7 +217,7 @@ test('omitted orders retain prior values as stale instead of falsely reporting z
   assert.equal(state.accounts[0].workingOrdersObservedAt, before); assert.equal(state.workingOrders[0].stale, true);
   assert.equal(state.workingOrders[0].observedAt, before);
   const logs = []; logSnapshot(state, row => logs.push(row));
-  assert.match(logs.join('\n'), /Working orders:\s+unavailable/); assert.match(logs.join('\n'), /WORKING ORDER \(STALE\)/);
+  assert.match(logs.join('\n'), /Working orders:\s+unavailable/); assert.match(logs.join('\n'), /ORDER — STATUS UNCONFIRMED/);
   f.raw.portfolio.workingOrders = []; await f.monitor.poll(); state = f.monitor.snapshot();
   assert.deepEqual(state.workingOrders, []); assert.equal(state.accounts[0].workingOrdersStatus, 'CURRENT');
   const g = fixture(); delete g.raw.portfolio.workingOrders; await g.monitor.initialize();
@@ -227,17 +258,18 @@ test('change logger ignores poll timestamps/reordering and does not repeat an or
   await f.monitor.poll(); logChanges(f.monitor.snapshot());
   assert.equal(messages.length, 1); assert.match(messages[0], /Stop price:\s+5995[\s\S]*Order ID:\s+43/);
 });
-test('change logger reports removals even when counts stay the same and keeps order coverage changes visible', async () => {
+test('change logger retains disappeared orders as unconfirmed and keeps coverage changes visible', async () => {
   const f = fixture(); f.raw.portfolio.workingOrders = [stopOrder()]; await f.monitor.initialize();
   const messages = [], logChanges = createMonitorChangeLogger(row => messages.push(row)); logChanges(f.monitor.snapshot()); messages.length = 0;
   f.raw.portfolio.workingOrders = [stopOrder({ id: 43 })]; await f.monitor.poll(); logChanges(f.monitor.snapshot());
-  assert.equal(messages.length, 2); assert.match(messages.join('\n'), /WORKING ORDER NO LONGER REPORTED[\s\S]*Order ID:\s+42/);
+  assert.equal(messages.length, 3); assert.match(messages.join('\n'), /ORDER — STATUS UNCONFIRMED[\s\S]*Order ID:\s+42/);
   assert.doesNotMatch(messages.join('\n'), /cancelled|filled/i);
   messages.length = 0; delete f.raw.portfolio.workingOrders; await f.monitor.poll(); logChanges(f.monitor.snapshot());
-  assert.match(messages.join('\n'), /Working orders:\s+unavailable/); assert.match(messages.join('\n'), /WORKING ORDER \(STALE\)/);
+  assert.match(messages.join('\n'), /Working orders:\s+0 current; 1 status unconfirmed/); assert.match(messages.join('\n'), /ORDER — STATUS UNCONFIRMED/);
   messages.length = 0; f.advance(); await f.monitor.poll(); logChanges(f.monitor.snapshot()); assert.deepEqual(messages, []);
   f.raw.portfolio.workingOrders = []; await f.monitor.poll(); logChanges(f.monitor.snapshot());
-  assert.match(messages.join('\n'), /Working orders:\s+0/); assert.match(messages.join('\n'), /NO LONGER REPORTED/);
+  assert.match(messages.join('\n'), /Working orders:\s+0 current; 2 status unconfirmed/); assert.doesNotMatch(messages.join('\n'), /NO LONGER REPORTED|ORDER CANCELLED/);
+  assert.equal(f.monitor.snapshot().unconfirmedOrders.length, 2);
 });
 test('runner has no unchanged heartbeat, suppresses repeated errors, reports recovery and still emits new fills once', async () => {
   const f = fixture(), messages = [], controller = new AbortController(); let iteration = 0, clock = START;
@@ -251,14 +283,16 @@ test('runner has no unchanged heartbeat, suppresses repeated errors, reports rec
       if (iteration === 2 || iteration === 3) f.raw.error = 'NINJATRADER_RATE_LIMIT_COOLDOWN';
       else delete f.raw.error;
       if (iteration === 5) f.raw.fills.items.push(fill(2));
+      if (iteration === 4) { f.raw.portfolio.account.netLiq = 10025; f.raw.portfolio.account.openPnL = 25; }
       if (iteration === 7) controller.abort();
     } });
   assert.equal(stopped, true);
-  assert.equal(messages.filter(row => row.startsWith('\nNINJATRADER MONITOR STATUS')).length, 3); // startup, degraded, recovery
-  assert.equal(messages.filter(row => row.includes('⚠ Monitor poll failed: NINJATRADER_RATE_LIMIT_COOLDOWN')).length, 1);
-  assert.equal(messages.filter(row => row.startsWith('\nNEW NINJATRADER EXECUTION')).length, 1);
-  assert.equal(messages.filter(row => /WORKING ORDER/.test(row)).length, 3); // initial, stale, recovered
-  assert.ok(!messages.some(row => /last successful read/.test(row)));
+  assert.equal(messages.filter(row => row.includes('MONITOR WARNING | NINJATRADER_RATE_LIMIT_COOLDOWN')).length, 1);
+  assert.equal(messages.filter(row => row.includes('MONITOR RECOVERED')).length, 1);
+  assert.equal(messages.filter(row => row.includes('| BUY 1 MESZ6 @')).length, 1);
+  assert.equal(messages.filter(row => row.includes('NINJATRADER ACCOUNT SUMMARY (STARTUP)')).length, 1);
+  assert.ok(messages.filter(row => !row.includes('NINJATRADER ACCOUNT SUMMARY (STARTUP)')).every(row => !/[\r\n]/.test(row)));
+  assert.doesNotMatch(messages.join('\n'), /ACCOUNT SNAPSHOT|POSITION FLAT|WORKING ORDER|MONITOR STATUS|NEW NINJATRADER EXECUTION/);
 });
 
 test('Schwab-style order blocks align labels and distinguish stop-market N/A from missing limit prices', async () => {
@@ -285,16 +319,11 @@ Order ID:       42
   f.raw.portfolio.account.netLiq = null; f.raw.portfolio.account.openPnL = null; await f.monitor.poll();
   const missing = []; logSnapshot(f.monitor.snapshot(), row => missing.push(row)); assert.match(missing.join('\n'), /Current equity: —/); assert.match(missing.join('\n'), /Open P&L:\s+—/);
 });
-test('Schwab-style execution block shows source facts and millisecond Mountain timestamps without inferred transitions', () => {
+test('concise execution line keeps source price, identities and millisecond Mountain timestamp', () => {
   const text = formatNinjaTraderFill({ accountDisplay: '••••3456', environment: 'live', symbol: 'MESZ6', action: 'Sell', quantity: 1,
     price: 5990.25, orderId: 42, fillId: 2, executionTime: '2026-10-19T22:00:00.123Z', detectedAt: '2026-10-19T22:00:00.456Z' });
-  assert.ok(text.startsWith('\nNEW NINJATRADER EXECUTION\n----------------------------------------\n'));
-  assert.match(text, /Instruction:\s+Sell/); assert.match(text, /Fill price:\s+5990\.25/);
-  assert.match(text, /Broker fill:\s+16:00:00\.123 MDT/); assert.match(text, /Detected:\s+16:00:00\.456 MDT/);
-  assert.match(text, /Observed delay: 333 ms/);
-  assert.doesNotMatch(text, /Position effect|State event|Transition|ARMED|max risk|PRIVATE/);
-  const skew = formatNinjaTraderFill({ executionTime: '2026-10-19T22:00:01Z', detectedAt: '2026-10-19T22:00:00Z' });
-  assert.match(skew, /-1000 ms \(local\/API clock skew\)/);
+  assert.equal(text, '16:00:00.123 MDT | NINJATRADER LIVE ••••3456 | SELL 1 MESZ6 @ 5990.25 | order 42 | fill 2');
+  assert.doesNotMatch(text, /[\r\n]|Position effect|State event|Transition|ARMED|max risk|PRIVATE/);
 });
 test('currency display noise remains quiet and does not round the API account values', async () => {
   const f = fixture(); await f.monitor.initialize(); const messages = [], logChanges = createMonitorChangeLogger(row => messages.push(row));
