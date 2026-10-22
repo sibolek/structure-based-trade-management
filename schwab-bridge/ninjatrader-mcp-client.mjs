@@ -1,3 +1,4 @@
+import { appendRenewalAudit, normalizeRenewalEvent, renewalExpiryClaim, renewalServerHint } from './ninjatrader-renewal-audit.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -14,7 +15,7 @@ export const NINJATRADER_ENDPOINTS = Object.freeze({
 });
 const TOOLS = new Set(['describe', 'search_contracts', 'market_snapshot', 'market_history']);
 const UPDATE_RESOURCES = ['tradovate://orders', 'tradovate://positions'];
-const OBSERVATION_TOOLS = ['my_portfolio', 'fill_history', 'order_history'];
+const OBSERVATION_TOOLS = ['my_portfolio', 'fill_history', 'order_history', 'cash_history'];
 export function endpointFor(environment) {
   if (!Object.hasOwn(NINJATRADER_ENDPOINTS, environment)) throw new Error('NINJATRADER_ENVIRONMENT_INVALID');
   return NINJATRADER_ENDPOINTS[environment];
@@ -100,6 +101,7 @@ export class NinjaTraderOAuthStore {
       this.data = next;
     } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
   }
+  recordRenewalEvent(event) { if (this.lockFd === undefined) throw new Error('NINJATRADER_AUTH_STORE_NOT_OWNED'); return appendRenewalAudit(path.dirname(this.file), this.environment, event); }
   close() {
     if (this.lockFd !== undefined) {
       fs.closeSync(this.lockFd); this.lockFd = undefined;
@@ -111,12 +113,15 @@ export class NinjaTraderOAuthStore {
 export class NinjaTraderReadOnlyClient {
   #client; #transport; #pending; #tools; #tail = Promise.resolve(); #last = new Map(); #blockedUntil = 0;
   #streamOpen = false; #updateListener = null; #updatesActive = false; #subscriptionClient; #subscriptionRetryAt = 0; #streamFailed = false;
+  #renewalEvents = []; #renewalSuccesses = 0; #auditAvailable = null; #onAuthEvent;
   #allowedTools; #accountObservation; #authMetadata; #refreshPending; #refreshRetryAt = 0; #refreshFailure = null; #forceRefresh = false; #terminalRefreshFailure = null;
-  constructor({ environment = 'demo', oauthProvider, fetchImpl = fetch, now = Date.now, minIntervalMs = 1000, accountObservation = false } = {}) {
-    this.endpoint = endpointFor(environment);
+  constructor({ environment = 'demo', oauthProvider, fetchImpl = fetch, now = Date.now, minIntervalMs = 1000, accountObservation = false, onAuthEvent = () => {} } = {}) {
+    this.endpoint = endpointFor(environment); this.environment = environment;
     this.issuer = `https://${environment}.tradovateapi.com`;
     if (!oauthProvider || oauthProvider.endpoint !== this.endpoint) throw new Error('NINJATRADER_AUTH_ENVIRONMENT_MISMATCH');
     if (!Number.isFinite(minIntervalMs) || minIntervalMs < 1000) throw new Error('NINJATRADER_RATE_POLICY_INVALID');
+    if (typeof onAuthEvent !== 'function') throw new Error('NINJATRADER_AUTH_EVENT_HANDLER_INVALID');
+    this.#onAuthEvent = onAuthEvent;
     if (typeof accountObservation !== 'boolean') throw new Error('NINJATRADER_OBSERVATION_MODE_INVALID');
     this.#accountObservation = accountObservation;
     this.#allowedTools = new Set([...TOOLS, ...(accountObservation ? OBSERVATION_TOOLS : [])]);
@@ -230,7 +235,7 @@ export class NinjaTraderReadOnlyClient {
       if (!force && !this.#forceRefresh && this.now() < expiresAt) return;
       throw new Error(this.#refreshFailure || 'NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE');
     }
-    if (!this.#refreshPending) this.#refreshPending = this.#performRefresh().finally(() => { this.#refreshPending = undefined; });
+    if (!this.#refreshPending) this.#refreshPending = this.#observedRefresh(force ? 'forced' : this.#forceRefresh ? 'server_401' : 'scheduled').finally(() => { this.#refreshPending = undefined; });
     try { await this.#refreshPending; }
     catch (error) {
       const code = /^NINJATRADER_[A-Z0-9_]+$/.test(error?.message) ? error.message : 'NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE';
@@ -243,7 +248,39 @@ export class NinjaTraderReadOnlyClient {
       throw new Error(code);
     }
   }
-  async #performRefresh() {
+  authenticationStatus() {
+    const expiry = this.oauth.data?.expiresAt;
+    return { schema: 'executionos.ninjatrader.authentication.v1', environment: this.environment,
+      accessExpiresAt: Number.isFinite(expiry) ? new Date(expiry).toISOString() : null,
+      nextScheduledRefreshAt: Number.isFinite(expiry) ? new Date(expiry - 300000).toISOString() : null,
+      successfulRenewalsThisProcess: this.#renewalSuccesses, auditAvailable: this.#auditAvailable,
+      lastEvent: this.#renewalEvents.length ? structuredClone(this.#renewalEvents.at(-1)) : null };
+  }
+  #recordRenewal(event) {
+    const safe = normalizeRenewalEvent(event);
+    this.#renewalEvents.push(safe); this.#renewalEvents = this.#renewalEvents.slice(-20);
+    if (typeof this.oauth.recordRenewalEvent === 'function') {
+      try { this.oauth.recordRenewalEvent(safe); this.#auditAvailable = true; } catch { this.#auditAvailable = false; }
+    }
+    try { this.#onAuthEvent(structuredClone(safe)); } catch { /* Diagnostics cannot invalidate saved credentials. */ }
+  }
+  async #observedRefresh(trigger) {
+    const started = this.now(), before = this.oauth.tokens(), expiry = this.oauth.data?.expiresAt;
+    const details = { trigger, accessExpiresAt: Number.isFinite(expiry) ? new Date(expiry).toISOString() : null,
+      refreshExpiresAtClaim: renewalExpiryClaim(before?.refresh_token) };
+    this.#recordRenewal({ ...details, stage: 'STARTED', at: new Date(started).toISOString() });
+    try {
+      await this.#performRefresh(details);
+      this.#renewalSuccesses++;
+      this.#recordRenewal({ ...details, stage: 'SUCCEEDED', at: new Date(this.now()).toISOString(), elapsedMs: Math.max(0, this.now() - started),
+        accessExpiresAt: Number.isFinite(this.oauth.data?.expiresAt) ? new Date(this.oauth.data.expiresAt).toISOString() : null,
+        refreshExpiresAtClaim: renewalExpiryClaim(this.oauth.tokens()?.refresh_token), rotated: this.oauth.tokens()?.refresh_token !== before?.refresh_token });
+    } catch (error) {
+      this.#recordRenewal({ ...details, stage: 'FAILED', at: new Date(this.now()).toISOString(), elapsedMs: Math.max(0, this.now() - started), outcomeCode: /^NINJATRADER_[A-Z0-9_]+$/.test(error?.message || '') ? error.message : 'NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE' });
+      throw error;
+    }
+  }
+  async #performRefresh(details = {}) {
     const tokens = this.oauth.tokens(), registration = this.oauth.clientInformation?.();
     if (!tokens?.refresh_token) throw new Error('NINJATRADER_REFRESH_TOKEN_MISSING_REAUTHORIZE_REQUIRED');
     if (!registration?.client_id) throw new Error('NINJATRADER_REFRESH_CLIENT_MISSING_REAUTHORIZE_REQUIRED');
@@ -257,6 +294,8 @@ export class NinjaTraderReadOnlyClient {
     }
     const response = await this.fetch(this.#authMetadata.token_endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: registration.client_id, resource: this.endpoint }) });
+    details.httpStatus = response.status;
+    details.requestId = response.headers.get('x-request-id') || response.headers.get('x-correlation-id');
     if (response.status === 429) {
       const retry = response.headers.get('retry-after');
       const wait = retry && /^\d+(\.\d+)?$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - this.now();
@@ -266,6 +305,7 @@ export class NinjaTraderReadOnlyClient {
     if (response.status >= 500) throw new Error('NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE');
     let body;
     try { body = await response.json(); } catch { throw new Error('NINJATRADER_TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE'); }
+    details.oauthError = body?.error; details.serverHint = body?.error ? renewalServerHint(body?.error_description) : null;
     // This beta also returns OAuth errors inside HTTP 200 responses.
     if (['invalid_token', 'invalid_grant', 'access_denied'].includes(body?.error)) throw new Error('NINJATRADER_REFRESH_TOKEN_REJECTED_REAUTHORIZE_REQUIRED');
     if (['invalid_client', 'unauthorized_client'].includes(body?.error)) throw new Error('NINJATRADER_REFRESH_CLIENT_REJECTED_REAUTHORIZE_REQUIRED');

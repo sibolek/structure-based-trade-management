@@ -112,7 +112,7 @@ test('notifications wake the runner before 15s, coalesce bursts and cannot postp
     } });
   assert.deepEqual(f.calls.filter(row => row.name === 'my_portfolio').map(row => row.at), [0, 2000, 7000, 15000]);
   assert.deepEqual(f.calls.filter(row => row.name === 'fill_history').map(row => row.at), [0, 15000]);
-  assert.equal(messages.filter(row => row.includes('NINJATRADER ORDER CANCELLED')).length, 1);
+  assert.equal(messages.filter(row => row.includes('ORDER CANCELLED')).length, 1);
 });
 test('notifications cannot bypass a rate-limit cooldown; recovery performs a full fill poll', async () => {
   const f = monitorFixture(), controller = new AbortController(); let waits = 0;

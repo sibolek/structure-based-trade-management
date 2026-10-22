@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { lastNinjaTraderRoundTrip } from './ninjatrader-round-trip.mjs';
+import { isolatedTradeWindow, calculateTradeNetPnl } from './ninjatrader-trade-pnl.mjs';
 
 const clone = value => structuredClone(value);
 function fail(code) { throw new Error(code); }
@@ -87,13 +89,18 @@ export function normalizeMonitorTerminalOrders(payload, account, environment, tr
     const quantity = numeric(row.quantity), filledQuantity = numeric(row.filledQty);
     if (!Number.isSafeInteger(quantity) || quantity <= 0 || (row.filledQty != null && (!Number.isSafeInteger(filledQuantity) || filledQuantity < 0 || filledQuantity > quantity))) fail('NINJATRADER_MONITOR_ORDER_HISTORY_UNVERIFIED');
     result.push({ ...opaqueAccount(account.name, environment), orderId: row.orderId, symbol: prior.symbol, action: row.action, quantity, filledQuantity,
-      status, brokerStatus: row.ordStatus, brokerOrderTime: row.timestamp == null ? null : instant(row.timestamp), source: 'NINJATRADER', environment });
+      status, brokerStatus: row.ordStatus, brokerOrderTime: row.timestamp == null ? null : instant(row.timestamp),
+      orderType: text(prior.orderType), stopPrice: numeric(prior.stopPrice), limitPrice: numeric(prior.limitPrice), timeInForce: text(prior.timeInForce),
+      parentOrderId: Number.isSafeInteger(prior.parentOrderId) ? prior.parentOrderId : null,
+      ocoOrderId: Number.isSafeInteger(prior.ocoOrderId) ? prior.ocoOrderId : null,
+      orderDetailsSource: 'LAST_OBSERVED_WORKING_ORDER', orderDetailsObservedAt: prior.observedAt == null ? null : instant(prior.observedAt),
+      source: 'NINJATRADER', environment });
   }
   return result;
 }
 
 export class NinjaTraderMonitor {
-  #client; #accounts = null; #seen = new Map(); #busy = false; #pendingOrders = new Map(); #orderHistoryNextRead = new Map(); #hasOrderHistory = false;
+  #client; #accounts = null; #seen = new Map(); #busy = false; #pendingOrders = new Map(); #orderHistoryNextRead = new Map(); #hasOrderHistory = false; #hasCashHistory = false;
   constructor({ client, environment = 'demo', pollMs = 5000, accountSelectors = [], now = Date.now, onFill = () => {} } = {}) {
     if (!client || typeof client.readAccountList !== 'function' || typeof client.callTool !== 'function') fail('NINJATRADER_MONITOR_CLIENT_REQUIRED');
     if (!['live', 'demo'].includes(environment) || !Number.isFinite(pollMs) || pollMs < 2000 || pollMs > 60000) fail('NINJATRADER_MONITOR_CONFIG_INVALID');
@@ -101,13 +108,14 @@ export class NinjaTraderMonitor {
     this.#client = client; this.environment = environment; this.pollMs = pollMs; this.accountSelectors = [...accountSelectors]; this.now = now; this.onFill = onFill;
     this.state = { schema: 'executionos.ninjatrader.monitor.v1', version: 1, source: 'NINJATRADER', environment,
       readOnly: true, executionEnabled: false, executionOwnershipVerified: false, continuousFillCoverageVerified: false,
-      status: 'BOOTING', pollMs, accounts: [], positions: [], workingOrders: [], unconfirmedOrders: [], orderEvents: [], executions: [], baselineCompletedAt: null,
+      status: 'BOOTING', pollMs, accounts: [], positions: [], workingOrders: [], unconfirmedOrders: [], orderEvents: [], executions: [], startupRoundTrips: [], baselineCompletedAt: null,
       baselineFillCount: 0, lastFillSuccessfulAt: null, lastSuccessfulAt: null, lastError: null, updatedAt: new Date(now()).toISOString() };
   }
   async initialize() {
     const tools = await this.#client.toolCatalog();
     if (!['my_portfolio', 'fill_history'].every(name => tools.some(tool => tool.name === name))) fail('NINJATRADER_MONITOR_READ_PERMISSIONS_REQUIRED');
     this.#hasOrderHistory = tools.some(tool => tool.name === 'order_history');
+    this.#hasCashHistory = tools.some(tool => tool.name === 'cash_history');
     const available = normalizeMonitorAccountList(await this.#client.readAccountList(), this.environment);
     this.#accounts = this.accountSelectors.length ? available.filter(account => this.accountSelectors.includes(account.name) || this.accountSelectors.includes(account.accountId)) : available;
     if (this.accountSelectors.some(selector => !this.#accounts.some(account => [account.name, account.accountId].includes(selector)))) fail('NINJATRADER_MONITOR_ACCOUNT_SELECTION_INVALID');
@@ -122,11 +130,13 @@ export class NinjaTraderMonitor {
     this.#busy = true;
     try {
       const started = this.now(), accounts = [], positions = [], workingOrders = [], fills = [], orderEvents = [], unconfirmedOrders = [];
+      const positionReadStartedAt = new Map();
       const pendingOrders = new Map(this.#pendingOrders);
       let positionResource = null, orderResource, orderResourceRead = false;
       const startDate = new Date(started - 86400000).toISOString().slice(0, 10);
       const endDate = new Date(started + 86400000).toISOString().slice(0, 10);
       for (const account of this.#accounts) {
+        positionReadStartedAt.set(account.accountId, new Date(this.now()).toISOString());
         const raw = await this.#client.callTool('my_portfolio', { account: account.name,
           fields: ['account.name', 'account.currency', 'account.netLiq', 'account.cashBalance', 'account.openPnL', 'account.realizedPnL', 'account.dayPnL', 'positions[]', 'workingOrders[]'] });
         // The beta may omit an empty projected positions branch. Confirm
@@ -190,9 +200,32 @@ export class NinjaTraderMonitor {
       for (const [key, row] of nextSeen) if (readFills && Date.parse(row.executionTime) < Date.parse(`${startDate}T00:00:00Z`)) nextSeen.delete(key);
       if (nextSeen.size > 50000) fail('NINJATRADER_MONITOR_FILL_MEMORY_LIMIT');
       if (pendingOrders.size > 1000) fail('NINJATRADER_MONITOR_ORDER_RECONCILIATION_LIMIT');
+      const startupRoundTrips = baseline ? accounts.map(account => lastNinjaTraderRoundTrip({ account, positions, fills, startDate, endDate, observedAt: detectedAt,
+        positionSnapshotStartedAt: positionReadStartedAt.get(account.accountId) })) : this.state.startupRoundTrips;
+      if (baseline) {
+        const contractSpecs = new Map();
+        for (const summary of startupRoundTrips) {
+          const window = isolatedTradeWindow(summary, fills);
+          summary.pnl = { status: 'UNAVAILABLE', reason: window.reason || 'CASH_HISTORY_UNAVAILABLE', netPnl: null };
+          if (window.reason || !this.#hasCashHistory) continue;
+          try {
+            let contracts = contractSpecs.get(summary.trade.symbol);
+            if (!contracts) {
+              contracts = await this.#client.callTool('search_contracts', { text: summary.trade.symbol, includeFamilySiblings: false });
+              contractSpecs.set(summary.trade.symbol, contracts);
+            }
+            const account = this.#accounts.find(row => row.accountId === summary.accountId);
+            const currency = accounts.find(row => row.accountId === summary.accountId)?.currency;
+            // Reuse the bounded baseline date window. Date isolation happens
+            // in the calculator; no fee guesses or timing-nearest-fill joins.
+            const cashHistory = await this.#client.callTool('cash_history', { account: account.name, startDate, endDate, format: 'objects' });
+            summary.pnl = calculateTradeNetPnl({ summary, fills, accountName: account.name, accountCurrency: currency, cashHistory, contracts, observedAt: new Date(this.now()).toISOString() });
+          } catch { summary.pnl = { status: 'UNAVAILABLE', reason: 'BROKER_FEE_READ_UNAVAILABLE', netPnl: null }; }
+        }
+      }
       this.#pendingOrders = pendingOrders;
       this.#seen = nextSeen;
-      this.state = { ...this.state, status: 'OBSERVING', accounts, positions, workingOrders, unconfirmedOrders,
+      this.state = { ...this.state, status: 'OBSERVING', accounts, positions, workingOrders, unconfirmedOrders, startupRoundTrips,
         orderEvents: [...orderEvents.reverse(), ...this.state.orderEvents].slice(0, 100),
         executions: [...fresh.slice().reverse(), ...this.state.executions].slice(0, 100),
         baselineCompletedAt: this.state.baselineCompletedAt || detectedAt,
@@ -209,6 +242,7 @@ export class NinjaTraderMonitor {
   stop() { this.state = { ...this.state, status: 'STOPPED', updatedAt: new Date(this.now()).toISOString() }; }
   snapshot() {
     const result = clone(this.state);
+    if (typeof this.#client.authenticationStatus === 'function') result.authentication = this.#client.authenticationStatus();
     result.stale = result.status !== 'OBSERVING' || !result.lastSuccessfulAt || this.now() - Date.parse(result.lastSuccessfulAt) > Math.max(15000, this.pollMs * 3);
     return result;
   }

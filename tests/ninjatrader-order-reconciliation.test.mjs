@@ -129,3 +129,50 @@ test('a nonempty unbound resource cannot prove zero working orders, even after t
   assert.equal(state.orderEvents[0].status, 'Cancelled'); assert.equal(state.accounts[0].workingOrdersStatus, 'UNAVAILABLE');
   assert.match(render(state), /Working orders:\s+unavailable/);
 });
+
+test('closing fill stays distinct from canceled stop and limit orders, retaining their observed bracket context', async () => {
+  const f = lifecycleFixture();
+  f.raw.portfolio.positions = [{ symbol: 'MESZ6', netPos: 1, netPrice: 7745 }];
+  f.raw.portfolio.workingOrders = [
+    { id: 42, symbol: 'MESZ6', action: 'Sell', orderType: 'Stop', quantity: 1, stopPrice: 7740, ordStatus: 'Working', timeInForce: 'Day', bracket: { parentId: 10, ocoId: 43 } },
+    { id: 43, symbol: 'MESZ6', action: 'Sell', orderType: 'Limit', quantity: 1, price: 7750, ordStatus: 'Working', timeInForce: 'Day', bracket: { parentId: 10, ocoId: 42 } },
+  ];
+  await f.monitor.initialize(); const messages = [], changes = createMonitorChangeLogger(row => messages.push(row)); changes(f.monitor.snapshot()); messages.length = 0;
+  f.advance(); f.raw.portfolio.positions = []; f.raw.portfolio.workingOrders = [];
+  f.raw.history.items = [42, 43, 44].map(orderId => ({ account: NAME, orderId, symbol: 'MESZ6', action: 'Sell', quantity: 1, filledQty: orderId === 44 ? 1 : 0, ordStatus: orderId === 44 ? 'Filled' : 'Canceled' }));
+  f.raw.fills.items = [{ account: NAME, orderId: 44, fillId: 50, symbol: 'MESZ6', action: 'Sell', quantity: 1, price: 7745, timestamp: observedAt }];
+  await f.monitor.poll(); const state = f.monitor.snapshot(); changes(state);
+  const stop = state.orderEvents.find(event => event.orderId === 42), limit = state.orderEvents.find(event => event.orderId === 43);
+  assert.equal(stop.orderType, 'Stop'); assert.equal(stop.stopPrice, 7740); assert.equal(stop.parentOrderId, 10); assert.equal(stop.ocoOrderId, 43);
+  assert.equal(limit.orderType, 'Limit'); assert.equal(limit.limitPrice, 7750); assert.equal(limit.parentOrderId, 10);
+  assert.equal(f.fills.length, 1); assert.equal(f.fills[0].orderId, 44); assert.equal(state.orderEvents.length, 2); assert.ok(!state.orderEvents.some(event => event.orderId === 44));
+  const text = messages.join('\n'); assert.match(text, /Order type:\s+Stop/); assert.match(text, /Order type:\s+Limit/); assert.match(text, /NINJATRADER POSITION FLAT/);
+  assert.doesNotMatch(text, /POSITION NO LONGER REPORTED|automatically|user canceled/i);
+  messages.length = 0; f.advance(); await f.monitor.poll(); changes(f.monitor.snapshot()); assert.deepEqual(messages, []);
+});
+test('position removal becomes FLAT only for a current broker snapshot of the same accessible account', () => {
+  for (const verified of [true, false]) {
+    const state = snapshot(), messages = [], changes = createMonitorChangeLogger(row => messages.push(row));
+    state.positions = [{ ...identity, symbol: 'MESZ6', side: 'LONG', quantity: 1 }]; changes(state); messages.length = 0;
+    state.positions = []; if (!verified) state.accounts = [];
+    changes(state); const text = messages.join('\n');
+    if (verified) { assert.match(text, /NINJATRADER POSITION FLAT/); assert.match(text, /Confirmation:\s+Broker position snapshot/); }
+    else { assert.match(text, /POSITION NO LONGER REPORTED/); assert.doesNotMatch(text, /POSITION FLAT/); }
+  }
+});
+test('a filled observed closing order is reported FILLED even when history includes unrelated cancellations', async () => {
+  const f = lifecycleFixture(); f.raw.portfolio.positions = [{ symbol: 'MESZ6', netPos: 1, netPrice: 7745 }];
+  f.raw.portfolio.workingOrders = [{ id: 44, symbol: 'MESZ6', action: 'Sell', quantity: 1, orderType: 'Market', ordStatus: 'PendingNew' }];
+  await f.monitor.initialize(); f.advance(); f.raw.portfolio.positions = []; f.raw.portfolio.workingOrders = [];
+  f.raw.history.items = [42, 43, 44].map(orderId => ({ account: NAME, orderId, symbol: 'MESZ6', action: 'Sell', quantity: 1, filledQty: orderId === 44 ? 1 : 0, ordStatus: orderId === 44 ? 'Filled' : 'Canceled' }));
+  f.raw.fills.items = [{ account: NAME, orderId: 44, fillId: 50, symbol: 'MESZ6', action: 'Sell', quantity: 1, price: 7745, timestamp: observedAt }];
+  await f.monitor.poll(); const state = f.monitor.snapshot();
+  assert.equal(state.orderEvents.length, 1); assert.equal(state.orderEvents[0].orderId, 44); assert.equal(state.orderEvents[0].status, 'Filled'); assert.equal(state.orderEvents[0].filledQuantity, 1);
+  assert.match(render(state), /NINJATRADER ORDER FILLED/); assert.doesNotMatch(render(state), /ORDER CANCELLED/);
+});
+test('stale position removals cannot be labeled flat even if the account remains present', () => {
+  const state = snapshot(), messages = [], changes = createMonitorChangeLogger(row => messages.push(row));
+  state.positions = [{ ...identity, symbol: 'MESZ6', side: 'LONG', quantity: 1 }]; changes(state); messages.length = 0;
+  state.positions = []; state.stale = true; state.status = 'DEGRADED'; changes(state);
+  assert.match(messages.join('\n'), /POSITION NO LONGER REPORTED/); assert.doesNotMatch(messages.join('\n'), /POSITION FLAT/);
+});

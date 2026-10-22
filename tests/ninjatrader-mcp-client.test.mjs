@@ -64,7 +64,7 @@ for (const sse of [false, true]) test(`SDK handles ${sse ? 'SSE' : 'JSON'} respo
 test('hard allowlist denies orders, account reads, alerts, risk writes and arbitrary RPC before network', async () => {
   let calls = 0;
   const client = new NinjaTraderReadOnlyClient({ oauthProvider: provider(), fetchImpl: async () => { calls++; throw new Error('must not run'); } });
-  for (const tool of ['place_order', 'modify_order', 'cancel_order', 'close_position', 'update_risk_settings', 'create_alert', 'my_portfolio', 'user_profile', 'order_history']) {
+  for (const tool of ['place_order', 'modify_order', 'cancel_order', 'close_position', 'update_risk_settings', 'create_alert', 'my_portfolio', 'user_profile', 'order_history', 'cash_history']) {
     await assert.rejects(client.callTool(tool, {}), /TOOL_DENIED/);
     await assert.rejects(client.fetch(endpoint, { method: 'POST', body: JSON.stringify({ method: 'tools/call', params: { name: tool } }) }), /RPC_DENIED/);
   }
@@ -159,7 +159,7 @@ test('default market-data clients cannot read account/position resources', async
   await assert.rejects(client.readAccountList(), /RESOURCE_DENIED/);
   await assert.rejects(client.readPositionList(), /RESOURCE_DENIED/); await assert.rejects(client.readOrderList(), /RESOURCE_DENIED/); assert.equal(calls, 0);
 });
-test('explicit monitor capability permits only portfolio/fill tools and two fixed observation resources', async t => {
+test('explicit monitor capability permits only read-only observation tools and fixed resources', async t => {
   const requests = [];
   const fetchImpl = async (input, init = {}) => {
     if (init.method === 'GET') return new Response(null, { status: 405 });
@@ -167,15 +167,16 @@ test('explicit monitor capability permits only portfolio/fill tools and two fixe
     if (!Object.hasOwn(m, 'id')) return new Response(null, { status: 202 });
     let result;
     if (m.method === 'initialize') result = { protocolVersion: m.params.protocolVersion, capabilities: { tools: {}, resources: {} }, serverInfo: { name: 'synthetic-monitor', version: '1' } };
-    else if (m.method === 'tools/list') result = { tools: ['my_portfolio', 'fill_history', 'order_history', 'place_order', 'cancel_order', 'risk_settings'].map(name => ({ name, inputSchema: { type: 'object' }, annotations: { readOnlyHint: !['place_order', 'cancel_order'].includes(name) } })) };
+    else if (m.method === 'tools/list') result = { tools: ['my_portfolio', 'fill_history', 'order_history', 'cash_history', 'place_order', 'cancel_order', 'risk_settings'].map(name => ({ name, inputSchema: { type: 'object' }, annotations: { readOnlyHint: !['place_order', 'cancel_order'].includes(name) } })) };
     else if (m.method === 'resources/read') result = { contents: [{ uri: m.params.uri, mimeType: 'application/json', text: '[]' }] };
     else if (m.method === 'tools/call') result = { content: [{ type: 'text', text: '{"ok":true}' }] };
     return new Response(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }), { headers: { 'Content-Type': 'application/json' } });
   };
   const client = new NinjaTraderReadOnlyClient({ oauthProvider: provider(), fetchImpl, accountObservation: true }); t.after(() => client.close());
-  assert.deepEqual((await client.toolCatalog()).map(tool => tool.name), ['my_portfolio', 'fill_history', 'order_history']);
+  assert.deepEqual((await client.toolCatalog()).map(tool => tool.name), ['my_portfolio', 'fill_history', 'order_history', 'cash_history']);
   assert.deepEqual(await client.readAccountList(), []); assert.deepEqual(await client.readPositionList(), []); assert.deepEqual(await client.readOrderList(), []);
   assert.deepEqual(await client.callTool('my_portfolio', { account: 'synthetic' }), { ok: true });
+  assert.deepEqual(await client.callTool('cash_history', { account: 'synthetic', startDate: '2026-10-21', endDate: '2026-10-23', format: 'objects' }), { ok: true });
   const before = requests.length;
   for (const name of ['place_order', 'modify_order', 'cancel_order', 'close_position', 'update_risk_settings', 'create_alert', 'risk_settings'])
     await assert.rejects(client.callTool(name, {}), /TOOL_DENIED/);
@@ -187,12 +188,13 @@ function refreshFixture(t, extra = {}) {
   let clock = Date.now(); const directory = temp(t), store = new NinjaTraderOAuthStore({ directory, now: () => clock });
   store.saveClientInformation({ client_id: 'public-client', issuer });
   store.saveTokens({ access_token: 'OLD', refresh_token: 'OLD_REFRESH', token_type: 'Bearer', expires_in: 4800, issuer });
-  const server = fakeServer(extra); let mode = 'ok', tokenCalls = 0, redirects = 0;
+  const server = fakeServer(extra), authEvents = []; let mode = 'ok', tokenCalls = 0, redirects = 0;
   store.onAuthorize = () => { redirects++; };
   const fetchImpl = async (input, init) => {
     if (String(input).endsWith('/auth/oauthtoken')) {
       tokenCalls++;
       if (mode === 'network') throw new TypeError('PRIVATE_TOKEN');
+      if (mode === 'invalidGrant') return new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Refresh token does not exist. PRIVATE_TOKEN' }), { status: 400, headers: { 'Content-Type': 'application/json', 'x-request-id': '12345678-1234-1234-1234-123456789abc' } });
       if (mode === 'invalid200') return new Response(JSON.stringify({ error: 'invalid_token', error_description: 'PRIVATE_TOKEN' }), { headers: { 'Content-Type': 'application/json' } });
       if (mode === 'busy') return new Response('PRIVATE_TOKEN', { status: 503 });
       if (mode === 'rate') return new Response('{}', { status: 429, headers: { 'Retry-After': '45' } });
@@ -201,9 +203,9 @@ function refreshFixture(t, extra = {}) {
     }
     return server.fetchImpl(input, init);
   };
-  const client = new NinjaTraderReadOnlyClient({ oauthProvider: store, fetchImpl, now: () => clock });
+  const client = new NinjaTraderReadOnlyClient({ oauthProvider: store, fetchImpl, now: () => clock, onAuthEvent: extra.onAuthEvent || (event => authEvents.push(event)) });
   t.after(async () => { await client.close(); store.close(); });
-  return { store, client, server, setMode: next => { mode = next; }, advance: ms => { clock += ms; },
+  return { store, client, server, authEvents, setMode: next => { mode = next; }, advance: ms => { clock += ms; },
     saved: () => fs.readFileSync(path.join(directory, 'demo.json'), 'utf8'), counts: () => ({ tokenCalls, redirects }) };
 }
 test('proactive refresh runs five minutes before expiry and sends the rotated bearer token on SDK requests', async t => {
@@ -288,4 +290,39 @@ test('a failed save after rotation fails closed and does not retry the now-consu
   await assert.rejects(f.client.refreshAuthorization(), /^Error: NINJATRADER_AUTH_STORE_WRITE_FAILED$/);
   await assert.rejects(f.client.refreshAuthorization(), /AUTH_STORE_WRITE_FAILED/);
   assert.equal(f.saved(), before); assert.equal(f.counts().tokenCalls, 1); assert.equal(f.counts().redirects, 0);
+});
+
+test('renewal diagnostics record exact safe OAuth rejection without persisting credentials or raw server text', async t => {
+  const f = refreshFixture(t); f.setMode('invalidGrant');
+  await assert.rejects(f.client.refreshAuthorization(), /REFRESH_TOKEN_REJECTED/);
+  const status = f.client.authenticationStatus();
+  assert.equal(status.lastEvent.httpStatus, 400); assert.equal(status.lastEvent.oauthError, 'invalid_grant');
+  assert.equal(status.lastEvent.serverHint, 'UNKNOWN_GRANT'); assert.equal(status.lastEvent.trigger, 'forced');
+  assert.equal(status.lastEvent.requestId, '12345678-1234-1234-1234-123456789abc');
+  const file = path.join(path.dirname(f.store.file), 'demo-renewal.json'), audit = fs.readFileSync(file, 'utf8');
+  for (const secret of ['PRIVATE_TOKEN', 'OLD_REFRESH', 'public-client', 'does not exist']) assert.ok(!audit.includes(secret));
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600); assert.equal(status.auditAvailable, true);
+  assert.equal(JSON.parse(audit).events.length, 2); assert.equal(f.counts().redirects, 0);
+});
+test('successful scheduled renewal records rotation and persists a separate audit without changing token storage schema', async t => {
+  const f = refreshFixture(t); f.advance(75 * 60000); await f.client.toolCatalog();
+  const status = f.client.authenticationStatus(), audit = JSON.parse(fs.readFileSync(path.join(path.dirname(f.store.file), 'demo-renewal.json')));
+  assert.equal(status.successfulRenewalsThisProcess, 1); assert.equal(status.lastEvent.stage, 'SUCCEEDED');
+  assert.equal(status.lastEvent.trigger, 'scheduled'); assert.equal(status.lastEvent.rotated, true); assert.equal(audit.successfulRenewals, 1);
+  assert.equal(Date.parse(status.nextScheduledRefreshAt), Date.parse(status.accessExpiresAt) - 300000);
+  assert.deepEqual(Object.keys(JSON.parse(f.saved())).sort(), ['client','expiresAt','resource','tokens']);
+  assert.ok(!JSON.stringify(audit).includes('ROTATED_ACCESS')); assert.ok(!JSON.stringify(audit).includes('ROTATED_REFRESH'));
+});
+test('failed diagnostic writes or callbacks cannot discard rotated credentials or turn success into another refresh', async t => {
+  const f = refreshFixture(t, { onAuthEvent: () => { throw new Error('PRIVATE_TOKEN'); } });
+  f.store.recordRenewalEvent = () => { throw new Error('PRIVATE_PATH'); };
+  await f.client.refreshAuthorization();
+  assert.equal(f.store.tokens().access_token, 'ROTATED_ACCESS'); assert.equal(f.client.authenticationStatus().auditAvailable, false);
+  assert.equal(f.client.authenticationStatus().lastEvent.stage, 'SUCCEEDED');
+  await f.client.toolCatalog(); assert.equal(f.counts().tokenCalls, 1);
+});
+test('temporary refresh errors produce safe diagnostics while still permitting the unexpired access grant', async t => {
+  const f = refreshFixture(t); f.advance(75 * 60000); f.setMode('network'); await f.client.toolCatalog();
+  assert.equal(f.client.authenticationStatus().lastEvent.stage, 'FAILED'); assert.equal(f.store.tokens().access_token, 'OLD');
+  assert.ok(!JSON.stringify(f.client.authenticationStatus()).includes('PRIVATE_TOKEN')); assert.equal(f.counts().redirects, 0);
 });
