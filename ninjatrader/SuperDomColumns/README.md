@@ -66,3 +66,7 @@ The separately named v4 column has an optional rolling calculation and experimen
 ## Market-depth troubleshooting (ES, 2026-10-22)
 
 ES DEC26 briefly showed a crossed/inconsistent SuperDOM and duplicated Level II depth while MES and NQ appeared coherent. **The user reported that clearing NinjaTrader cache restored a coherent ES book.** Root cause was not established. Before trying recovery during any recurrence, preserve diagnostics and ensure live positions and protective orders are safely managed. See the [incident record and safe diagnostic/recovery checklist](ES-Depth-Troubleshooting-2026-10-22.md). This does not change v4 detection settings or source.
+
+## Data-only depth recorder
+
+The separate [ExecutionOS Depth Capture recorder](../Indicators/README-Depth-Capture.md) preserves bounded native depth, marketdata, and context callbacks for offline investigation. It does not change this DOM column or place orders.

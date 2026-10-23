@@ -1,0 +1,26 @@
+{
+  "build": "0.1 EXP 2026-10-22",
+  "schema": "executionos.depth-capture.v0.1",
+  "source_sha256": "5b9d787c7a8b4afffbd537ffdea5db995b38554680d402eca57afcf9493cc4f7",
+  "source_bytes": 24818,
+  "source_checkpoint_unchanged": true,
+  "branch": "codex/ninjatrader-pulling-stacking-v3",
+  "validation_date": "2026-10-23",
+  "publication_checks": {
+    "runner": "tests/depth-capture/run_tests.py",
+    "expected_results_reproduced": 8,
+    "process_exit_code": 0,
+    "scope": "Exact extracted pure transport classes, .NET 10, C# 5; includes known limitation and expected-defect cases, not acceptance certification"
+  },
+  "known_limits": [
+    "Entry ids include unappended UI timer stamps.",
+    "Normal deadline and post-stop exclusions are outside the drop count, including callbacks stamped before the deadline and admitted later.",
+    "Header size is not bounded by MaxBytes; oversized configuration text can overrun it.",
+    "Zero local drops does not establish provider or exchange completeness."
+  ],
+  "historical_loaded_assembly_attestation": "NOT_ESTABLISHED",
+  "native_compile_render_performance": "NOT_INDEPENDENTLY_VERIFIED",
+  "dom_column_source_changed": false,
+  "runtime_or_configuration_changed": false,
+  "thresholds_changed": false
+}
