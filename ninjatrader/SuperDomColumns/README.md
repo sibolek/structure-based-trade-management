@@ -62,3 +62,7 @@ live-market threshold calibration are pending.
 ## Experimental v4
 
 The separately named v4 column has an optional rolling calculation and experimental absorption/initiative observations. See the [current v4 checkpoint](README-Pulling-Stacking-v4-Experimental.md) for build 2026-10-16.5, optional pause/recheck, quote-pause diagnostics, the compact fixed last-event summary, validation, and installation instructions. The original column above is unchanged.
+
+## Market-depth troubleshooting (ES, 2026-10-22)
+
+ES DEC26 briefly showed a crossed/inconsistent SuperDOM and duplicated Level II depth while MES and NQ appeared coherent. **The user reported that clearing NinjaTrader cache restored a coherent ES book.** Root cause was not established. Before trying recovery during any recurrence, preserve diagnostics and ensure live positions and protective orders are safely managed. See the [incident record and safe diagnostic/recovery checklist](ES-Depth-Troubleshooting-2026-10-22.md). This does not change v4 detection settings or source.
