@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOT = process.cwd();
 const ENV_PATH = path.join(ROOT, ".env.local");
@@ -164,6 +165,7 @@ function signedPrice(value) {
 }
 
 function finiteNumber(value) {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -184,7 +186,7 @@ function adverseSlippage(fillPrice, referencePrice, instruction) {
   return normalizeDisplayZero(raw);
 }
 
-function groupOrderExecutions(account, orders, symbolFilter) {
+export function groupOrderExecutions(account, orders, symbolFilter) {
   const groups = [];
 
   for (const order of orders || []) {
@@ -296,8 +298,12 @@ function printOrder(row) {
   }
 }
 
+function isReferenceMeasurable(row, fieldPerShare, fieldDollars, refField) {
+  return [refField, fieldPerShare, fieldDollars].every((field) => Number.isFinite(row[field]));
+}
+
 function summarizeReference(rows, fieldPerShare, fieldDollars, refField) {
-  const measurable = rows.filter((row) => row[refField] != null && row[fieldPerShare] != null && row[fieldDollars] != null);
+  const measurable = rows.filter((row) => isReferenceMeasurable(row, fieldPerShare, fieldDollars, refField));
   const qty = measurable.reduce((sum, row) => sum + row.filledQuantity, 0);
   const dollars = measurable.reduce((sum, row) => sum + row[fieldDollars], 0);
   return {
@@ -305,6 +311,36 @@ function summarizeReference(rows, fieldPerShare, fieldDollars, refField) {
     qty,
     dollars,
     weightedPerShare: qty > 0 ? normalizeDisplayZero(dollars / qty) : null,
+  };
+}
+
+export function summarizeReferenceImpact(rows) {
+  const legKey = (row) => JSON.stringify([String(row.accountNumber), String(row.orderId), String(row.legId)]);
+  const uniqueRows = [...new Map(rows.map((row) => [legKey(row), row])).values()];
+  const limitFields = ["limitSlipPerShare", "limitSlipDollars", "limitReference"];
+  const stopFields = ["stopSlipPerShare", "stopSlipDollars", "stopReference"];
+  const limitSummary = summarizeReference(uniqueRows, ...limitFields);
+  const stopSummary = summarizeReference(uniqueRows, ...stopFields);
+  let measuredCount = 0;
+  let overlapCount = 0;
+  for (const row of uniqueRows) {
+    const limitMeasured = isReferenceMeasurable(row, ...limitFields);
+    const stopMeasured = isReferenceMeasurable(row, ...stopFields);
+    if (limitMeasured || stopMeasured) measuredCount += 1;
+    if (limitMeasured && stopMeasured) overlapCount += 1;
+  }
+  return {
+    analyzedCount: uniqueRows.length,
+    limitSummary,
+    stopSummary,
+    measuredCount,
+    overlapCount,
+    unmeasuredCount: uniqueRows.length - measuredCount,
+    coveragePercent: uniqueRows.length ? measuredCount / uniqueRows.length * 100 : null,
+    // Two benchmarks on the same fill are alternatives, not additive costs.
+    netDollars: measuredCount && !overlapCount
+      ? normalizeDisplayZero(limitSummary.dollars + stopSummary.dollars)
+      : null,
   };
 }
 
@@ -344,11 +380,15 @@ async function main() {
 
   for (const row of displayed) printOrder(row);
 
+  printAnalyticsSummary(rows);
+}
+
+export function printAnalyticsSummary(rows) {
   const fragmented = rows.filter((row) => row.fragmentCount > 1);
   const totalExecutionLegs = rows.reduce((sum, row) => sum + row.fragmentCount, 0);
   const totalQty = rows.reduce((sum, row) => sum + row.filledQuantity, 0);
-  const limitSummary = summarizeReference(rows, "limitSlipPerShare", "limitSlipDollars", "limitReference");
-  const stopSummary = summarizeReference(rows, "stopSlipPerShare", "stopSlipDollars", "stopReference");
+  const reference = summarizeReferenceImpact(rows);
+  const { limitSummary, stopSummary } = reference;
 
   console.log("\n\nANALYTICS SUMMARY");
   console.log("================================================================================");
@@ -366,6 +406,21 @@ async function main() {
     console.log(`  Weighted adverse/share vs stop:  ${signedPrice(stopSummary.weightedPerShare)}`);
     console.log(`  Aggregate reference impact:      ${signedMoney(stopSummary.dollars)}`);
   }
+  const coverage = reference.coveragePercent == null ? "N/A" : `${reference.coveragePercent.toFixed(2)}%`;
+  console.log(`Unique reference-measured legs:    ${reference.measuredCount} / ${reference.analyzedCount} (${coverage})`);
+  console.log(`Legs measured vs both limit/stop:  ${reference.overlapCount}`);
+  console.log(`Legs without reference measurement: ${reference.unmeasuredCount}`);
+  if (reference.netDollars != null) {
+    console.log(`Net reference-price impact:       ${signedMoney(reference.netDollars)}`);
+    console.log("  Limit + stop impacts are additive: no measured order leg appears in both.");
+  } else if (reference.overlapCount) {
+    console.log("Net reference-price impact:       N/A — overlapping limit/stop benchmarks are not additive.");
+  } else {
+    console.log("Net reference-price impact:       N/A — no measured limit/stop references.");
+  }
+  console.log("  Coverage uses all analyzed executed legs, including with --fragmented-only.");
+  console.log("  Reference impacts cover measured legs only; unmeasured legs are not zero-cost.");
+  console.log("  This is not total execution cost, NBBO slippage, or a P&L adjustment.");
 
   const widest = [...fragmented].sort((a, b) => b.fillRange - a.fillRange).slice(0, 5);
   if (widest.length) {
@@ -378,7 +433,9 @@ async function main() {
   console.log("\nPositive reference-slippage numbers are adverse; negative numbers indicate price improvement.\n");
 }
 
-main().catch((error) => {
-  console.error(`\n✗ ${error.message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(`\n✗ ${error.message}\n`);
+    process.exitCode = 1;
+  });
+}

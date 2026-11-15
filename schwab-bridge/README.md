@@ -150,6 +150,12 @@ For each executed order leg, the analyzer reports:
 
 Positive reference-slippage values are adverse; negative values represent price improvement.
 
+The summary also reports unique reference-measured order legs and their percentage of all analyzed executed legs (account + order ID + leg ID), the count measured against both references, and the count without a measurement. `--fragmented-only` filters the detailed display; it does not narrow the summary or coverage denominator.
+
+The **net reference-price impact** adds the measured limit and stop dollar impacts only when no order leg is measured against both. For example, disjoint totals of -$25.55 versus limits and +$2.52 versus stops produce -$23.03 (favorable). A stop-limit fill can have both benchmarks; these are alternative measurements of the same fill, so any overlap makes the combined net **N/A**, while both detailed metrics remain available. With no measured references the net and, for an empty sample, coverage percentage are **N/A**.
+
+Coverage and net impact apply only to available reference measurements. Unmeasured legs are not assumed to have zero cost. This net is not total execution cost, NBBO slippage, or an adjustment to realized P&L.
+
 Important: fill-price dispersion does **not** prove that fragmentation itself caused slippage. Market orders also have no valid historical NBBO benchmark in the current bridge. True market-order slippage versus the contemporaneous bid/ask will be added only after the live ToS latency test determines the correct quote-capture architecture.
 
 Multi-leg orders deliberately do not compare an order-level strategy price with a single execution leg.
